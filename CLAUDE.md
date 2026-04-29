@@ -113,7 +113,16 @@
 - Swagger/ReDoc déplacés sous /api/docs et /api/redoc
 - Mode dev frontend (VITE_DEV_MODE) pour tester sans Entra ID
 
-**Projet complet — toutes les phases terminées.**
+**Sprint A — Bastion : Session Recording** (terminé)
+
+- Modèle SessionRecording : events JSONB timestampés (input/output base64), durée, taille
+- WebSocket terminal enrichi : enregistre tous les I/O en temps réel, sauvegarde en BDD à la fermeture
+- API sessions : GET /sessions (liste), GET /sessions/{id} (détail + events), DELETE /sessions/{id}
+- Page Sessions dans l'UI : liste des enregistrements (serveur, user, durée, events, taille)
+- Player de replay : xterm.js en lecture seule, play/pause, reset, vitesse 1x/2x/5x/10x, barre de progression
+- Navigation : "Sessions" ajouté dans la sidebar
+
+**En cours : Sprint B — Mini-CA + certificats SSH éphémères**
 
 ## Conventions
 

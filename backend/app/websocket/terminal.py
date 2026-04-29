@@ -1,46 +1,57 @@
 import asyncio
+import base64
 import json
+import time
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import _validate_token, _sync_user
+from app.core.auth import _validate_token, _sync_user, _get_or_create_dev_user
+from app.core.config import settings
 from app.core.database import async_session
 from app.models.server import Server
 from app.models.credential import Credential
 from app.models.audit import AuditLog
+from app.models.session_recording import SessionRecording
 from app.models.base import OSType
 from app.websocket.session_manager import session_manager
 
 router = APIRouter()
 
 
-async def _authenticate_ws(websocket: WebSocket) -> dict | None:
-    """Authenticate WebSocket via token in query param or first message."""
-    token = websocket.query_params.get("token")
-    if not token:
-        # Try to get token from first message
-        try:
-            first_msg = await asyncio.wait_for(websocket.receive_text(), timeout=5)
-            data = json.loads(first_msg)
-            token = data.get("token")
-        except Exception:
-            return None
+class SessionRecorder:
+    """Records all terminal I/O events with timestamps for replay."""
 
-    if not token:
-        return None
+    def __init__(self):
+        self.events: list[dict] = []
+        self.start_time: float = time.time()
+        self.size_bytes: int = 0
 
-    try:
-        claims = await _validate_token(token)
-        return claims
-    except Exception:
-        return None
+    def record_output(self, data: bytes):
+        elapsed_ms = int((time.time() - self.start_time) * 1000)
+        encoded = base64.b64encode(data).decode("ascii")
+        self.events.append({"t": elapsed_ms, "type": "o", "data": encoded})
+        self.size_bytes += len(data)
+
+    def record_input(self, data: bytes):
+        elapsed_ms = int((time.time() - self.start_time) * 1000)
+        encoded = base64.b64encode(data).decode("ascii")
+        self.events.append({"t": elapsed_ms, "type": "i", "data": encoded})
+        self.size_bytes += len(data)
+
+    @property
+    def duration_seconds(self) -> int:
+        return int(time.time() - self.start_time)
+
+    @property
+    def event_count(self) -> int:
+        return len(self.events)
 
 
 @router.websocket("/ws/terminal/{server_id}")
 async def terminal_websocket(websocket: WebSocket, server_id: str):
-    """Interactive terminal via WebSocket.
+    """Interactive terminal via WebSocket with session recording.
 
     Protocol:
     - Client sends JSON: {"type": "auth", "token": "..."} first
@@ -62,22 +73,30 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         await websocket.close()
         return
 
-    if msg.get("type") != "auth" or not msg.get("token"):
+    if msg.get("type") != "auth":
         await websocket.send_json({"type": "error", "message": "First message must be auth"})
         await websocket.close()
         return
 
-    try:
-        claims = await _validate_token(msg["token"])
-    except Exception as e:
-        await websocket.send_json({"type": "error", "message": f"Auth failed: {e}"})
-        await websocket.close()
-        return
-
-    # Step 2: Get user and server info
+    # Authenticate user
     async with async_session() as db:
-        user = await _sync_user(claims, db)
+        if settings.DEV_MODE:
+            user = await _get_or_create_dev_user(db)
+        else:
+            token = msg.get("token")
+            if not token:
+                await websocket.send_json({"type": "error", "message": "No token provided"})
+                await websocket.close()
+                return
+            try:
+                claims = await _validate_token(token)
+                user = await _sync_user(claims, db)
+            except Exception as e:
+                await websocket.send_json({"type": "error", "message": f"Auth failed: {e}"})
+                await websocket.close()
+                return
 
+        # Step 2: Get server and credential
         result = await db.execute(select(Server).where(Server.id == server_id))
         server = result.scalar_one_or_none()
         if not server:
@@ -117,58 +136,69 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             else:
                 await websocket.send_json({
                     "type": "error",
-                    "message": "Interactive terminal for Windows is not yet supported. Use the execute command instead.",
+                    "message": "Interactive terminal not supported for Windows. Use execute command.",
                 })
                 await websocket.close()
                 return
-
         except Exception as e:
             await websocket.send_json({"type": "error", "message": f"Connection failed: {e}"})
             await websocket.close()
             return
 
+        # Save references for recording
+        server_name = server.name
+        user_name = user.display_name
+        user_id = user.id
+        srv_id = server.id
+
         # Log session start
         db.add(AuditLog(
-            user_id=user.id,
-            server_id=server.id,
+            user_id=user_id,
+            server_id=srv_id,
             action="terminal.open",
         ))
         await db.commit()
 
+    # Start recording
+    recorder = SessionRecorder()
+    stop_event = asyncio.Event()
+
     await websocket.send_json({"type": "connected", "session_id": session.session_id})
 
-    # Step 4: Bidirectional streaming
+    # Step 4: Bidirectional streaming with recording
     async def _read_from_server():
-        """Read from SSH and send to WebSocket."""
         try:
-            while not session.is_closed:
+            while not stop_event.is_set():
                 data = await session_manager.read(session.session_id)
                 if data is None:
-                    # EOF — session ended
-                    await websocket.send_json({"type": "disconnected"})
+                    try:
+                        await websocket.send_json({"type": "disconnected"})
+                    except Exception:
+                        pass
                     break
                 if data:
-                    # Send binary data as base64 to preserve encoding
-                    import base64
-                    await websocket.send_json({
-                        "type": "output",
-                        "data": base64.b64encode(data).decode("ascii"),
-                    })
-        except WebSocketDisconnect:
-            pass
+                    recorder.record_output(data)
+                    try:
+                        await websocket.send_json({
+                            "type": "output",
+                            "data": base64.b64encode(data).decode("ascii"),
+                        })
+                    except Exception:
+                        break
         except Exception:
             pass
+        finally:
+            stop_event.set()
 
     async def _read_from_client():
-        """Read from WebSocket and send to SSH."""
         try:
-            while not session.is_closed:
+            while not stop_event.is_set():
                 raw = await websocket.receive_text()
                 msg = json.loads(raw)
 
                 if msg["type"] == "input":
-                    import base64
                     data = base64.b64decode(msg["data"])
+                    recorder.record_input(data)
                     await session_manager.write(session.session_id, data)
                 elif msg["type"] == "resize":
                     await session_manager.resize(
@@ -176,26 +206,51 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                         msg.get("cols", 80),
                         msg.get("rows", 24),
                     )
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, Exception):
             pass
-        except Exception:
-            pass
+        finally:
+            stop_event.set()
 
-    # Run both tasks concurrently
+    # Run both tasks, cancel survivors when one exits
+    tasks = [
+        asyncio.create_task(_read_from_server()),
+        asyncio.create_task(_read_from_client()),
+    ]
+
     try:
-        await asyncio.gather(
-            _read_from_server(),
-            _read_from_client(),
-            return_exceptions=True,
-        )
+        # Wait for stop signal
+        await stop_event.wait()
+        # Give tasks a moment to finish
+        await asyncio.sleep(0.5)
     finally:
+        # Cancel remaining tasks
+        for t in tasks:
+            t.cancel()
+
         await session_manager.close(session.session_id)
 
-        # Log session end
-        async with async_session() as db:
-            db.add(AuditLog(
-                user_id=user.id,
-                server_id=server.id,
-                action="terminal.close",
-            ))
-            await db.commit()
+        # Save recording + audit log
+        try:
+            async with async_session() as db:
+                recording = SessionRecording(
+                    session_id=session.session_id,
+                    server_id=srv_id,
+                    user_id=user_id,
+                    server_name=server_name,
+                    user_name=user_name,
+                    events=recorder.events,
+                    duration_seconds=recorder.duration_seconds,
+                    event_count=recorder.event_count,
+                    size_bytes=recorder.size_bytes,
+                )
+                db.add(recording)
+
+                db.add(AuditLog(
+                    user_id=user_id,
+                    server_id=srv_id,
+                    action="terminal.close",
+                    result=f"Recorded {recorder.event_count} events, {recorder.duration_seconds}s",
+                ))
+                await db.commit()
+        except Exception:
+            pass  # Don't crash on recording save failure

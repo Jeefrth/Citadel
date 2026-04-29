@@ -4,7 +4,7 @@ import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -118,11 +118,17 @@ async def _sync_user(claims: dict, db: AsyncSession) -> User:
     user = result.scalar_one_or_none()
 
     if user is None:
+        # First real user (non-dev) gets admin role automatically
+        existing_count = await db.execute(
+            select(func.count(User.id)).where(User.entra_object_id != "dev-mode-user-00000000")
+        )
+        is_first_user = existing_count.scalar_one() == 0
+
         user = User(
             entra_object_id=oid,
             email=claims.get("preferred_username", claims.get("email", "")),
             display_name=claims.get("name", "Unknown"),
-            role=UserRole.VIEWER,
+            role=UserRole.ADMIN if is_first_user else UserRole.VIEWER,
             is_active=True,
         )
         db.add(user)
