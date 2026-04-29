@@ -9,7 +9,18 @@ import {
   Info,
   Play,
   X,
+  Key,
+  Trash2,
+  Pencil,
 } from "lucide-react";
+
+interface CredentialData {
+  id: string;
+  name: string;
+  type: string;
+  username: string;
+  created_at: string;
+}
 
 interface ServerData {
   id: string;
@@ -57,6 +68,58 @@ export default function Servers() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
+  // Credentials
+  const [credentials, setCredentials] = useState<CredentialData[]>([]);
+  const [showCredModal, setShowCredModal] = useState(false);
+  const [credForm, setCredForm] = useState({
+    name: "",
+    type: "ssh_password" as string,
+    username: "",
+    password: "",
+    ssh_key: "",
+  });
+  const [credLoading, setCredLoading] = useState(false);
+  const [credError, setCredError] = useState<string | null>(null);
+
+  // Add server modal
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({
+    name: "",
+    hostname: "",
+    ip_address: "",
+    os_type: "linux" as "linux" | "windows",
+    os_version: "",
+    ssh_port: 22,
+    winrm_port: 5985,
+    credential_id: "" as string,
+  });
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  // Edit server modal
+  const [editServer, setEditServer] = useState<ServerData | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    hostname: "",
+    ip_address: "",
+    os_type: "linux" as "linux" | "windows",
+    os_version: "",
+    ssh_port: 22,
+    winrm_port: 5985,
+    credential_id: "" as string,
+  });
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Edit credential modal
+  const [editCred, setEditCred] = useState<CredentialData | null>(null);
+  const [editCredForm, setEditCredForm] = useState({
+    name: "",
+    username: "",
+    password: "",
+    ssh_key: "",
+  });
+  const [editCredLoading, setEditCredLoading] = useState(false);
+
   // Command execution modal
   const [cmdServer, setCmdServer] = useState<ServerData | null>(null);
   const [cmdInput, setCmdInput] = useState("");
@@ -69,12 +132,178 @@ export default function Servers() {
   const [infoLoading, setInfoLoading] = useState(false);
 
   useEffect(() => {
-    api
-      .get<ServerData[]>("/api/servers/")
-      .then(setServers)
+    Promise.all([
+      api.get<ServerData[]>("/api/servers/"),
+      api.get<CredentialData[]>("/api/servers/credentials/").catch(() => []),
+    ])
+      .then(([srvs, creds]) => {
+        setServers(srvs);
+        setCredentials(creds);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleDeleteCredential = async (credId: string) => {
+    if (!confirm("Supprimer ce credential ? Les serveurs liés seront déconnectés.")) return;
+    try {
+      await api.delete(`/api/servers/credentials/${credId}`);
+      setCredentials((prev) => prev.filter((c) => c.id !== credId));
+      // Unlink from servers locally
+      setServers((prev) =>
+        prev.map((s) => (s.credential_id === credId ? { ...s, credential_id: null } : s))
+      );
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleAddCredential = async () => {
+    if (!credForm.name || !credForm.username) return;
+    setCredLoading(true);
+    setCredError(null);
+    try {
+      const newCred = await api.post<CredentialData>("/api/servers/credentials/", {
+        name: credForm.name,
+        type: credForm.type,
+        username: credForm.username,
+        password: credForm.password || null,
+        ssh_key: credForm.ssh_key || null,
+      });
+      setCredentials((prev) => [...prev, newCred]);
+      setCredForm({ name: "", type: "ssh_password", username: "", password: "", ssh_key: "" });
+      setShowCredModal(false);
+    } catch (e: unknown) {
+      setCredError(e instanceof Error ? e.message : "Erreur");
+    } finally {
+      setCredLoading(false);
+    }
+  };
+
+  const handleAssignCredential = async (serverId: string, credentialId: string) => {
+    try {
+      const updated = await api.patch<ServerData>(`/api/servers/${serverId}`, {
+        credential_id: credentialId,
+      });
+      setServers((prev) => prev.map((s) => (s.id === serverId ? updated : s)));
+    } catch {
+      // silently fail
+    }
+  };
+
+  const openEditServer = (srv: ServerData) => {
+    setEditServer(srv);
+    setEditForm({
+      name: srv.name,
+      hostname: srv.hostname,
+      ip_address: srv.ip_address,
+      os_type: srv.os_type,
+      os_version: srv.os_version || "",
+      ssh_port: srv.ssh_port,
+      winrm_port: srv.winrm_port,
+      credential_id: srv.credential_id || "",
+    });
+  };
+
+  const handleEditServer = async () => {
+    if (!editServer) return;
+    setEditLoading(true);
+    try {
+      const updated = await api.patch<ServerData>(`/api/servers/${editServer.id}`, {
+        name: editForm.name,
+        hostname: editForm.hostname,
+        ip_address: editForm.ip_address,
+        os_type: editForm.os_type,
+        os_version: editForm.os_version || null,
+        ssh_port: editForm.ssh_port,
+        winrm_port: editForm.winrm_port,
+        credential_id: editForm.credential_id || null,
+      });
+      setServers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setEditServer(null);
+    } catch {
+      // silently fail
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const openEditCred = (cred: CredentialData) => {
+    setEditCred(cred);
+    setEditCredForm({
+      name: cred.name,
+      username: cred.username,
+      password: "",
+      ssh_key: "",
+    });
+  };
+
+  const handleEditCredential = async () => {
+    if (!editCred) return;
+    setEditCredLoading(true);
+    try {
+      const body: Record<string, string> = {};
+      if (editCredForm.name !== editCred.name) body.name = editCredForm.name;
+      if (editCredForm.username !== editCred.username) body.username = editCredForm.username;
+      if (editCredForm.password) body.password = editCredForm.password;
+      if (editCredForm.ssh_key) body.ssh_key = editCredForm.ssh_key;
+
+      const updated = await api.patch<CredentialData>(
+        `/api/servers/credentials/${editCred.id}`,
+        body
+      );
+      setCredentials((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      setEditCred(null);
+    } catch {
+      // silently fail
+    } finally {
+      setEditCredLoading(false);
+    }
+  };
+
+  const handleDeleteServer = async (serverId: string) => {
+    if (!confirm("Supprimer ce serveur ?")) return;
+    try {
+      await api.delete(`/api/servers/${serverId}`);
+      setServers((prev) => prev.filter((s) => s.id !== serverId));
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleAddServer = async () => {
+    if (!addForm.name || !addForm.hostname || !addForm.ip_address) return;
+    setAddLoading(true);
+    setAddError(null);
+    try {
+      const newServer = await api.post<ServerData>("/api/servers/", {
+        name: addForm.name,
+        hostname: addForm.hostname,
+        ip_address: addForm.ip_address,
+        os_type: addForm.os_type,
+        os_version: addForm.os_version || null,
+        ssh_port: addForm.ssh_port,
+        winrm_port: addForm.winrm_port,
+        credential_id: addForm.credential_id || null,
+      });
+      setServers((prev) => [...prev, newServer]);
+      setShowAddModal(false);
+      setAddForm({
+        name: "",
+        hostname: "",
+        ip_address: "",
+        os_type: "linux",
+        os_version: "",
+        ssh_port: 22,
+        winrm_port: 5985,
+        credential_id: "",
+      });
+    } catch (e: unknown) {
+      setAddError(e instanceof Error ? e.message : "Erreur inconnue");
+    } finally {
+      setAddLoading(false);
+    }
+  };
 
   const handleTestConnection = async (srv: ServerData) => {
     setTestingId(srv.id);
@@ -149,10 +378,22 @@ export default function Servers() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">Serveurs</h2>
-        <button className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90">
-          <Plus size={16} />
-          Ajouter un serveur
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCredModal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-md border text-sm font-medium hover:bg-accent"
+          >
+            <Key size={16} />
+            Credentials ({credentials.length})
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
+          >
+            <Plus size={16} />
+            Ajouter un serveur
+          </button>
+        </div>
       </div>
 
       {/* Test result banner */}
@@ -200,6 +441,7 @@ export default function Servers() {
                 <th className="text-left p-3 font-medium">Hostname</th>
                 <th className="text-left p-3 font-medium">IP</th>
                 <th className="text-left p-3 font-medium">OS</th>
+                <th className="text-left p-3 font-medium">Credential</th>
                 <th className="text-right p-3 font-medium">Actions</th>
               </tr>
             </thead>
@@ -218,6 +460,20 @@ export default function Servers() {
                     <span className="px-2 py-0.5 rounded text-xs bg-secondary">
                       {srv.os_type}
                     </span>
+                  </td>
+                  <td className="p-3">
+                    <select
+                      value={srv.credential_id || ""}
+                      onChange={(e) => handleAssignCredential(srv.id, e.target.value)}
+                      className="px-2 py-1 rounded border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">-- aucun --</option>
+                      {credentials.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.username})
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="p-3 text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -250,6 +506,20 @@ export default function Servers() {
                         title="Exécuter une commande"
                       >
                         <Play size={16} />
+                      </button>
+                      <button
+                        onClick={() => openEditServer(srv)}
+                        className="p-1.5 rounded hover:bg-accent text-muted-foreground"
+                        title="Modifier"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteServer(srv.id)}
+                        className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
+                        title="Supprimer"
+                      >
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </td>
@@ -374,6 +644,488 @@ export default function Servers() {
                   credentials.
                 </p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Add server modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border rounded-lg shadow-lg w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold">Ajouter un serveur</h3>
+              <button onClick={() => setShowAddModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {addError && (
+                <div className="p-2 rounded bg-red-50 text-red-700 text-sm">
+                  {addError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Nom *</label>
+                  <input
+                    type="text"
+                    value={addForm.name}
+                    onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                    placeholder="web-prod-01"
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Hostname *</label>
+                  <input
+                    type="text"
+                    value={addForm.hostname}
+                    onChange={(e) => setAddForm({ ...addForm, hostname: e.target.value })}
+                    placeholder="web-prod-01.local"
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Adresse IP *</label>
+                  <input
+                    type="text"
+                    value={addForm.ip_address}
+                    onChange={(e) => setAddForm({ ...addForm, ip_address: e.target.value })}
+                    placeholder="192.168.1.10"
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Type OS *</label>
+                  <select
+                    value={addForm.os_type}
+                    onChange={(e) => setAddForm({ ...addForm, os_type: e.target.value as "linux" | "windows" })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="linux">Linux</option>
+                    <option value="windows">Windows</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Version OS</label>
+                  <input
+                    type="text"
+                    value={addForm.os_version}
+                    onChange={(e) => setAddForm({ ...addForm, os_version: e.target.value })}
+                    placeholder="Ubuntu 22.04"
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Port SSH</label>
+                  <input
+                    type="number"
+                    value={addForm.ssh_port}
+                    onChange={(e) => setAddForm({ ...addForm, ssh_port: parseInt(e.target.value) || 22 })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Port WinRM</label>
+                  <input
+                    type="number"
+                    value={addForm.winrm_port}
+                    onChange={(e) => setAddForm({ ...addForm, winrm_port: parseInt(e.target.value) || 5985 })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Credential</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={addForm.credential_id}
+                      onChange={(e) => setAddForm({ ...addForm, credential_id: e.target.value })}
+                      className="flex-1 px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="">-- aucun --</option>
+                      {credentials.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.username})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setShowCredModal(true)}
+                      className="px-3 py-2 rounded-md border text-sm hover:bg-accent"
+                      title="Nouveau credential"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 rounded-md border text-sm hover:bg-accent"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleAddServer}
+                  disabled={addLoading || !addForm.name || !addForm.hostname || !addForm.ip_address}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {addLoading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    "Ajouter"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credentials modal */}
+      {showCredModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border rounded-lg shadow-lg w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold">Credentials</h3>
+              <button onClick={() => setShowCredModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Existing credentials */}
+              {credentials.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase">
+                    Existants
+                  </h4>
+                  {credentials.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between p-2 rounded border text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Key size={14} className="text-muted-foreground" />
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {c.username} — {c.type}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEditCred(c)}
+                          className="p-1 rounded hover:bg-accent text-muted-foreground"
+                          title="Modifier"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCredential(c.id)}
+                          className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
+                          title="Supprimer"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add new credential */}
+              <div className="border-t pt-4">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase mb-3">
+                  Nouveau credential
+                </h4>
+
+                {credError && (
+                  <div className="p-2 rounded bg-red-50 text-red-700 text-sm mb-3">
+                    {credError}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Nom *</label>
+                      <input
+                        type="text"
+                        value={credForm.name}
+                        onChange={(e) => setCredForm({ ...credForm, name: e.target.value })}
+                        placeholder="ssh-admin-prod"
+                        className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Type *</label>
+                      <select
+                        value={credForm.type}
+                        onChange={(e) => setCredForm({ ...credForm, type: e.target.value })}
+                        className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option value="ssh_password">SSH (mot de passe)</option>
+                        <option value="ssh_key">SSH (clé privée)</option>
+                        <option value="winrm">WinRM</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Utilisateur *</label>
+                    <input
+                      type="text"
+                      value={credForm.username}
+                      onChange={(e) => setCredForm({ ...credForm, username: e.target.value })}
+                      placeholder="root"
+                      className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+
+                  {credForm.type !== "ssh_key" && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Mot de passe</label>
+                      <input
+                        type="password"
+                        value={credForm.password}
+                        onChange={(e) => setCredForm({ ...credForm, password: e.target.value })}
+                        className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                  )}
+
+                  {credForm.type === "ssh_key" && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Clé privée SSH</label>
+                      <textarea
+                        value={credForm.ssh_key}
+                        onChange={(e) => setCredForm({ ...credForm, ssh_key: e.target.value })}
+                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                        rows={4}
+                        className="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleAddCredential}
+                    disabled={credLoading || !credForm.name || !credForm.username}
+                    className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {credLoading ? (
+                      <Loader2 size={16} className="animate-spin mx-auto" />
+                    ) : (
+                      "Ajouter le credential"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit server modal */}
+      {editServer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border rounded-lg shadow-lg w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold">Modifier — {editServer.name}</h3>
+              <button onClick={() => setEditServer(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Nom</label>
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Hostname</label>
+                  <input
+                    type="text"
+                    value={editForm.hostname}
+                    onChange={(e) => setEditForm({ ...editForm, hostname: e.target.value })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Adresse IP</label>
+                  <input
+                    type="text"
+                    value={editForm.ip_address}
+                    onChange={(e) => setEditForm({ ...editForm, ip_address: e.target.value })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Type OS</label>
+                  <select
+                    value={editForm.os_type}
+                    onChange={(e) => setEditForm({ ...editForm, os_type: e.target.value as "linux" | "windows" })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="linux">Linux</option>
+                    <option value="windows">Windows</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Version OS</label>
+                  <input
+                    type="text"
+                    value={editForm.os_version}
+                    onChange={(e) => setEditForm({ ...editForm, os_version: e.target.value })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Port SSH</label>
+                  <input
+                    type="number"
+                    value={editForm.ssh_port}
+                    onChange={(e) => setEditForm({ ...editForm, ssh_port: parseInt(e.target.value) || 22 })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Port WinRM</label>
+                  <input
+                    type="number"
+                    value={editForm.winrm_port}
+                    onChange={(e) => setEditForm({ ...editForm, winrm_port: parseInt(e.target.value) || 5985 })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Credential</label>
+                  <select
+                    value={editForm.credential_id}
+                    onChange={(e) => setEditForm({ ...editForm, credential_id: e.target.value })}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">-- aucun --</option>
+                    {credentials.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.username})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setEditServer(null)}
+                  className="px-4 py-2 rounded-md border text-sm hover:bg-accent"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleEditServer}
+                  disabled={editLoading}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {editLoading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    "Enregistrer"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit credential modal */}
+      {editCred && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border rounded-lg shadow-lg w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold">Modifier — {editCred.name}</h3>
+              <button onClick={() => setEditCred(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Nom</label>
+                <input
+                  type="text"
+                  value={editCredForm.name}
+                  onChange={(e) => setEditCredForm({ ...editCredForm, name: e.target.value })}
+                  className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Utilisateur</label>
+                <input
+                  type="text"
+                  value={editCredForm.username}
+                  onChange={(e) => setEditCredForm({ ...editCredForm, username: e.target.value })}
+                  className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Nouveau mot de passe
+                  <span className="text-xs text-muted-foreground ml-1">(laisser vide pour ne pas changer)</span>
+                </label>
+                <input
+                  type="password"
+                  value={editCredForm.password}
+                  onChange={(e) => setEditCredForm({ ...editCredForm, password: e.target.value })}
+                  placeholder="••••••••"
+                  className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              {editCred.type === "ssh_key" && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Nouvelle clé SSH
+                    <span className="text-xs text-muted-foreground ml-1">(laisser vide pour ne pas changer)</span>
+                  </label>
+                  <textarea
+                    value={editCredForm.ssh_key}
+                    onChange={(e) => setEditCredForm({ ...editCredForm, ssh_key: e.target.value })}
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setEditCred(null)}
+                  className="px-4 py-2 rounded-md border text-sm hover:bg-accent"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleEditCredential}
+                  disabled={editCredLoading}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {editCredLoading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    "Enregistrer"
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

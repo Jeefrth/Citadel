@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.base import UserRole
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 _jwks_cache: dict | None = None
 
@@ -112,11 +112,43 @@ async def _sync_user(claims: dict, db: AsyncSession) -> User:
     return user
 
 
+async def _get_or_create_dev_user(db: AsyncSession) -> User:
+    """Get or create a dev admin user for DEV_MODE."""
+    dev_oid = "dev-mode-user-00000000"
+    result = await db.execute(select(User).where(User.entra_object_id == dev_oid))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        user = User(
+            entra_object_id=dev_oid,
+            email="dev@localhost",
+            display_name="Dev Admin",
+            role=UserRole.ADMIN,
+            is_active=True,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+    return user
+
+
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """FastAPI dependency: validate token and return current user."""
+    from app.core.config import settings
+
+    if settings.DEV_MODE:
+        return await _get_or_create_dev_user(db)
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
     claims = await _validate_token(credentials.credentials)
     user = await _sync_user(claims, db)
 

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     CREDENTIAL_ENCRYPTION_KEY: str = ""
     SECRET_KEY: str = "dev-secret-key-change-in-production"
 
+    # Dev mode (bypass auth)
+    DEV_MODE: bool = False
+
     # CORS
     BACKEND_CORS_ORIGINS: str = "http://localhost:5173"
 
