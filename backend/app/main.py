@@ -9,7 +9,7 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring
+from app.api import auth, servers, users, commands, updates, monitoring, sessions
 from app.websocket import terminal
 
 # Structured logging
@@ -47,6 +47,7 @@ app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(commands.router, prefix="/api/servers", tags=["commands"])
 app.include_router(updates.router, prefix="/api/servers", tags=["updates"])
 app.include_router(monitoring.router, prefix="/api", tags=["monitoring"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(terminal.router, tags=["terminal"])
 
 

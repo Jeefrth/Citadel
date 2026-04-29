@@ -6,6 +6,7 @@ import {
   RefreshCw,
   LayoutDashboard,
   Shield,
+  Film,
   LogOut,
   User,
 } from "lucide-react";
@@ -14,6 +15,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/servers", icon: Server, label: "Serveurs" },
   { to: "/terminal", icon: Terminal, label: "Terminal" },
+  { to: "/sessions", icon: Film, label: "Sessions" },
   { to: "/updates", icon: RefreshCw, label: "Mises à jour" },
   { to: "/audit", icon: Shield, label: "Audit" },
 ];
