@@ -1,0 +1,27 @@
+# Web framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+
+# Database
+sqlalchemy[asyncio]==2.0.40
+asyncpg==0.30.0
+alembic==1.15.2
+
+# Redis
+redis==5.3.0
+
+# Auth (Entra ID token validation)
+python-jose[cryptography]==3.4.0
+httpx==0.28.1
+
+# Security
+cryptography==44.0.3
+bcrypt==4.3.0
+
+# Validation
+pydantic==2.11.3
+pydantic-settings==2.9.1
+
+# SSH / WinRM
+asyncssh==2.20.0
+pywinrm==0.5.0
