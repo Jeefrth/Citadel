@@ -66,15 +66,37 @@ async def _validate_token(token: str) -> dict:
             detail="Unable to find matching signing key",
         )
 
-    try:
-        payload = jwt.decode(
-            token,
-            rsa_key,
-            algorithms=["RS256"],
-            audience=settings.AZURE_CLIENT_ID,
-            issuer=settings.azure_issuer,
-        )
-    except JWTError as e:
+    # Try both audience formats: raw client ID and api:// URI
+    payload = None
+    last_error = None
+    for aud in [f"api://{settings.AZURE_CLIENT_ID}", settings.AZURE_CLIENT_ID]:
+        try:
+            payload = jwt.decode(
+                token,
+                rsa_key,
+                algorithms=["RS256"],
+                audience=aud,
+                issuer=settings.azure_issuer,
+            )
+            break
+        except JWTError as e:
+            last_error = e
+            continue
+
+    if payload is None:
+        # Try without issuer validation as fallback (v1 vs v2 tokens)
+        try:
+            payload = jwt.decode(
+                token,
+                rsa_key,
+                algorithms=["RS256"],
+                audience=f"api://{settings.AZURE_CLIENT_ID}",
+                options={"verify_iss": False},
+            )
+        except JWTError as e:
+            last_error = e
+
+    if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token validation failed: {e}",
