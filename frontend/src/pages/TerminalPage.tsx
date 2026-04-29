@@ -9,6 +9,7 @@ import {
   X,
   Server,
   Monitor,
+  Loader2,
 } from "lucide-react";
 
 interface ServerData {
@@ -38,6 +39,11 @@ export default function TerminalPage() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [showServerPicker, setShowServerPicker] = useState(false);
 
+  // MFA confirmation before terminal
+  const [pendingServer, setPendingServer] = useState<ServerData | null>(null);
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [mfaError, setMfaError] = useState<string | null>(null);
+
   useEffect(() => {
     api
       .get<ServerData[]>("/api/servers/")
@@ -54,6 +60,48 @@ export default function TerminalPage() {
     });
     return response.accessToken;
   }, [instance, accounts]);
+
+  const requestTerminal = (srv: ServerData) => {
+    setPendingServer(srv);
+    setMfaError(null);
+    setShowServerPicker(false);
+  };
+
+  const confirmMfaAndOpen = async () => {
+    if (!pendingServer) return;
+    const account = accounts[0];
+    if (!account) return;
+
+    setMfaLoading(true);
+    setMfaError(null);
+
+    try {
+      // Force full re-auth via popup → triggers MFA (Conditional Access)
+      await instance.acquireTokenPopup({
+        ...loginRequest,
+        account,
+        prompt: "login",
+      });
+
+      // MFA passed — open the terminal
+      const id = `tab-${++tabCounter}`;
+      const tab: Tab = {
+        id,
+        serverId: pendingServer.id,
+        serverName: pendingServer.name,
+        osType: pendingServer.os_type,
+        connected: true,
+      };
+      setTabs((prev) => [...prev, tab]);
+      setActiveTab(id);
+      setPendingServer(null);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "MFA failed";
+      setMfaError(msg);
+    } finally {
+      setMfaLoading(false);
+    }
+  };
 
   const openTab = (srv: ServerData) => {
     const id = `tab-${++tabCounter}`;
@@ -204,7 +252,7 @@ export default function TerminalPage() {
                     {linuxServers.map((srv) => (
                       <button
                         key={srv.id}
-                        onClick={() => openTab(srv)}
+                        onClick={() => requestTerminal(srv)}
                         className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent text-left text-sm"
                       >
                         <Server size={16} className="text-green-500" />
@@ -229,7 +277,7 @@ export default function TerminalPage() {
                     {windowsServers.map((srv) => (
                       <button
                         key={srv.id}
-                        onClick={() => openTab(srv)}
+                        onClick={() => requestTerminal(srv)}
                         className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent text-left text-sm"
                         title="Terminal interactif non disponible pour Windows — utiliser l'exécution de commande"
                       >
@@ -248,6 +296,52 @@ export default function TerminalPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MFA confirmation modal */}
+      {pendingServer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border rounded-lg shadow-lg w-full max-w-sm mx-4 p-6">
+            <div className="text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
+                <Server size={24} className="text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg">Vérification d'identité</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  L'ouverture d'un terminal vers <strong>{pendingServer.name}</strong> nécessite
+                  une authentification renforcée.
+                </p>
+              </div>
+
+              {mfaError && (
+                <div className="p-2 rounded bg-red-50 text-red-700 text-sm">
+                  {mfaError}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPendingServer(null)}
+                  className="flex-1 px-4 py-2 rounded-md border text-sm hover:bg-accent"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={confirmMfaAndOpen}
+                  disabled={mfaLoading}
+                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {mfaLoading ? (
+                    <Loader2 size={16} className="animate-spin mx-auto" />
+                  ) : (
+                    "Confirmer (MFA)"
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

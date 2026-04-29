@@ -11,7 +11,7 @@ class User(UUIDMixin, TimestampMixin, Base):
     entra_object_id: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
     )
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole), default=UserRole.VIEWER, nullable=False

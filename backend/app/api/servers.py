@@ -164,6 +164,7 @@ async def create_credential(
         username=data.username,
         encrypted_password=encrypt_value(data.password) if data.password else None,
         encrypted_ssh_key=encrypt_value(data.ssh_key) if data.ssh_key else None,
+        cert_validity_minutes=data.cert_validity_minutes,
     )
     db.add(cred)
 

@@ -1,378 +1,234 @@
-# srv_gest — Documentation Projet
+# srv_gest — Documentation Architecture
 
-> **Schémas visuels Excalidraw** (ouvrir avec excalidraw.com ou extension VS Code) :
+> Schemas Excalidraw (ouvrir avec excalidraw.com ou extension VS Code) :
 >
-> - `docs/01-architecture-generale.excalidraw` — Vue d'ensemble 3 tiers
-> - `docs/02-flux-auth-entra.excalidraw` — Flux OAuth2/OIDC avec Entra ID
-> - `docs/03-modele-donnees.excalidraw` — Tables, relations FK et enums
+> - `01-architecture-generale.excalidraw` — Vue d'ensemble 3 tiers
+> - `02-flux-auth-entra.excalidraw` — Flux OAuth2/OIDC avec Entra ID
+> - `03-modele-donnees.excalidraw` — Tables, relations FK et enums
 
-## 1. Vision du Projet
+## 1. Vision
 
-**srv_gest** est une application web de gestion centralisée de serveurs Windows et Linux.
-Elle permet aux administrateurs système de :
-- Gérer un inventaire de serveurs (Windows / Linux)
-- Exécuter des commandes à distance (PowerShell / Bash)
-- Gérer les mises à jour système (Windows Update / apt / yum / dnf)
-- Configurer des paramètres serveur à distance
-- Superviser l'état des serveurs en temps réel
+srv_gest est une application web de gestion centralisee de serveurs Windows et Linux
+avec bastion SSH securise integre. Elle permet de gerer un inventaire de serveurs,
+executer des commandes a distance, gerer les mises a jour, monitorer les metriques,
+et se connecter en terminal interactif avec authentification renforcee (MFA)
+et certificats SSH ephemeres.
 
----
+## 2. Architecture Generale
 
-## 2. Architecture Générale
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       UTILISATEUR                           │
-│                     (Navigateur Web)                        │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTPS
-                         ▼
-┌──────────────────┐   ┌──────────────────────────────────────┐
-│  Microsoft Entra │◀──│              FRONTEND                │
-│  ID (Azure AD)   │──▶│        (React + TypeScript)          │
-│                  │   │                                      │
-│  - OAuth2 / OIDC │   │  ┌───────────┐ ┌──────────────────┐ │
-│  - MSAL.js       │   │  │ Dashboard │ │ Terminal Distant │ │
-│  - App Registration  │  └───────────┘ └──────────────────┘ │
-└──────────────────┘   │  ┌───────────┐ ┌──────────────────┐ │
-                       │  │ Inventaire│ │ Updates Manager  │ │
-                       │  └───────────┘ └──────────────────┘ │
-                       │  ┌───────────┐ ┌──────────────────┐ │
-                       │  │ Paramètres│ │   Audit Logs     │ │
-                       │  └───────────┘ └──────────────────┘ │
-                       └────────────────────┬─────────────────┘
-                                            │ REST API + WebSocket
-                                            │ (Bearer Token Entra)
-                                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        BACKEND                              │
-│                (Python — FastAPI)                            │
-│                                                             │
-│  ┌───────────┐ ┌───────────┐ ┌────────────────────────┐   │
-│  │ API REST  │ │ WebSocket │ │ Auth Middleware         │   │
-│  │ Endpoints │ │  Server   │ │ (validation token      │   │
-│  └───────────┘ └───────────┘ │  Entra ID / JWKS)      │   │
-│  ┌───────────┐ ┌───────────┐ └────────────────────────┘   │
-│  │ Task      │ │ Connexion │ ┌────────────────────────┐   │
-│  │ Queue     │ │  Manager  │ │  Audit Logger          │   │
-│  └───────────┘ └───────────┘ └────────────────────────┘   │
-└──────────┬───────────┬───────────┬──────────────────────────┘
-           │           │           │
-           ▼           ▼           ▼
-┌──────────────┐ ┌───────────┐ ┌──────────────────────────────┐
-│  PostgreSQL  │ │   Redis   │ │    SERVEURS DISTANTS         │
-│              │ │ (cache +  │ │                              │
-│ - Serveurs   │ │  sessions │ │  ┌──────────┐ ┌──────────┐  │
-│ - Users sync │ │  + queue) │ │  │  Linux   │ │ Windows  │  │
-│ - Audit log  │ │           │ │  │  (SSH)   │ │ (WinRM)  │  │
-│ - Jobs       │ │           │ │  └──────────┘ └──────────┘  │
-│ - Credentials│ │           │ │                              │
-└──────────────┘ └───────────┘ └──────────────────────────────┘
-
-Déploiement cible :
-  - Phase initiale : serveur interne QIMinfo (Docker Compose)
-  - Phase finale   : VM Azure (avec proximity Entra ID)
+```text
+Utilisateur (Navigateur)
+    |
+    | HTTPS
+    v
++--------------------------------------------------+
+|              FRONTEND (React + TS)               |
+|  MSAL.js (Entra ID) → Bearer Token              |
+|  Pages: Dashboard, Serveurs, Terminal,           |
+|         Sessions, Updates, Audit                 |
++--------------------------------------------------+
+    |                              |
+    | REST API                     | WebSocket
+    v                              v
++--------------------------------------------------+
+|               BACKEND (FastAPI)                  |
+|                                                  |
+|  Auth Middleware (JWKS)    Mini-CA (Ed25519)     |
+|  RBAC (admin/op/viewer)   Certificats ephemeres |
+|  Command Filter            Session Recording     |
+|  Rate Limiting             Idle Timeout (30min)  |
++--------------------------------------------------+
+    |          |          |           |
+    v          v          v           v
++--------+ +-------+ +----------+ +------------------+
+|PostgreSQL| |Redis | |Serveurs  | |Microsoft Entra ID|
+|          | |      | |Linux(SSH)| |  OAuth2/OIDC     |
+|9 tables  | |cache | |Win(WinRM)| |  MFA             |
++--------+ +-------+ +----------+ +------------------+
 ```
 
----
+## 3. Stack Technique
 
-## 3. Stack Technique Proposée
-
-| Couche       | Technologie             | Justification                                      |
-|-------------|-------------------------|---------------------------------------------------|
-| Frontend    | React + TypeScript      | Écosystème riche, composants UI (xterm.js terminal)|
-| UI Kit      | Shadcn/ui + Tailwind    | Design moderne, accessible, personnalisable        |
-| Backend     | Python + FastAPI        | Async natif, performant, typage fort               |
-| BDD         | PostgreSQL              | Robuste, adapté aux données relationnelles         |
-| Cache/Queue | Redis                   | Sessions, cache, file de tâches                    |
-| SSH Client  | Paramiko / asyncssh     | Connexion SSH vers serveurs Linux                  |
-| WinRM       | pywinrm                 | Exécution PowerShell à distance sur Windows        |
-| WebSocket   | FastAPI WebSocket       | Terminal interactif temps réel                     |
-| Auth Front  | MSAL.js (@azure/msal-browser) | Authentification via Microsoft Entra ID       |
-| Auth Back   | python-jose + JWKS      | Validation des tokens Entra ID côté API            |
-| Container   | Docker + Docker Compose | Déploiement simplifié                              |
-| Cloud       | Azure VM                | Hébergement cible en production                    |
-
----
+| Couche | Technologie | Role |
+|--------|-------------|------|
+| Frontend | React 18 + TypeScript + Vite | SPA avec routing |
+| UI | Shadcn/ui + Tailwind CSS | Composants + style |
+| Terminal | xterm.js + addon-fit + addon-web-links | Terminal web |
+| Backend | Python 3.12+ + FastAPI | API REST + WebSocket |
+| ORM | SQLAlchemy 2 (async) + Alembic | BDD + migrations |
+| BDD | PostgreSQL 16 | Stockage principal |
+| Cache | Redis 7 | Sessions, cache |
+| SSH | asyncssh + ssh-keygen | Connexion + certificats |
+| WinRM | pywinrm (NTLM) | PowerShell distant |
+| Auth | MSAL.js (front) + python-jose (back) | Entra ID tokens |
+| CA | ssh-keygen (Ed25519) | Certificats ephemeres |
+| Securite | AES-256-GCM (cryptography) | Chiffrement credentials |
+| Container | Docker + Docker Compose | Dev et prod |
 
 ## 4. Modules Fonctionnels
 
 ### 4.1 Inventaire Serveurs
-- Ajout / modification / suppression de serveurs
-- Informations : nom, IP, OS, type (Win/Linux), port SSH/WinRM, tags
-- Groupes de serveurs (par environnement, rôle, localisation)
-- Test de connectivité (ping + connexion SSH/WinRM)
-- Import/export CSV
 
-### 4.2 Terminal Distant
-- Terminal interactif via WebSocket (xterm.js)
-- Exécution de commandes SSH (Linux) ou PowerShell (Windows)
-- Historique des commandes exécutées
-- Multi-onglets (plusieurs serveurs simultanément)
-- Coloration syntaxique de la sortie
+- CRUD serveurs (nom, hostname, IP, OS, ports, tags)
+- Groupes de serveurs
+- 4 types de credentials : ssh_password, ssh_key, winrm, ephemeral_cert
+- Test de connectivite (SSH/WinRM)
+- Import d'infos systeme
 
-### 4.3 Gestion des Mises à Jour
-- **Linux** : détection des paquets à mettre à jour (apt/yum/dnf)
-- **Windows** : interrogation Windows Update via PowerShell
-- Planification de mises à jour
-- Application de mises à jour avec suivi du statut
-- Rapport de conformité des mises à jour
+### 4.2 Terminal Distant (Bastion)
 
-### 4.4 Paramètres Serveur
-- Consultation des paramètres système (hostname, réseau, services, etc.)
-- Modification de paramètres à distance
-- Gestion des services (start/stop/restart/status)
-- Gestion du pare-feu (règles iptables / Windows Firewall)
+- Terminal interactif SSH via WebSocket + xterm.js
+- Multi-onglets (plusieurs serveurs simultanes)
+- Modale MFA obligatoire avant ouverture (`prompt: "login"`)
+- Session recording (tous les I/O enregistres avec timestamps)
+- Replay de sessions (play/pause/reset, vitesse 1x/2x/5x/10x)
+- Timeout d'inactivite (30 minutes)
+- Theme Tokyo Night
 
-### 4.5 Monitoring (Dashboard)
-- Tableau de bord avec état de tous les serveurs
-- Métriques temps réel : CPU, RAM, disque, réseau
-- Alertes sur seuils dépassés
-- Graphiques d'historique (dernières 24h / 7j / 30j)
+### 4.3 Mini-CA (Certificats Ephemeres)
 
-### 4.6 Gestion des Utilisateurs & Sécurité
-- Authentification via Microsoft Entra ID (OAuth2 / OIDC)
-- Synchronisation des profils Entra → BDD locale au premier login
-- Rôles : Admin / Opérateur / Lecteur (RBAC, mappés depuis groupes Entra ou assignés manuellement)
-- Audit log de toutes les actions
-- Chiffrement des credentials serveur (AES-256)
-- Timeout de session (géré par Entra + expiration token)
+- Cle CA Ed25519 generee au demarrage, persistee dans `data/ca/`
+- Signature de certificats SSH via ssh-keygen
+- Duree configurable : 5 min, 15 min, 30 min, 1h, 2h, 4h, 8h, 12h, 24h
+- Zero secret stocke en BDD pour ce type de credential
+- Setup serveur : une ligne dans sshd_config (TrustedUserCAKeys)
 
----
+### 4.4 Gestion des Mises a Jour
 
-## 5. Flux d'Authentification — Microsoft Entra ID
+- Detection automatique du package manager (apt/dnf/yum)
+- Scan Windows Update via COM
+- Classification severite (critical, important, moderate, low)
+- Application des MAJ avec suivi des jobs
+- Rapport de conformite
 
-```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│          │     │          │     │ Microsoft│     │          │
-│  User    │────▶│ Frontend │────▶│ Entra ID │     │ Backend  │
-│          │     │ (MSAL.js)│     │ (login)  │     │ (FastAPI)│
-│          │     │          │◀────│          │     │          │
-│          │     │          │     └──────────┘     │          │
-│          │     │          │                      │          │
-│          │     │          │──── Bearer Token ───▶│          │
-│          │     │          │◀─── API Response ────│          │
-└──────────┘     └──────────┘                      └──────────┘
+### 4.5 Monitoring et Dashboard
 
-Détail du flux :
-1. L'utilisateur clique "Se connecter" dans l'app
-2. MSAL.js redirige vers la page de login Microsoft Entra ID
-3. L'utilisateur s'authentifie (MFA si configuré dans Entra)
-4. Entra ID renvoie un authorization code au frontend
-5. MSAL.js échange le code contre un access token + id token (PKCE)
-6. Le frontend stocke le token et l'envoie dans chaque requête API
-   (Header: Authorization: Bearer <access_token>)
-7. Le backend valide le token via les clés publiques JWKS de Entra
-8. Si premier login : création du profil utilisateur en BDD locale
-9. L'utilisateur accède à l'application avec son rôle assigné
+- Collecte metriques : CPU, RAM, disque, reseau, uptime, processus
+- Stockage historique en BDD (table server_metrics)
+- Dashboard : cartes resume, barres de progression, alertes
+- Page detail serveur : sparklines SVG (24h), infos systeme
+- Alertes configurables sur seuils (CPU > 90%, etc.)
+
+### 4.6 Securite
+
+- Auth : Microsoft Entra ID (OAuth2/OIDC avec PKCE)
+- MFA par session : popup re-auth avant chaque terminal
+- RBAC : admin, operator, viewer
+- Credentials : AES-256-GCM avec nonce aleatoire
+- Command filter : blocklist regex (rm -rf, mkfs, dd, fork bomb, etc.)
+- Rate limiting : 200 req/min par IP
+- Security headers : CSP, X-Frame-Options, X-Content-Type-Options
+- Audit : toutes les actions loguees
+
+## 5. Flux d'Authentification
+
+```text
+1. User clique "Se connecter"
+2. MSAL.js redirect vers Entra ID
+3. User s'authentifie (+ MFA si Conditional Access)
+4. Entra renvoie un authorization code
+5. MSAL.js echange le code → access_token + id_token (PKCE)
+6. Frontend envoie Bearer token dans chaque requete API
+7. Backend valide le token via JWKS (cles publiques Microsoft)
+8. Si premier login : creation du profil en BDD (premier user = admin)
 ```
 
-### Configuration Entra ID requise
+Pour le terminal :
 
-- **App Registration** dans le portail Azure
-  - Type : Single Page Application (SPA)
-  - Redirect URI : `https://<app-domain>/auth/callback`
-  - API permissions : `User.Read` (Microsoft Graph)
-  - Token configuration : groups claim (optionnel, pour mapper les rôles)
-- **Variables d'environnement backend** :
-  - `AZURE_TENANT_ID` : ID du tenant Entra
-  - `AZURE_CLIENT_ID` : ID de l'App Registration
-  - `AZURE_AUTHORITY` : `https://login.microsoftonline.com/<tenant_id>`
-
----
-
-## 7. Flux de Données — Exécution de Commande
-
-```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│          │     │          │     │          │     │          │
-│  User    │────▶│ Frontend │────▶│ Backend  │────▶│ Serveur  │
-│          │     │ (React)  │     │ (FastAPI)│     │ Distant  │
-│          │     │          │     │          │     │          │
-│          │◀────│          │◀────│          │◀────│          │
-└──────────┘     └──────────┘     └──────────┘     └──────────┘
-   Affiche         WebSocket       SSH/WinRM        Exécute
-   résultat        (stream)        (stream)         commande
-
-Détail du flux :
-1. L'utilisateur saisit une commande dans le terminal web
-2. Le frontend envoie la commande via WebSocket au backend
-3. Le backend vérifie le token Entra + les permissions RBAC
-4. Le backend ouvre/réutilise une connexion SSH ou WinRM
-5. La commande est exécutée sur le serveur distant
-6. La sortie (stdout/stderr) est streamée en retour
-7. Le backend relaye via WebSocket au frontend
-8. Le terminal affiche le résultat en temps réel
-9. La commande est enregistrée dans l'audit log
+```text
+1. User clique sur un serveur dans le picker
+2. Modale "Verification d'identite" apparait
+3. User clique "Confirmer (MFA)"
+4. Popup Microsoft s'ouvre → login + MFA
+5. Token frais obtenu → WebSocket s'ouvre
+6. Backend valide le token, ouvre session SSH
+7. Si credential = ephemeral_cert : signe un certificat a la volee
+8. Terminal interactif demarre, I/O enregistres
+9. A la fermeture : session sauvee en BDD
 ```
 
----
+## 6. Modele de Donnees
 
-## 6. Modèle de Données
+9 tables PostgreSQL :
 
-```
-┌──────────────────┐      ┌─────────────────┐
-│      users       │      │    servers       │
-├──────────────────┤      ├─────────────────┤
-│ id (PK, UUID)    │      │ id (PK, UUID)   │
-│ entra_object_id  │      │ name            │
-│ email            │      │ hostname        │
-│ display_name     │      │ ip_address      │
-│ role (enum)      │      │ os_type (enum)  │
-│ is_active        │      │ os_version      │
-│ created_at       │      │ ssh_port        │
-│ last_login       │      │ winrm_port      │
-└────────┬─────────┘      │ credential_id   │──┐
-         │                │ group_id (FK)   │  │
-         │                │ status          │  │
-         │                │ last_seen       │  │
-         │                │ tags (JSONB)    │  │
-         │                │ created_at      │  │
-         │                └─────────────────┘  │
-         │                                     │
-         ▼                                     ▼
-┌──────────────────┐      ┌─────────────────┐
-│   audit_logs     │      │  credentials    │
-├──────────────────┤      ├─────────────────┤
-│ id (PK, UUID)    │      │ id (PK, UUID)   │
-│ user_id (FK)     │      │ name            │
-│ server_id (FK)   │      │ type (ssh/winrm)│
-│ action           │      │ username        │
-│ command          │      │ encrypted_pwd   │
-│ result           │      │ ssh_key_enc     │
-│ status           │      │ created_at      │
-│ ip_address       │      └─────────────────┘
-│ timestamp        │
-└──────────────────┘      ┌─────────────────┐
-                          │  server_groups   │
-┌──────────────────┐      ├─────────────────┤
-│   update_jobs    │      │ id (PK, UUID)   │
-├──────────────────┤      │ name            │
-│ id (PK, UUID)    │      │ description     │
-│ server_id (FK)   │      │ created_at      │
-│ user_id (FK)     │      └─────────────────┘
-│ type             │
-│ packages (JSONB) │
-│ status           │
-│ scheduled_at     │
-│ started_at       │
-│ completed_at     │
-│ output (TEXT)    │
-└──────────────────┘
+| Table | Description |
+|-------|-------------|
+| users | Profils synchronises depuis Entra ID (oid, email, role) |
+| servers | Inventaire serveurs (nom, IP, OS, ports, status, tags) |
+| server_groups | Groupement logique de serveurs |
+| credentials | Identifiants (ssh_password, ssh_key, winrm, ephemeral_cert) |
+| audit_logs | Journal de toutes les actions (user, server, action, timestamp) |
+| update_jobs | Jobs de mise a jour (status, output, timestamps) |
+| server_metrics | Metriques historiques (CPU, RAM, disque, reseau) |
+| alert_rules | Regles d'alerte sur seuils |
+| session_recordings | Enregistrements terminal (events JSONB timestamps) |
 
 Enums :
-  - role       : admin | operator | viewer
-  - os_type    : linux | windows
-  - cred_type  : ssh_password | ssh_key | winrm
-  - job_status : pending | running | completed | failed | cancelled
 
-Note : pas de password_hash — l'authentification est déléguée
-à Microsoft Entra ID. La table users stocke le profil synchronisé
-au premier login via le champ entra_object_id (unique).
+- role : admin, operator, viewer
+- os_type : linux, windows
+- credential_type : ssh_password, ssh_key, winrm, ephemeral_cert
+- server_status : online, offline, unknown
+- job_status : pending, running, completed, failed, cancelled
+
+## 7. Securite en Detail
+
+### Authentification Entra ID
+
+- Frontend : MSAL.js avec Authorization Code + PKCE (SPA flow)
+- Backend : validation JWT via JWKS (cles publiques Microsoft)
+- Support audiences : `api://<client_id>` et `<client_id>` brut
+- Compatibilite issuer v1 et v2
+- Premier utilisateur auto-promu admin
+
+### Bastion SSH
+
+- Mini-CA Ed25519 persistee dans `data/ca/` (exclue du git)
+- Certificats signes via `ssh-keygen -s` (pas l'API asyncssh, plus fiable)
+- Duree configurable de 5 minutes a 24 heures
+- Certificat genere a chaque connexion, nettoye apres usage
+- Le serveur cible doit avoir `TrustedUserCAKeys` dans sshd_config
+
+### MFA par Session
+
+- Chaque ouverture de terminal declenche `acquireTokenPopup` avec `prompt: "login"`
+- Force une re-authentification complete via Entra ID
+- Si Conditional Access configure avec "Every time" → MFA a chaque terminal
+- Modale de confirmation cote UI avant le popup
+
+### Protection des Commandes
+
+Blocklist regex sur le endpoint `/execute` :
+
+- `rm -rf /`, `mkfs.*`, `dd of=/dev/sd*`
+- Fork bomb : `:(){ :|:& };`
+- `shutdown`, `reboot`, `halt`, `poweroff`, `init 0`
+- `wget|sh`, `curl|sh`, `curl|bash`
+- `chmod 777 /`, `> /dev/sd*`
+
+### Chiffrement
+
+- Credentials serveur : AES-256-GCM avec nonce aleatoire 12 bytes
+- Cle de chiffrement dans `.env` (CREDENTIAL_ENCRYPTION_KEY)
+- CA private key : fichier avec permissions 600
+
+## 8. Deploiement
+
+### Dev local
+
+```bash
+docker-compose up -d db redis    # BDD + Redis
+cd backend && .venv/bin/uvicorn app.main:app --reload
+cd frontend && npm run dev
 ```
 
----
+### Production
 
-## 7. Sécurité
-
-- **Transport** : HTTPS obligatoire (TLS 1.3)
-- **Authentification** : Microsoft Entra ID (OAuth2 / OIDC), tokens validés via JWKS
-- **Autorisation** : RBAC (Admin / Opérateur / Lecteur), rôles en BDD locale
-- **Credentials serveur** : chiffrés en BDD (AES-256-GCM), jamais en clair
-- **Audit** : toutes les actions loguées avec user, timestamp, IP source
-- **Input** : validation stricte de toutes les entrées (Pydantic)
-- **Rate limiting** : protection contre le brute force
-- **CORS** : configuré strictement (domaine de l'app uniquement)
-- **CSP** : Content Security Policy en place
-- **Secrets** : variables d'environnement, jamais dans le code (tenant_id, client_id, clé AES)
-
----
-
-## 8. Feuille de Route (Phases)
-
-### Phase 1 — Fondations (Sprint 1-2)
-
-- [ ] Setup projet (structure, Docker Compose, .env)
-- [ ] Backend : modèles BDD (SQLAlchemy), migrations (Alembic)
-- [ ] Backend : middleware auth Entra ID (validation token JWKS)
-- [ ] Frontend : scaffold React + Vite, routing, layout Shadcn/ui
-- [ ] Frontend : intégration MSAL.js (login / logout / token)
-- [ ] API : CRUD serveurs + gestion credentials (chiffrés)
-- [ ] Synchronisation profil Entra → table users au premier login
-
-### Phase 2 — Connectivité (Sprint 3-4)
-- [ ] Connexion SSH (Linux) via asyncssh
-- [ ] Connexion WinRM (Windows) via pywinrm
-- [ ] Test de connectivité depuis l'UI
-- [ ] Exécution de commandes simples
-
-### Phase 3 — Terminal Interactif (Sprint 5-6)
-- [ ] WebSocket backend
-- [ ] Intégration xterm.js frontend
-- [ ] Streaming temps réel de la sortie
-- [ ] Multi-onglets terminal
-
-### Phase 4 — Gestion des Mises à Jour (Sprint 7-8)
-- [ ] Détection des updates Linux (apt/yum/dnf)
-- [ ] Détection des updates Windows (PowerShell)
-- [ ] Application des mises à jour
-- [ ] Planification et rapports
-
-### Phase 5 — Monitoring & Dashboard (Sprint 9-10)
-- [ ] Collecte métriques (CPU, RAM, disque)
-- [ ] Dashboard temps réel
-- [ ] Alertes et notifications
-- [ ] Graphiques historiques
-
-### Phase 6 — Production (Sprint 11-12)
-- [ ] Tests E2E complets
-- [ ] Documentation utilisateur
-- [ ] Hardening sécurité
-- [ ] Déploiement production
-
----
-
-## 9. Arborescence Projet (Cible)
-
+```bash
+docker-compose -f docker-compose.prod.yml up -d
 ```
-srv_gest/
-├── backend/
-│   ├── app/
-│   │   ├── api/              # Routes FastAPI
-│   │   │   ├── auth.py
-│   │   │   ├── servers.py
-│   │   │   ├── commands.py
-│   │   │   ├── updates.py
-│   │   │   └── users.py
-│   │   ├── core/             # Configuration, sécurité
-│   │   │   ├── config.py
-│   │   │   ├── security.py
-│   │   │   └── database.py
-│   │   ├── models/           # Modèles SQLAlchemy
-│   │   ├── schemas/          # Schémas Pydantic
-│   │   ├── services/         # Logique métier
-│   │   │   ├── ssh_service.py
-│   │   │   ├── winrm_service.py
-│   │   │   ├── update_service.py
-│   │   │   └── monitoring_service.py
-│   │   ├── websocket/        # Gestionnaire WebSocket
-│   │   └── main.py
-│   ├── alembic/              # Migrations BDD
-│   ├── tests/
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   └── App.tsx
-│   ├── package.json
-│   └── Dockerfile
-├── docker-compose.yml
-├── docs/
-│   └── architecture.md
-├── CLAUDE.md
-└── README.md
-```
+
+- Frontend : nginx (build React) avec proxy API/WS
+- Backend : Python slim avec user non-root
+- PostgreSQL + Redis sans ports exposes
+- Health checks sur tous les services

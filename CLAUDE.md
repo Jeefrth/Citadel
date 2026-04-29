@@ -2,127 +2,48 @@
 
 ## Projet
 
-**srv_gest** — Application web de gestion centralisée de serveurs Windows et Linux.
+**srv_gest** — Application web de gestion centralisée de serveurs Windows et Linux avec bastion SSH sécurisé.
 
 - Dépôt GitLab : `https://gitlab.qiminfo.net/jean-francois.reithler/srv_gest.git`
 - Branche principale : `main`
 - Chef de projet : Claude (assistant IA)
 - Développeur : Jean-François Reithler
 
-## Objectifs
-
-- Gérer un inventaire de serveurs (Windows / Linux)
-- Exécuter des commandes à distance (PowerShell / Bash) via terminal web interactif
-- Gérer les mises à jour système (Windows Update / apt / yum / dnf)
-- Configurer des paramètres serveur à distance
-- Superviser l'état des serveurs en temps réel (dashboard)
-
-## Décisions Validées
-
-- **Stack** : React + TypeScript (frontend), FastAPI + Python (backend) — validé
-- **BDD** : PostgreSQL — validé
-- **Auth** : Microsoft Entra ID (App Registration, OAuth2/OIDC, MSAL.js) — validé
-- **Déploiement** : interne QIMinfo initialement, VM Azure en cible finale — validé
-
 ## Stack Technique
 
-| Couche       | Technologie                    |
-|-------------|--------------------------------|
-| Frontend    | React + TypeScript + Vite      |
-| UI Kit      | Shadcn/ui + Tailwind CSS       |
-| Backend     | Python + FastAPI               |
-| BDD         | PostgreSQL                     |
-| Cache/Queue | Redis                          |
-| SSH         | asyncssh                       |
-| WinRM       | pywinrm                        |
-| WebSocket   | FastAPI WebSocket              |
-| Auth Front  | MSAL.js (@azure/msal-browser)  |
-| Auth Back   | python-jose + JWKS (Entra ID)  |
-| Container   | Docker + Docker Compose        |
-| Cloud       | Azure VM (cible production)    |
+| Couche | Technologie |
+|--------|-------------|
+| Frontend | React 18 + TypeScript + Vite |
+| UI Kit | Shadcn/ui + Tailwind CSS |
+| Terminal | xterm.js + WebSocket |
+| Backend | Python 3.12+ + FastAPI |
+| BDD | PostgreSQL 16 |
+| Cache | Redis 7 |
+| SSH | asyncssh + ssh-keygen (certificats éphémères) |
+| WinRM | pywinrm (NTLM) |
+| Auth | Microsoft Entra ID (MSAL.js + JWKS) |
+| CA | Mini-CA Ed25519 via ssh-keygen |
+| Container | Docker + Docker Compose |
+| Cloud | Azure VM (cible production) |
 
 ## Documentation
 
-- Architecture, schémas et feuille de route : `docs/architecture.md`
-- Schémas Excalidraw :
-  - `docs/01-architecture-generale.excalidraw`
-  - `docs/02-flux-auth-entra.excalidraw`
-  - `docs/03-modele-donnees.excalidraw`
+- Architecture et schémas : `docs/architecture.md`
+- Schémas Excalidraw : `docs/01-*.excalidraw`, `docs/02-*.excalidraw`, `docs/03-*.excalidraw`
+- README complet : `README.md`
 
-## Phase actuelle
+## Historique des phases
 
-**Phase 0 — Cadrage projet** (terminé)
-
-**Phase 1 — Fondations** (terminé)
-
-- Structure projet (backend/frontend/docker-compose)
-- Backend FastAPI : modèles SQLAlchemy (6 tables), Alembic, config
-- Auth : middleware Entra ID (JWKS validation), sync profil, RBAC (admin/operator/viewer)
-- API REST : CRUD serveurs, groups, credentials (chiffrés AES-256-GCM), audit logging
-- Frontend React : Vite + TS, MSAL.js (login/logout), routing, layout sidebar
-- Pages : Dashboard, Serveurs (liste), Terminal (placeholder), Updates (placeholder), Audit (placeholder)
-- Docker Compose : PostgreSQL 16, Redis 7, backend, frontend
-- Sécurité : chiffrement credentials, .env.example, .gitignore
-
-**Phase 2 — Connectivité SSH / WinRM** (terminé)
-
-- Service SSH : asyncssh — connexion, test, exécution commandes, infos système Linux
-- Service WinRM : pywinrm — connexion NTLM, test, exécution PowerShell, infos système Windows
-- Connection Manager : dispatcher auto SSH/WinRM selon os_type, mise à jour statut serveur
-- API : POST /servers/{id}/test-connection, POST /servers/{id}/execute, GET /servers/{id}/info
-- Frontend : boutons test connexion / infos / exécuter par serveur, modales commande et infos système
-- Audit : toutes les commandes exécutées sont loguées
-
-**Phase 3 — Terminal Interactif** (terminé)
-
-- Backend WebSocket : endpoint `/ws/terminal/{server_id}`, auth par token, protocole JSON (auth/input/output/resize)
-- Session Manager : gestion des sessions SSH PTY persistantes (create, read, write, resize, close)
-- Composant Terminal : xterm.js avec thème Tokyo Night, base64 bidirectionnel, resize dynamique
-- Page Terminal multi-onglets : sélecteur de serveur, onglets avec indicateur connexion, fermeture individuelle
-- Proxy WebSocket Vite pour dev
-- Audit : ouverture/fermeture de session terminal loguées
-- Note : terminal interactif SSH (Linux), Windows en mode commande uniquement pour l'instant
-
-**Phase 4 — Gestion des Mises à Jour** (terminé)
-
-- Update service Linux : détection auto apt/dnf/yum, scan packages, classification sévérité, application MAJ
-- Update service Windows : scan via COM Windows Update, détection sévérité MSRC, application via PowerShell
-- API : GET /servers/{id}/updates (scan), POST /servers/{id}/updates/apply, GET /updates/jobs, GET /updates/compliance
-- Schéma UpdateJob en BDD : suivi des jobs (pending/running/completed/failed)
-- Frontend complet : cartes résumé (scannés, MAJ dispo, sécurité, conformité), scan individuel/global, liste packages dépliable avec sévérité, application MAJ, historique des jobs
-- Audit : scans et applications loguées
-
-**Phase 5 — Monitoring & Dashboard** (terminé)
-
-- Monitoring service : collecte CPU, RAM, disque, réseau, uptime, processus via SSH (Linux) et PowerShell (Windows)
-- Modèle ServerMetric en BDD : historique des métriques avec timestamp, nettoyage automatique configurable
-- Modèle AlertRule : règles d'alerte sur seuils (CPU > 90%, RAM > 85%, etc.) par serveur ou global
-- API : POST /servers/{id}/metrics (collect), GET /metrics/latest, GET /metrics/history, GET /dashboard/summary, CRUD alert rules, cleanup
-- Dashboard enrichi : 4 cartes résumé (serveurs, CPU moyen, RAM moyen, alertes), cartes serveur avec barres de progression CPU/RAM/disque, alertes visuelles
-- Page détail serveur : métriques temps réel, graphiques sparkline SVG (historique 24h), infos système, réseau, actions rapides
-- Composant Sparkline SVG léger (sans dépendance chart)
-
-**Phase 6 — Production** (terminé)
-
-- Dockerfiles multi-stage : backend (python slim + user non-root), frontend (build + nginx)
-- Dockerfile.dev séparés pour le développement (hot-reload)
-- docker-compose.prod.yml : config production sans ports exposés inutiles, health checks
-- nginx.conf : SPA fallback, proxy API/WS, headers sécurité (CSP, X-Frame, X-Content-Type), gzip, cache assets
-- Tests : pytest + pytest-asyncio — tests chiffrement (roundtrip, tampering, unicode), schemas Pydantic, API health + auth guards
-- Middleware sécurité : rate limiting (200 req/min par IP), security headers, request logging structuré
-- Swagger/ReDoc déplacés sous /api/docs et /api/redoc
-- Mode dev frontend (VITE_DEV_MODE) pour tester sans Entra ID
-
-**Sprint A — Bastion : Session Recording** (terminé)
-
-- Modèle SessionRecording : events JSONB timestampés (input/output base64), durée, taille
-- WebSocket terminal enrichi : enregistre tous les I/O en temps réel, sauvegarde en BDD à la fermeture
-- API sessions : GET /sessions (liste), GET /sessions/{id} (détail + events), DELETE /sessions/{id}
-- Page Sessions dans l'UI : liste des enregistrements (serveur, user, durée, events, taille)
-- Player de replay : xterm.js en lecture seule, play/pause, reset, vitesse 1x/2x/5x/10x, barre de progression
-- Navigation : "Sessions" ajouté dans la sidebar
-
-**En cours : Sprint B — Mini-CA + certificats SSH éphémères**
+- **Phase 0** : Cadrage, architecture, modèle de données, schémas Excalidraw
+- **Phase 1** : Fondations — FastAPI, SQLAlchemy, Alembic, React+Vite, MSAL.js, Docker Compose
+- **Phase 2** : Connectivité — SSH (asyncssh), WinRM (pywinrm), test connexion, exécution commandes
+- **Phase 3** : Terminal interactif — WebSocket, xterm.js, session manager, multi-onglets
+- **Phase 4** : Mises à jour — scan apt/dnf/yum + Windows Update, application, jobs, conformité
+- **Phase 5** : Monitoring — métriques CPU/RAM/disque, dashboard, sparklines, alertes sur seuils
+- **Phase 6** : Production — Dockerfiles multi-stage, nginx, tests pytest, rate limiting, security headers
+- **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
+- **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
+- **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
 
 ## Conventions
 
@@ -133,28 +54,28 @@
 - Schémas et documentation technique dans `docs/`
 - Sécurité : pas de secrets dans le code, credentials chiffrés en BDD
 - Variables sensibles dans `.env` (jamais commité)
+- Clé CA dans `data/ca/` (jamais commitée)
 
 ## Commandes utiles
 
 ```bash
-# Démarrage complet (PostgreSQL + Redis + backend + frontend)
+# Dev local (backend + frontend avec accès réseau LAN)
+docker-compose up -d db redis
+cd backend && .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cd frontend && npm run dev
+
+# Docker complet
 docker-compose up -d
 
-# Backend seul (dev)
-cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
+# Migrations
+cd backend && .venv/bin/python -m alembic upgrade head
 
-# Frontend seul (dev)
-cd frontend && npm install && npm run dev
+# Générer clé de chiffrement
+python3 -c "from cryptography.hazmat.primitives.ciphers.aead import AESGCM; import base64; print(base64.b64encode(AESGCM.generate_key(bit_length=256)).decode())"
 
-# Générer une clé de chiffrement (pour .env CREDENTIAL_ENCRYPTION_KEY)
-python -c "from app.core.security import generate_encryption_key; print(generate_encryption_key())"
+# Clé publique CA (pour setup serveurs)
+curl http://localhost:8000/api/ca/public-key
 
-# Créer une migration Alembic
-cd backend && alembic revision --autogenerate -m "description"
-
-# Appliquer les migrations
-cd backend && alembic upgrade head
-
-# Health check API
+# Health check
 curl http://localhost:8000/api/health
 ```

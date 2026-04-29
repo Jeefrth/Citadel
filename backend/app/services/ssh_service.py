@@ -31,27 +31,51 @@ async def _connect(
     username: str,
     password: bytes | None = None,
     ssh_key: bytes | None = None,
+    use_ephemeral_cert: bool = False,
+    cert_validity_minutes: int = 480,
 ) -> asyncssh.SSHClientConnection:
-    """Open an SSH connection to a Linux server."""
+    """Open an SSH connection to a Linux server.
+
+    Supports 3 auth methods (checked in order):
+    1. Ephemeral certificate (signed by Mini-CA)
+    2. SSH key (stored encrypted in DB)
+    3. Password (stored encrypted in DB)
+    """
     connect_kwargs: dict = {
         "host": host,
         "port": port,
         "username": username,
-        "known_hosts": None,  # TODO: implement known_hosts verification for production
+        "known_hosts": None,
     }
 
-    if ssh_key:
+    _cert_key_path = None  # Track for cleanup
+
+    if use_ephemeral_cert:
+        from app.services.ca_service import sign_user_certificate
+        key_path, cert_path = sign_user_certificate(
+            username=username,
+            validity_minutes=cert_validity_minutes,
+        )
+        _cert_key_path = key_path
+        connect_kwargs["client_keys"] = [key_path]
+    elif ssh_key:
         key_str = decrypt_value(ssh_key)
         connect_kwargs["client_keys"] = [asyncssh.import_private_key(key_str)]
     elif password:
         connect_kwargs["password"] = decrypt_value(password)
     else:
-        raise ValueError("No password or SSH key provided")
+        raise ValueError("No password, SSH key, or ephemeral cert configured")
 
-    return await asyncio.wait_for(
-        asyncssh.connect(**connect_kwargs),
-        timeout=10,
-    )
+    try:
+        conn = await asyncio.wait_for(
+            asyncssh.connect(**connect_kwargs),
+            timeout=10,
+        )
+        return conn
+    finally:
+        if _cert_key_path:
+            from app.services.ca_service import cleanup_cert_files
+            cleanup_cert_files(_cert_key_path)
 
 
 async def test_connection(
@@ -60,14 +84,19 @@ async def test_connection(
     username: str,
     password: bytes | None = None,
     ssh_key: bytes | None = None,
+    use_ephemeral_cert: bool = False,
+    cert_validity_minutes: int = 480,
 ) -> tuple[bool, str]:
     """Test SSH connectivity. Returns (success, message)."""
     try:
-        conn = await _connect(host, port, username, password, ssh_key)
+        conn = await _connect(host, port, username, password, ssh_key,
+                              use_ephemeral_cert=use_ephemeral_cert,
+                              cert_validity_minutes=cert_validity_minutes)
         result = await conn.run("echo ok", timeout=5)
         conn.close()
+        auth_method = "ephemeral cert" if use_ephemeral_cert else "password/key"
         if result.stdout.strip() == "ok":
-            return True, f"SSH connection successful to {host}:{port}"
+            return True, f"SSH connection successful to {host}:{port} ({auth_method})"
         return False, f"Unexpected response: {result.stdout}"
     except asyncio.TimeoutError:
         return False, f"Connection timed out to {host}:{port}"
@@ -87,9 +116,13 @@ async def execute_command(
     password: bytes | None = None,
     ssh_key: bytes | None = None,
     timeout: int = 30,
+    use_ephemeral_cert: bool = False,
+    cert_validity_minutes: int = 480,
 ) -> CommandResult:
     """Execute a command over SSH and return the result."""
-    conn = await _connect(host, port, username, password, ssh_key)
+    conn = await _connect(host, port, username, password, ssh_key,
+                          use_ephemeral_cert=use_ephemeral_cert,
+                          cert_validity_minutes=cert_validity_minutes)
     try:
         result = await conn.run(command, timeout=timeout)
         return CommandResult(
@@ -107,6 +140,8 @@ async def get_system_info(
     username: str,
     password: bytes | None = None,
     ssh_key: bytes | None = None,
+    use_ephemeral_cert: bool = False,
+    cert_validity_minutes: int = 480,
 ) -> SystemInfo:
     """Gather system information from a Linux server."""
     commands = {
@@ -120,7 +155,9 @@ async def get_system_info(
         "disk_usage": "df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'",
     }
 
-    conn = await _connect(host, port, username, password, ssh_key)
+    conn = await _connect(host, port, username, password, ssh_key,
+                          use_ephemeral_cert=use_ephemeral_cert,
+                          cert_validity_minutes=cert_validity_minutes)
     results = {}
     try:
         for key, cmd in commands.items():
