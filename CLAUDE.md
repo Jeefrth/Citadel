@@ -102,7 +102,18 @@
 - Page détail serveur : métriques temps réel, graphiques sparkline SVG (historique 24h), infos système, réseau, actions rapides
 - Composant Sparkline SVG léger (sans dépendance chart)
 
-**Prochaine étape : Phase 6 — Production**
+**Phase 6 — Production** (terminé)
+
+- Dockerfiles multi-stage : backend (python slim + user non-root), frontend (build + nginx)
+- Dockerfile.dev séparés pour le développement (hot-reload)
+- docker-compose.prod.yml : config production sans ports exposés inutiles, health checks
+- nginx.conf : SPA fallback, proxy API/WS, headers sécurité (CSP, X-Frame, X-Content-Type), gzip, cache assets
+- Tests : pytest + pytest-asyncio — tests chiffrement (roundtrip, tampering, unicode), schemas Pydantic, API health + auth guards
+- Middleware sécurité : rate limiting (200 req/min par IP), security headers, request logging structuré
+- Swagger/ReDoc déplacés sous /api/docs et /api/redoc
+- Mode dev frontend (VITE_DEV_MODE) pour tester sans Entra ID
+
+**Projet complet — toutes les phases terminées.**
 
 ## Conventions
 
