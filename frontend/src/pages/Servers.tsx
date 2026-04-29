@@ -77,6 +77,7 @@ export default function Servers() {
     username: "",
     password: "",
     ssh_key: "",
+    cert_validity_minutes: 480,
   });
   const [credLoading, setCredLoading] = useState(false);
   const [credError, setCredError] = useState<string | null>(null);
@@ -163,15 +164,20 @@ export default function Servers() {
     setCredLoading(true);
     setCredError(null);
     try {
-      const newCred = await api.post<CredentialData>("/api/servers/credentials/", {
+      const body: Record<string, unknown> = {
         name: credForm.name,
         type: credForm.type,
         username: credForm.username,
-        password: credForm.password || null,
-        ssh_key: credForm.ssh_key || null,
-      });
+      };
+      if (credForm.type === "ephemeral_cert") {
+        body.cert_validity_minutes = credForm.cert_validity_minutes;
+      } else {
+        body.password = credForm.password || null;
+        body.ssh_key = credForm.ssh_key || null;
+      }
+      const newCred = await api.post<CredentialData>("/api/servers/credentials/", body);
       setCredentials((prev) => [...prev, newCred]);
-      setCredForm({ name: "", type: "ssh_password", username: "", password: "", ssh_key: "" });
+      setCredForm({ name: "", type: "ssh_password", username: "", password: "", ssh_key: "", cert_validity_minutes: 480 });
       setShowCredModal(false);
     } catch (e: unknown) {
       setCredError(e instanceof Error ? e.message : "Erreur");
@@ -876,6 +882,7 @@ export default function Servers() {
                         <option value="ssh_password">SSH (mot de passe)</option>
                         <option value="ssh_key">SSH (clé privée)</option>
                         <option value="winrm">WinRM</option>
+                        <option value="ephemeral_cert">Certificat éphémère (CA)</option>
                       </select>
                     </div>
                   </div>
@@ -891,7 +898,7 @@ export default function Servers() {
                     />
                   </div>
 
-                  {credForm.type !== "ssh_key" && (
+                  {(credForm.type === "ssh_password" || credForm.type === "winrm") && (
                     <div>
                       <label className="block text-sm font-medium mb-1">Mot de passe</label>
                       <input
@@ -913,6 +920,60 @@ export default function Servers() {
                         rows={4}
                         className="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
                       />
+                    </div>
+                  )}
+
+                  {credForm.type === "ephemeral_cert" && (
+                    <div className="space-y-3">
+                      <div className="p-3 rounded-md bg-blue-50 border border-blue-200 text-sm text-blue-800">
+                        <p className="font-medium mb-1">Certificat SSH éphémère</p>
+                        <p className="text-xs">
+                          srv_gest signera un certificat SSH de courte durée à chaque connexion.
+                          Aucun mot de passe ni clé stockée. Le serveur cible doit faire confiance à la CA.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Durée du certificat
+                        </label>
+                        <select
+                          value={credForm.cert_validity_minutes || 480}
+                          onChange={(e) =>
+                            setCredForm({
+                              ...credForm,
+                              cert_validity_minutes: parseInt(e.target.value),
+                            })
+                          }
+                          className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <option value={5}>5 minutes</option>
+                          <option value={15}>15 minutes</option>
+                          <option value={30}>30 minutes</option>
+                          <option value={60}>1 heure</option>
+                          <option value={120}>2 heures</option>
+                          <option value={240}>4 heures</option>
+                          <option value={480}>8 heures (défaut)</option>
+                          <option value={720}>12 heures</option>
+                          <option value={1440}>24 heures</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Setup serveur cible
+                        </label>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Récupérez les instructions via l'API : GET /api/ca/setup-instructions?hostname=mon-serveur
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.open("/api/ca/setup-instructions?hostname=my-server", "_blank");
+                          }}
+                          className="text-xs text-primary hover:underline"
+                        >
+                          Voir les instructions de setup
+                        </button>
+                      </div>
                     </div>
                   )}
 

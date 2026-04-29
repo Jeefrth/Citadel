@@ -40,6 +40,8 @@ class SessionManager:
         username: str,
         password: bytes | None = None,
         ssh_key: bytes | None = None,
+        use_ephemeral_cert: bool = False,
+        cert_validity_minutes: int = 480,
         term_type: str = "xterm-256color",
         cols: int = 80,
         rows: int = 24,
@@ -52,15 +54,30 @@ class SessionManager:
             "known_hosts": None,
         }
 
-        if ssh_key:
+        _cert_key_path = None
+
+        if use_ephemeral_cert:
+            from app.services.ca_service import sign_user_certificate
+            key_path, cert_path = sign_user_certificate(
+                username=username,
+                validity_minutes=cert_validity_minutes,
+            )
+            _cert_key_path = key_path
+            connect_kwargs["client_keys"] = [key_path]
+        elif ssh_key:
             key_str = decrypt_value(ssh_key)
             connect_kwargs["client_keys"] = [asyncssh.import_private_key(key_str)]
         elif password:
             connect_kwargs["password"] = decrypt_value(password)
         else:
-            raise ValueError("No password or SSH key provided")
+            raise ValueError("No password, SSH key, or ephemeral cert configured")
 
-        conn = await asyncio.wait_for(asyncssh.connect(**connect_kwargs), timeout=10)
+        try:
+            conn = await asyncio.wait_for(asyncssh.connect(**connect_kwargs), timeout=10)
+        finally:
+            if _cert_key_path:
+                from app.services.ca_service import cleanup_cert_files
+                cleanup_cert_files(_cert_key_path)
 
         process = await conn.create_process(
             term_type=term_type,

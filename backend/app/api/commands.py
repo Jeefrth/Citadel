@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.audit import AuditLog
 from app.models.base import UserRole
+from app.core.command_filter import check_command
 from app.schemas.command import (
     CommandRequest,
     CommandResponse,
@@ -58,6 +59,11 @@ async def execute_command(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Execute a command on a remote server (SSH or PowerShell)."""
+    # Security: block dangerous commands
+    allowed, reason = check_command(body.command)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+
     try:
         result = await connection_manager.execute_command(
             str(server_id), body.command, db, timeout=body.timeout

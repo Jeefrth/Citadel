@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.server import Server
 from app.models.credential import Credential
-from app.models.base import OSType, ServerStatus
+from app.models.base import OSType, ServerStatus, CredentialType
 from app.services import ssh_service, winrm_service
 
 
@@ -75,6 +75,19 @@ def _get_port(server: Server) -> int:
     return server.winrm_port
 
 
+def _get_auth_kwargs(credential: Credential) -> dict:
+    """Build auth keyword arguments based on credential type."""
+    if credential.type == CredentialType.EPHEMERAL_CERT:
+        return {
+            "use_ephemeral_cert": True,
+            "cert_validity_minutes": credential.cert_validity_minutes or 480,
+        }
+    return {
+        "password": credential.encrypted_password,
+        "ssh_key": credential.encrypted_ssh_key,
+    }
+
+
 async def test_connection(
     server_id: str, db: AsyncSession
 ) -> ConnectionTestResult:
@@ -92,13 +105,14 @@ async def test_connection(
     service = _get_service(server)
     port = _get_port(server)
 
+    auth_kwargs = _get_auth_kwargs(credential)
+
     start = asyncio.get_event_loop().time()
     success, message = await service.test_connection(
         host=server.ip_address,
         port=port,
         username=credential.username,
-        password=credential.encrypted_password,
-        ssh_key=credential.encrypted_ssh_key,
+        **auth_kwargs,
     )
     elapsed = (asyncio.get_event_loop().time() - start) * 1000
 
@@ -129,14 +143,15 @@ async def execute_command(
     service = _get_service(server)
     port = _get_port(server)
 
+    auth_kwargs = _get_auth_kwargs(credential)
+
     result = await service.execute_command(
         host=server.ip_address,
         port=port,
         username=credential.username,
         command=command,
-        password=credential.encrypted_password,
-        ssh_key=credential.encrypted_ssh_key,
         timeout=timeout,
+        **auth_kwargs,
     )
 
     return CommandResult(
@@ -158,12 +173,13 @@ async def get_system_info(
     service = _get_service(server)
     port = _get_port(server)
 
+    auth_kwargs = _get_auth_kwargs(credential)
+
     info = await service.get_system_info(
         host=server.ip_address,
         port=port,
         username=credential.username,
-        password=credential.encrypted_password,
-        ssh_key=credential.encrypted_ssh_key,
+        **auth_kwargs,
     )
 
     return SystemInfo(

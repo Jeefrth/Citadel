@@ -64,12 +64,15 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
     """
     await websocket.accept()
 
-    # Step 1: Authenticate
+    # Step 1: Authenticate (longer timeout for forceRefresh token acquisition)
     try:
-        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=30)
         msg = json.loads(raw)
     except Exception:
-        await websocket.send_json({"type": "error", "message": "Authentication timeout"})
+        try:
+            await websocket.send_json({"type": "error", "message": "Authentication timeout"})
+        except Exception:
+            pass
         await websocket.close()
         return
 
@@ -88,6 +91,10 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                 await websocket.send_json({"type": "error", "message": "No token provided"})
                 await websocket.close()
                 return
+
+            # Note: per-session MFA is enforced via Entra ID Conditional Access policy
+            # Configure: Entra ID → Security → Conditional Access → require MFA for this app
+
             try:
                 claims = await _validate_token(token)
                 user = await _sync_user(claims, db)
@@ -121,6 +128,9 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         rows = msg.get("rows", 24)
 
         try:
+            from app.models.base import CredentialType
+            use_cert = credential.type == CredentialType.EPHEMERAL_CERT
+
             if server.os_type == OSType.LINUX:
                 session = await session_manager.create_ssh_session(
                     server_id=str(server.id),
@@ -128,8 +138,10 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                     host=server.ip_address,
                     port=server.ssh_port,
                     username=credential.username,
-                    password=credential.encrypted_password,
-                    ssh_key=credential.encrypted_ssh_key,
+                    password=credential.encrypted_password if not use_cert else None,
+                    ssh_key=credential.encrypted_ssh_key if not use_cert else None,
+                    use_ephemeral_cert=use_cert,
+                    cert_validity_minutes=credential.cert_validity_minutes or 480,
                     cols=cols,
                     rows=rows,
                 )
@@ -162,8 +174,26 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
     # Start recording
     recorder = SessionRecorder()
     stop_event = asyncio.Event()
+    last_activity = time.time()
+    IDLE_TIMEOUT = 1800  # 30 minutes
 
     await websocket.send_json({"type": "connected", "session_id": session.session_id})
+
+    # Idle timeout watchdog
+    async def _idle_watchdog():
+        nonlocal last_activity
+        while not stop_event.is_set():
+            await asyncio.sleep(30)
+            if time.time() - last_activity > IDLE_TIMEOUT:
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Session expired after {IDLE_TIMEOUT // 60} minutes of inactivity",
+                    })
+                except Exception:
+                    pass
+                stop_event.set()
+                break
 
     # Step 4: Bidirectional streaming with recording
     async def _read_from_server():
@@ -191,10 +221,12 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             stop_event.set()
 
     async def _read_from_client():
+        nonlocal last_activity
         try:
             while not stop_event.is_set():
                 raw = await websocket.receive_text()
                 msg = json.loads(raw)
+                last_activity = time.time()
 
                 if msg["type"] == "input":
                     data = base64.b64decode(msg["data"])
@@ -211,10 +243,11 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         finally:
             stop_event.set()
 
-    # Run both tasks, cancel survivors when one exits
+    # Run all tasks, cancel survivors when one exits
     tasks = [
         asyncio.create_task(_read_from_server()),
         asyncio.create_task(_read_from_client()),
+        asyncio.create_task(_idle_watchdog()),
     ]
 
     try:

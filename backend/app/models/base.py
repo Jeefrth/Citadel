@@ -35,6 +35,7 @@ class CredentialType(str, enum.Enum):
     SSH_PASSWORD = "ssh_password"
     SSH_KEY = "ssh_key"
     WINRM = "winrm"
+    EPHEMERAL_CERT = "ephemeral_cert"
 
 
 class ServerStatus(str, enum.Enum):
