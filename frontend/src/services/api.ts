@@ -1,13 +1,17 @@
 import { PublicClientApplication } from "@azure/msal-browser";
 import { loginRequest, apiConfig } from "./authConfig";
 
+const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
+
 let msalInstance: PublicClientApplication | null = null;
 
 export function setMsalInstance(instance: PublicClientApplication) {
   msalInstance = instance;
 }
 
-async function getToken(): Promise<string> {
+async function getToken(): Promise<string | null> {
+  if (DEV_MODE) return null;
+
   if (!msalInstance) throw new Error("MSAL not initialized");
 
   const accounts = msalInstance.getAllAccounts();
@@ -24,13 +28,18 @@ async function getToken(): Promise<string> {
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getToken();
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...options.headers as Record<string, string>,
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${apiConfig.baseUrl}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {

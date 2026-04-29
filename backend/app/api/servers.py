@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user, require_role
@@ -11,6 +11,8 @@ from app.models.user import User
 from app.models.server import Server, ServerGroup
 from app.models.credential import Credential
 from app.models.audit import AuditLog
+from app.models.update_job import UpdateJob
+from app.models.metric import ServerMetric
 from app.models.base import UserRole
 from app.schemas.server import (
     ServerCreate, ServerUpdate, ServerRead,
@@ -104,11 +106,10 @@ async def delete_server(
     if not server:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
 
-    db.add(AuditLog(
-        user_id=user.id,
-        server_id=server.id,
-        action="server.delete",
-    ))
+    # Clean up dependent records
+    await db.execute(sa_delete(ServerMetric).where(ServerMetric.server_id == server_id))
+    await db.execute(sa_delete(UpdateJob).where(UpdateJob.server_id == server_id))
+    await db.execute(sa_delete(AuditLog).where(AuditLog.server_id == server_id))
 
     await db.delete(server)
     await db.commit()
@@ -218,10 +219,12 @@ async def delete_credential(
     if not cred:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
 
-    db.add(AuditLog(
-        user_id=user.id,
-        action="credential.delete",
-    ))
+    # Unlink servers using this credential
+    servers_result = await db.execute(
+        select(Server).where(Server.credential_id == cred_id)
+    )
+    for srv in servers_result.scalars().all():
+        srv.credential_id = None
 
     await db.delete(cred)
     await db.commit()
