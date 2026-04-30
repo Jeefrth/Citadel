@@ -44,6 +44,12 @@ services:
     volumes:
       - ./backend:/app
 
+  guacd:
+    image: guacamole/guacd:latest
+    restart: unless-stopped
+    ports:
+      - "4822:4822"
+
   frontend:
     build:
       context: ./frontend
