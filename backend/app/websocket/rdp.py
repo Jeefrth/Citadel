@@ -9,7 +9,7 @@ import asyncio
 import socket
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
 from app.core.auth import _validate_token, _sync_user, _get_or_create_dev_user
@@ -108,7 +108,7 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
     sock.sendall(_guac_encode("size", str(width), str(height), str(dpi)))
     sock.sendall(_guac_encode("audio"))
     sock.sendall(_guac_encode("video"))
-    sock.sendall(_guac_encode("image"))
+    sock.sendall(_guac_encode("image", "image/png", "image/jpeg", "image/webp"))
 
     arg_values = [params.get(name, "") for name in arg_names]
     sock.sendall(_guac_encode("connect", *arg_values))
@@ -129,13 +129,7 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
 
 
 @router.websocket("/ws/rdp/{server_id}")
-async def rdp_websocket(
-    websocket: WebSocket,
-    server_id: str,
-    token: str = Query(default=""),
-    width: int = Query(default=1024),
-    height: int = Query(default=768),
-):
+async def rdp_websocket(websocket: WebSocket, server_id: str):
     """RDP session via pure Guacamole protocol over WebSocket.
 
     Auth via query params: ?token=xxx&width=1024&height=768
@@ -147,6 +141,14 @@ async def rdp_websocket(
         await websocket.accept(subprotocol="guacamole")
     else:
         await websocket.accept()
+
+    # Parse query params manually (avoid FastAPI Query() which can reject before accept)
+    query_string = websocket.scope.get("query_string", b"").decode().rstrip("?")
+    from urllib.parse import parse_qs
+    params = parse_qs(query_string)
+    token = params.get("token", [""])[0]
+    width = int(params.get("width", ["1024"])[0])
+    height = int(params.get("height", ["768"])[0])
 
     # Authenticate
     async with async_session() as db:
@@ -205,29 +207,13 @@ async def rdp_websocket(
 
     logger.info("RDP connected to %s:%d for user %s", rdp_host, rdp_port, rdp_user)
 
-    # Send the initial guacd response (ready instruction) to the client
-    try:
-        init_buf = b""
-        sock.settimeout(2)
-        try:
-            while True:
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                init_buf += chunk
-        except socket.timeout:
-            pass
-        if init_buf:
-            await websocket.send_text(init_buf.decode("utf-8", errors="replace"))
-    except Exception:
-        pass
-
     sock.settimeout(0.02)
 
     # Bidirectional proxy: WebSocket <-> guacd socket
     stop = asyncio.Event()
 
     async def _guacd_to_ws():
+        buf = b""
         try:
             while not stop.is_set():
                 try:
@@ -235,7 +221,14 @@ async def rdp_websocket(
                         None, lambda: sock.recv(65536)
                     )
                 except socket.timeout:
-                    await asyncio.sleep(0.01)
+                    # Flush any complete instructions in buffer
+                    if buf:
+                        last_semi = buf.rfind(b";")
+                        if last_semi >= 0:
+                            to_send = buf[:last_semi + 1]
+                            buf = buf[last_semi + 1:]
+                            await websocket.send_text(to_send.decode("utf-8", errors="replace"))
+                    await asyncio.sleep(0.005)
                     continue
                 except Exception:
                     break
@@ -243,7 +236,13 @@ async def rdp_websocket(
                 if not data:
                     break
 
-                await websocket.send_text(data.decode("utf-8", errors="replace"))
+                buf += data
+                # Send only complete instructions (up to last ';')
+                last_semi = buf.rfind(b";")
+                if last_semi >= 0:
+                    to_send = buf[:last_semi + 1]
+                    buf = buf[last_semi + 1:]
+                    await websocket.send_text(to_send.decode("utf-8", errors="replace"))
         except Exception:
             pass
         finally:
