@@ -1,79 +1,120 @@
-"""Security middleware: rate limiting, request logging, security headers."""
+"""Security middleware: rate limiting, request logging, security headers.
+
+Uses raw ASGI middleware (not BaseHTTPMiddleware) to avoid WebSocket issues.
+"""
 
 import time
 import logging
 from collections import defaultdict
 
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.requests import Request
+from starlette.responses import Response
 
 logger = logging.getLogger("citadel")
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses."""
+class SecurityHeadersMiddleware:
+    """Add security headers to all HTTP responses (not WebSocket)."""
 
-    async def dispatch(self, request: Request, call_next):
-        response: Response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        return response
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+                extra = [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"x-xss-protection", b"1; mode=block"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                    (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+                ]
+                existing = list(message.get("headers", []))
+                existing.extend(extra)
+                message["headers"] = existing
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Log all API requests with timing."""
+class RequestLoggingMiddleware:
+    """Log all HTTP API requests with timing (not WebSocket)."""
 
-    async def dispatch(self, request: Request, call_next):
-        start = time.time()
-        response: Response = await call_next(request)
-        elapsed = (time.time() - start) * 1000
+    def __init__(self, app: ASGIApp):
+        self.app = app
 
-        # Skip health checks from logs
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         if request.url.path == "/api/health":
-            return response
+            await self.app(scope, receive, send)
+            return
 
+        start = time.time()
+        status_code = 0
+
+        async def send_with_logging(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        await self.app(scope, receive, send_with_logging)
+
+        elapsed = (time.time() - start) * 1000
         client_ip = request.client.host if request.client else "unknown"
         logger.info(
             "request",
             extra={
                 "method": request.method,
                 "path": request.url.path,
-                "status": response.status_code,
+                "status": status_code,
                 "duration_ms": round(elapsed, 1),
                 "client_ip": client_ip,
             },
         )
-        return response
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory rate limiter per IP."""
+class RateLimitMiddleware:
+    """Simple in-memory rate limiter per IP (HTTP only, not WebSocket)."""
 
-    def __init__(self, app, max_requests: int = 100, window_seconds: int = 60):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp, max_requests: int = 200, window_seconds: int = 60):
+        self.app = app
         self.max_requests = max_requests
         self.window = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
-        # Clean old entries
         self._requests[client_ip] = [
             t for t in self._requests[client_ip] if t > now - self.window
         ]
 
         if len(self._requests[client_ip]) >= self.max_requests:
-            return Response(
+            response = Response(
                 content='{"detail":"Rate limit exceeded"}',
                 status_code=429,
                 media_type="application/json",
                 headers={"Retry-After": str(self.window)},
             )
+            await response(scope, receive, send)
+            return
 
         self._requests[client_ip].append(now)
-        return await call_next(request)
+        await self.app(scope, receive, send)

@@ -3,6 +3,7 @@ import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "@/services/authConfig";
 import { api } from "@/services/api";
 import Terminal from "@/components/Terminal";
+import RdpViewer from "@/components/RdpViewer";
 import {
   Terminal as TerminalIcon,
   Plus,
@@ -28,6 +29,7 @@ interface Tab {
   id: string;
   serverId: string;
   serverName: string;
+  protocol: "ssh" | "rdp";
   certDuration?: number;
   osType: string;
   connected: boolean;
@@ -95,6 +97,7 @@ export default function TerminalPage() {
         id,
         serverId: pendingServer.id,
         serverName: pendingServer.name,
+        protocol: pendingServer.os_type === "windows" ? "rdp" : "ssh",
         osType: pendingServer.os_type,
         certDuration: needsCert ? certDuration : undefined,
         connected: true,
@@ -223,13 +226,22 @@ export default function TerminalPage() {
               activeTab === tab.id ? "block" : "hidden"
             }`}
           >
-            <Terminal
-              serverId={tab.serverId}
-              serverName={tab.serverName}
-              getToken={getToken}
-              certDuration={tab.certDuration}
-              onDisconnected={() => handleDisconnected(tab.id)}
-            />
+            {tab.protocol === "rdp" ? (
+              <RdpViewer
+                serverId={tab.serverId}
+                serverName={tab.serverName}
+                getToken={getToken}
+                onDisconnected={() => handleDisconnected(tab.id)}
+              />
+            ) : (
+              <Terminal
+                serverId={tab.serverId}
+                serverName={tab.serverName}
+                getToken={getToken}
+                certDuration={tab.certDuration}
+                onDisconnected={() => handleDisconnected(tab.id)}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -279,7 +291,7 @@ export default function TerminalPage() {
               {windowsServers.length > 0 && (
                 <div>
                   <h4 className="text-xs font-medium text-muted-foreground uppercase mb-2">
-                    Windows (WinRM)
+                    Windows (RDP)
                   </h4>
                   <div className="space-y-1">
                     {windowsServers.map((srv) => (
@@ -287,7 +299,6 @@ export default function TerminalPage() {
                         key={srv.id}
                         onClick={() => requestTerminal(srv)}
                         className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent text-left text-sm"
-                        title="Terminal interactif non disponible pour Windows — utiliser l'exécution de commande"
                       >
                         <Server size={16} className="text-blue-500" />
                         <div>
@@ -296,8 +307,8 @@ export default function TerminalPage() {
                             {srv.ip_address} — {srv.hostname}
                           </p>
                         </div>
-                        <span className="ml-auto text-xs text-amber-500">
-                          Cmd only
+                        <span className="ml-auto text-xs text-blue-500 font-medium">
+                          RDP
                         </span>
                       </button>
                     ))}

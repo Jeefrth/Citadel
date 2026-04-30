@@ -10,7 +10,7 @@ from app.core.middleware import (
     RateLimitMiddleware,
 )
 from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin
-from app.websocket import terminal
+from app.websocket import terminal, rdp
 
 # Structured logging
 logging.basicConfig(
@@ -38,6 +38,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=r".*",  # Fallback for WebSocket connections
 )
 
 # Routers
@@ -51,6 +52,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(ca.router, prefix="/api/ca", tags=["ca"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(terminal.router, tags=["terminal"])
+app.include_router(rdp.router, tags=["rdp"])
 
 
 @app.get("/api/health")
