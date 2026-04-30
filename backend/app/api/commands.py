@@ -59,8 +59,8 @@ async def execute_command(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Execute a command on a remote server (SSH or PowerShell)."""
-    # Security: block dangerous commands
-    allowed, reason = check_command(body.command)
+    # Security: block dangerous commands (reads patterns from DB)
+    allowed, reason = await check_command(body.command, db)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
 

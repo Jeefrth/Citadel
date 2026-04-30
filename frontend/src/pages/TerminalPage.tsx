@@ -20,12 +20,15 @@ interface ServerData {
   os_type: "linux" | "windows";
   status: string;
   credential_id: string | null;
+  cert_auth_enabled: boolean;
+  ssh_username: string | null;
 }
 
 interface Tab {
   id: string;
   serverId: string;
   serverName: string;
+  certDuration?: number;
   osType: string;
   connected: boolean;
 }
@@ -41,6 +44,7 @@ export default function TerminalPage() {
 
   // MFA confirmation before terminal
   const [pendingServer, setPendingServer] = useState<ServerData | null>(null);
+  const [certDuration, setCertDuration] = useState(480);
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaError, setMfaError] = useState<string | null>(null);
 
@@ -63,6 +67,7 @@ export default function TerminalPage() {
 
   const requestTerminal = (srv: ServerData) => {
     setPendingServer(srv);
+    setCertDuration(480); // default 8h
     setMfaError(null);
     setShowServerPicker(false);
   };
@@ -85,11 +90,13 @@ export default function TerminalPage() {
 
       // MFA passed — open the terminal
       const id = `tab-${++tabCounter}`;
+      const needsCert = pendingServer.cert_auth_enabled && !pendingServer.credential_id;
       const tab: Tab = {
         id,
         serverId: pendingServer.id,
         serverName: pendingServer.name,
         osType: pendingServer.os_type,
+        certDuration: needsCert ? certDuration : undefined,
         connected: true,
       };
       setTabs((prev) => [...prev, tab]);
@@ -134,7 +141,7 @@ export default function TerminalPage() {
   };
 
   const linuxServers = servers.filter(
-    (s) => s.os_type === "linux" && s.credential_id
+    (s) => s.os_type === "linux" && (s.credential_id || s.cert_auth_enabled)
   );
   const windowsServers = servers.filter(
     (s) => s.os_type === "windows" && s.credential_id
@@ -220,6 +227,7 @@ export default function TerminalPage() {
               serverId={tab.serverId}
               serverName={tab.serverName}
               getToken={getToken}
+              certDuration={tab.certDuration}
               onDisconnected={() => handleDisconnected(tab.id)}
             />
           </div>
@@ -316,6 +324,31 @@ export default function TerminalPage() {
                   une authentification renforcée.
                 </p>
               </div>
+
+              {/* Duration picker for cert-enabled servers */}
+              {pendingServer.cert_auth_enabled && !pendingServer.credential_id && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Durée de la session</label>
+                  <select
+                    value={certDuration}
+                    onChange={(e) => setCertDuration(parseInt(e.target.value))}
+                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value={5}>5 minutes</option>
+                    <option value={15}>15 minutes</option>
+                    <option value={30}>30 minutes</option>
+                    <option value={60}>1 heure</option>
+                    <option value={120}>2 heures</option>
+                    <option value={240}>4 heures</option>
+                    <option value={480}>8 heures</option>
+                    <option value={720}>12 heures</option>
+                    <option value={1440}>24 heures</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Un certificat SSH sera généré pour cette durée.
+                  </p>
+                </div>
+              )}
 
               {mfaError && (
                 <div className="p-2 rounded bg-red-50 text-red-700 text-sm">

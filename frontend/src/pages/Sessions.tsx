@@ -276,6 +276,8 @@ export default function Sessions() {
     null
   );
   const [loadingReplay, setLoadingReplay] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api
@@ -302,8 +304,62 @@ export default function Sessions() {
     try {
       await api.delete(`/api/sessions/${id}`);
       setSessions((prev) => prev.filter((s) => s.id !== id));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     } catch {
       // silently fail
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === sessions.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(sessions.map((s) => s.id)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`Supprimer ${selected.size} enregistrement(s) ?`)) return;
+    setDeleting(true);
+    try {
+      await api.post("/api/sessions/bulk-delete", {
+        ids: Array.from(selected),
+      });
+      setSessions((prev) => prev.filter((s) => !selected.has(s.id)));
+      setSelected(new Set());
+    } catch {
+      // fallback
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (sessions.length === 0) return;
+    if (!confirm(`Supprimer TOUS les enregistrements (${sessions.length}) ?`)) return;
+    setDeleting(true);
+    try {
+      await api.post("/api/sessions/delete-all", {});
+      setSessions([]);
+      setSelected(new Set());
+    } catch {
+      // fallback
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -311,9 +367,35 @@ export default function Sessions() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">Sessions enregistrées</h2>
-        <span className="text-sm text-muted-foreground">
-          {sessions.length} enregistrement{sessions.length !== 1 ? "s" : ""}
-        </span>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-xs font-medium hover:bg-red-100 disabled:opacity-50"
+            >
+              {deleting ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              Supprimer la sélection ({selected.size})
+            </button>
+          )}
+          {sessions.length > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              disabled={deleting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-red-50 hover:text-red-700 hover:border-red-200 disabled:opacity-50 text-muted-foreground"
+            >
+              <Trash2 size={14} />
+              Tout supprimer
+            </button>
+          )}
+          <span className="text-sm text-muted-foreground ml-2">
+            {sessions.length} enregistrement{sessions.length !== 1 ? "s" : ""}
+          </span>
+        </div>
       </div>
 
       {loading && (
@@ -334,11 +416,28 @@ export default function Sessions() {
 
       {sessions.length > 0 && (
         <div className="space-y-2">
+          <label className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+            <input
+              type="checkbox"
+              checked={selected.size === sessions.length && sessions.length > 0}
+              onChange={toggleSelectAll}
+              className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            {selected.size === sessions.length ? "Tout désélectionner" : "Tout sélectionner"}
+          </label>
           {sessions.map((s) => (
             <div
               key={s.id}
-              className="bg-card border rounded-lg p-4 flex items-center gap-4 hover:border-primary/30 transition-colors"
+              className={`bg-card border rounded-lg p-4 flex items-center gap-4 transition-colors ${
+                selected.has(s.id) ? "border-primary/50 bg-primary/5" : "hover:border-primary/30"
+              }`}
             >
+              <input
+                type="checkbox"
+                checked={selected.has(s.id)}
+                onChange={() => toggleSelect(s.id)}
+                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+              />
               <Film size={20} className="text-primary shrink-0" />
 
               <div className="flex-1 min-w-0">

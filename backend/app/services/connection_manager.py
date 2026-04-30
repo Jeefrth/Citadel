@@ -75,17 +75,36 @@ def _get_port(server: Server) -> int:
     return server.winrm_port
 
 
-def _get_auth_kwargs(credential: Credential) -> dict:
-    """Build auth keyword arguments based on credential type."""
+def _get_auth_kwargs(credential: Credential | None, server: Server | None = None, cert_minutes: int | None = None) -> dict:
+    """Build auth keyword arguments based on credential type or server cert mode."""
+    # Auto cert mode: server has cert_auth_enabled, no credential needed
+    if credential is None and server and server.cert_auth_enabled:
+        return {
+            "use_ephemeral_cert": True,
+            "cert_validity_minutes": cert_minutes or 1,  # 1 min for commands, configurable for terminal
+        }
+
+    if credential is None:
+        raise ValueError("No credential or cert auth configured")
+
     if credential.type == CredentialType.EPHEMERAL_CERT:
         return {
             "use_ephemeral_cert": True,
-            "cert_validity_minutes": credential.cert_validity_minutes or 480,
+            "cert_validity_minutes": cert_minutes or credential.cert_validity_minutes or 480,
         }
     return {
         "password": credential.encrypted_password,
         "ssh_key": credential.encrypted_ssh_key,
     }
+
+
+def _get_username(server: Server, credential: Credential | None) -> str:
+    """Get SSH username from credential or server."""
+    if credential:
+        return credential.username
+    if server.ssh_username:
+        return server.ssh_username
+    raise ValueError("No username configured (set ssh_username on server or assign a credential)")
 
 
 async def test_connection(
@@ -94,24 +113,33 @@ async def test_connection(
     """Test connectivity to a server and update its status."""
     server, credential = await _get_server_with_credential(server_id, db)
 
-    if not credential:
+    if not credential and not server.cert_auth_enabled:
         return ConnectionTestResult(
             server_id=str(server.id),
             server_name=server.name,
             success=False,
-            message="No credential assigned to this server",
+            message="No credential assigned and cert auth not enabled",
+        )
+
+    try:
+        username = _get_username(server, credential)
+        auth_kwargs = _get_auth_kwargs(credential, server, cert_minutes=1)
+    except ValueError as e:
+        return ConnectionTestResult(
+            server_id=str(server.id),
+            server_name=server.name,
+            success=False,
+            message=str(e),
         )
 
     service = _get_service(server)
     port = _get_port(server)
 
-    auth_kwargs = _get_auth_kwargs(credential)
-
     start = asyncio.get_event_loop().time()
     success, message = await service.test_connection(
         host=server.ip_address,
         port=port,
-        username=credential.username,
+        username=username,
         **auth_kwargs,
     )
     elapsed = (asyncio.get_event_loop().time() - start) * 1000
@@ -137,18 +165,16 @@ async def execute_command(
     """Execute a command on a remote server."""
     server, credential = await _get_server_with_credential(server_id, db)
 
-    if not credential:
-        raise ValueError("No credential assigned to this server")
+    username = _get_username(server, credential)
+    auth_kwargs = _get_auth_kwargs(credential, server, cert_minutes=1)
 
     service = _get_service(server)
     port = _get_port(server)
 
-    auth_kwargs = _get_auth_kwargs(credential)
-
     result = await service.execute_command(
         host=server.ip_address,
         port=port,
-        username=credential.username,
+        username=username,
         command=command,
         timeout=timeout,
         **auth_kwargs,
@@ -167,18 +193,16 @@ async def get_system_info(
     """Get system information from a remote server."""
     server, credential = await _get_server_with_credential(server_id, db)
 
-    if not credential:
-        raise ValueError("No credential assigned to this server")
+    username = _get_username(server, credential)
+    auth_kwargs = _get_auth_kwargs(credential, server, cert_minutes=1)
 
     service = _get_service(server)
     port = _get_port(server)
 
-    auth_kwargs = _get_auth_kwargs(credential)
-
     info = await service.get_system_info(
         host=server.ip_address,
         port=port,
-        username=credential.username,
+        username=username,
         **auth_kwargs,
     )
 

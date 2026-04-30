@@ -9,7 +9,7 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin
 from app.websocket import terminal
 
 # Structured logging
@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 
 app = FastAPI(
-    title="srv_gest API",
+    title="Citadel API",
     description="API de gestion centralisée de serveurs Windows et Linux",
     version="0.1.0",
     docs_url="/api/docs",
@@ -49,6 +49,7 @@ app.include_router(updates.router, prefix="/api/servers", tags=["updates"])
 app.include_router(monitoring.router, prefix="/api", tags=["monitoring"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(ca.router, prefix="/api/ca", tags=["ca"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(terminal.router, tags=["terminal"])
 
 

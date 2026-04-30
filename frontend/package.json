@@ -1,5 +1,5 @@
 {
-  "name": "srv-gest-frontend",
+  "name": "citadel-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",

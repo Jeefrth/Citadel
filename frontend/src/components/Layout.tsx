@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Shield,
   Film,
+  Settings,
   LogOut,
   User,
 } from "lucide-react";
@@ -18,6 +19,7 @@ const navItems = [
   { to: "/sessions", icon: Film, label: "Sessions" },
   { to: "/updates", icon: RefreshCw, label: "Mises à jour" },
   { to: "/audit", icon: Shield, label: "Audit" },
+  { to: "/settings", icon: Settings, label: "Paramètres" },
 ];
 
 export default function Layout() {
@@ -33,7 +35,7 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className="w-64 border-r bg-card flex flex-col">
         <div className="p-6 border-b">
-          <h1 className="text-xl font-bold text-primary">srv_gest</h1>
+          <h1 className="text-xl font-bold text-primary">Citadel</h1>
           <p className="text-xs text-muted-foreground mt-1">
             Gestion de serveurs
           </p>

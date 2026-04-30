@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, IPvAnyAddress
+from pydantic import BaseModel
 
 from app.models.base import OSType, ServerStatus
 
@@ -17,6 +17,8 @@ class ServerCreate(BaseModel):
     tags: dict | None = None
     credential_id: uuid.UUID | None = None
     group_id: uuid.UUID | None = None
+    ssh_username: str | None = None
+    cert_auth_enabled: bool = False
 
 
 class ServerUpdate(BaseModel):
@@ -30,6 +32,8 @@ class ServerUpdate(BaseModel):
     tags: dict | None = None
     credential_id: uuid.UUID | None = None
     group_id: uuid.UUID | None = None
+    ssh_username: str | None = None
+    cert_auth_enabled: bool | None = None
 
 
 class ServerRead(BaseModel):
@@ -46,6 +50,8 @@ class ServerRead(BaseModel):
     tags: dict | None
     credential_id: uuid.UUID | None
     group_id: uuid.UUID | None
+    ssh_username: str | None
+    cert_auth_enabled: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}

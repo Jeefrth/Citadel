@@ -7,7 +7,7 @@ from collections import defaultdict
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-logger = logging.getLogger("srv_gest")
+logger = logging.getLogger("citadel")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
