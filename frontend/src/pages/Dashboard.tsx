@@ -134,7 +134,7 @@ export default function Dashboard() {
         </div>
         <div className="bg-card border rounded-lg p-8 text-center">
           <Activity size={48} className="mx-auto text-muted-foreground mb-4" />
-          <h3 className="font-semibold mb-2">Bienvenue dans srv_gest</h3>
+          <h3 className="font-semibold mb-2">Bienvenue dans Citadel</h3>
           <p className="text-sm text-muted-foreground mb-4">
             Connectez le backend et ajoutez des serveurs pour voir les métriques en temps réel.
           </p>

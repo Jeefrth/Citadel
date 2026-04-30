@@ -1,4 +1,4 @@
-# srv_gest
+# Citadel
 
 Application web de gestion centralisee de serveurs Windows et Linux avec bastion SSH securise.
 
@@ -61,8 +61,8 @@ Application web de gestion centralisee de serveurs Windows et Linux avec bastion
 ### 1. Cloner le depot
 
 ```bash
-git clone https://gitlab.qiminfo.net/jean-francois.reithler/srv_gest.git
-cd srv_gest
+git clone https://github.com/Jeefrth/Citadel.git
+cd Citadel
 ```
 
 ### 2. Configurer l'environnement
@@ -156,8 +156,8 @@ cd backend && .venv/bin/python -m alembic upgrade head
 curl http://localhost:8000/api/ca/public-key
 
 # Sur le serveur cible (en root) :
-echo '<cle_publique_ca>' | sudo tee /etc/ssh/srv_gest_ca.pub
-echo 'TrustedUserCAKeys /etc/ssh/srv_gest_ca.pub' | sudo tee -a /etc/ssh/sshd_config
+echo '<cle_publique_ca>' | sudo tee /etc/ssh/Citadel_ca.pub
+echo 'TrustedUserCAKeys /etc/ssh/Citadel_ca.pub' | sudo tee -a /etc/ssh/sshd_config
 sudo systemctl restart sshd
 ```
 
@@ -173,7 +173,7 @@ sudo systemctl restart sshd
 ## Architecture
 
 ```
-srv_gest/
+Citadel/
 ├── backend/
 │   ├── app/
 │   │   ├── api/           # Routes : auth, servers, commands, updates, monitoring, sessions, ca

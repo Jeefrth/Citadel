@@ -93,6 +93,8 @@ export default function Servers() {
     ssh_port: 22,
     winrm_port: 5985,
     credential_id: "" as string,
+    ssh_username: "",
+    cert_auth_enabled: false,
   });
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -291,6 +293,8 @@ export default function Servers() {
         ssh_port: addForm.ssh_port,
         winrm_port: addForm.winrm_port,
         credential_id: addForm.credential_id || null,
+        ssh_username: addForm.ssh_username || null,
+        cert_auth_enabled: addForm.cert_auth_enabled,
       });
       setServers((prev) => [...prev, newServer]);
       setShowAddModal(false);
@@ -747,6 +751,30 @@ export default function Servers() {
                     className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
+                {addForm.os_type === "linux" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">User SSH</label>
+                      <input
+                        type="text"
+                        value={addForm.ssh_username}
+                        onChange={(e) => setAddForm({ ...addForm, ssh_username: e.target.value })}
+                        placeholder="root"
+                        className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-6">
+                      <input
+                        type="checkbox"
+                        checked={addForm.cert_auth_enabled}
+                        onChange={(e) => setAddForm({ ...addForm, cert_auth_enabled: e.target.checked })}
+                        className="w-4 h-4 rounded"
+                      />
+                      <label className="text-sm">Cert auto (CA)</label>
+                    </div>
+                  </>
+                )}
+                {!addForm.cert_auth_enabled && (
                 <div className="col-span-2">
                   <label className="block text-sm font-medium mb-1">Credential</label>
                   <div className="flex gap-2">
@@ -772,7 +800,18 @@ export default function Servers() {
                     </button>
                   </div>
                 </div>
+                )}
               </div>
+
+              {addForm.cert_auth_enabled && (
+                <div className="p-3 rounded bg-blue-50 border border-blue-200 text-sm text-blue-800">
+                  <p className="font-medium">Mode certificat automatique</p>
+                  <p className="text-xs mt-1">
+                    Pas de credential nécessaire. Un certificat SSH éphémère sera généré à chaque connexion.
+                    Le serveur doit avoir la clé CA dans sshd_config.
+                  </p>
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -928,7 +967,7 @@ export default function Servers() {
                       <div className="p-3 rounded-md bg-blue-50 border border-blue-200 text-sm text-blue-800">
                         <p className="font-medium mb-1">Certificat SSH éphémère</p>
                         <p className="text-xs">
-                          srv_gest signera un certificat SSH de courte durée à chaque connexion.
+                          Citadel signera un certificat SSH de courte durée à chaque connexion.
                           Aucun mot de passe ni clé stockée. Le serveur cible doit faire confiance à la CA.
                         </p>
                       </div>

@@ -67,3 +67,35 @@ async def delete_session(
         )
     await db.delete(recording)
     await db.commit()
+
+
+from pydantic import BaseModel
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[uuid.UUID]
+
+
+@router.post("/bulk-delete", status_code=status.HTTP_200_OK)
+async def bulk_delete_sessions(
+    body: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    """Delete multiple session recordings at once."""
+    result = await db.execute(
+        sa_delete(SessionRecording).where(SessionRecording.id.in_(body.ids))
+    )
+    await db.commit()
+    return {"deleted": result.rowcount}
+
+
+@router.post("/delete-all", status_code=status.HTTP_200_OK)
+async def delete_all_sessions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    """Delete all session recordings."""
+    result = await db.execute(sa_delete(SessionRecording))
+    await db.commit()
+    return {"deleted": result.rowcount}

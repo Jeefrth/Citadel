@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Enum, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Boolean, Enum, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,10 @@ class Server(UUIDMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     tags: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+
+    # Ephemeral cert mode: connect with auto-generated cert (no credential needed)
+    ssh_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cert_auth_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     credential_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("credentials.id"), nullable=True

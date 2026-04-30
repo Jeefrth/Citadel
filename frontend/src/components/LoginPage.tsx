@@ -17,7 +17,7 @@ export default function LoginPage() {
             <Server size={28} className="text-primary" />
           </div>
           <div className="text-left">
-            <h1 className="text-3xl font-bold">srv_gest</h1>
+            <h1 className="text-3xl font-bold">Citadel</h1>
             <p className="text-muted-foreground">
               Gestion centralisée de serveurs
             </p>

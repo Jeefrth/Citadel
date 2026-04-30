@@ -118,18 +118,36 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             )
             credential = cred_result.scalar_one_or_none()
 
-        if not credential:
-            await websocket.send_json({"type": "error", "message": "No credential for this server"})
+        if not credential and not server.cert_auth_enabled:
+            await websocket.send_json({"type": "error", "message": "No credential and cert auth not enabled"})
+            await websocket.close()
+            return
+
+        # Determine username
+        if credential:
+            ssh_user = credential.username
+        elif server.ssh_username:
+            ssh_user = server.ssh_username
+        else:
+            await websocket.send_json({"type": "error", "message": "No SSH username configured"})
             await websocket.close()
             return
 
         # Step 3: Open interactive session
         cols = msg.get("cols", 80)
         rows = msg.get("rows", 24)
+        # Client can request a specific cert duration (minutes)
+        requested_duration = msg.get("cert_duration", None)
 
         try:
             from app.models.base import CredentialType
-            use_cert = credential.type == CredentialType.EPHEMERAL_CERT
+
+            # Determine auth mode
+            use_cert = server.cert_auth_enabled and not credential
+            if credential and credential.type == CredentialType.EPHEMERAL_CERT:
+                use_cert = True
+
+            cert_minutes = requested_duration or (credential.cert_validity_minutes if credential and use_cert else None) or 480
 
             if server.os_type == OSType.LINUX:
                 session = await session_manager.create_ssh_session(
@@ -137,11 +155,11 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                     user_id=str(user.id),
                     host=server.ip_address,
                     port=server.ssh_port,
-                    username=credential.username,
-                    password=credential.encrypted_password if not use_cert else None,
-                    ssh_key=credential.encrypted_ssh_key if not use_cert else None,
+                    username=ssh_user,
+                    password=credential.encrypted_password if credential and not use_cert else None,
+                    ssh_key=credential.encrypted_ssh_key if credential and not use_cert else None,
                     use_ephemeral_cert=use_cert,
-                    cert_validity_minutes=credential.cert_validity_minutes or 480,
+                    cert_validity_minutes=cert_minutes,
                     cols=cols,
                     rows=rows,
                 )
@@ -163,11 +181,17 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         user_id = user.id
         srv_id = server.id
 
+        # Compute max session duration based on cert validity
+        cert_max_seconds = None
+        if use_cert:
+            cert_max_seconds = cert_minutes * 60
+
         # Log session start
         db.add(AuditLog(
             user_id=user_id,
             server_id=srv_id,
             action="terminal.open",
+            result=f"cert={cert_max_seconds}s" if cert_max_seconds else "password/key",
         ))
         await db.commit()
 
@@ -175,15 +199,50 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
     recorder = SessionRecorder()
     stop_event = asyncio.Event()
     last_activity = time.time()
+    session_start = time.time()
     IDLE_TIMEOUT = 1800  # 30 minutes
 
     await websocket.send_json({"type": "connected", "session_id": session.session_id})
 
-    # Idle timeout watchdog
+    # Session timeout watchdog (idle + cert expiry)
     async def _idle_watchdog():
         nonlocal last_activity
         while not stop_event.is_set():
-            await asyncio.sleep(30)
+            await asyncio.sleep(10)
+
+            # Check cert expiry (hard limit)
+            if cert_max_seconds:
+                elapsed = time.time() - session_start
+                remaining = cert_max_seconds - elapsed
+                if remaining <= 0:
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"Certificate expired — session closed after {cert_max_seconds // 60} minutes",
+                        })
+                    except Exception:
+                        pass
+                    stop_event.set()
+                    break
+                # Warn before expiry
+                if remaining <= 300 and remaining > 290:
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"Warning: session expires in 5 minutes",
+                        })
+                    except Exception:
+                        pass
+                elif remaining <= 60 and remaining > 50:
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"Warning: session expires in {int(remaining)} seconds",
+                        })
+                    except Exception:
+                        pass
+
+            # Check idle timeout
             if time.time() - last_activity > IDLE_TIMEOUT:
                 try:
                     await websocket.send_json({

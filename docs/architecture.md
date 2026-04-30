@@ -1,4 +1,4 @@
-# srv_gest — Documentation Architecture
+# Citadel — Documentation Architecture
 
 > Schemas Excalidraw (ouvrir avec excalidraw.com ou extension VS Code) :
 >
@@ -8,7 +8,7 @@
 
 ## 1. Vision
 
-srv_gest est une application web de gestion centralisee de serveurs Windows et Linux
+Citadel est une application web de gestion centralisee de serveurs Windows et Linux
 avec bastion SSH securise integre. Elle permet de gerer un inventaire de serveurs,
 executer des commandes a distance, gerer les mises a jour, monitorer les metriques,
 et se connecter en terminal interactif avec authentification renforcee (MFA)

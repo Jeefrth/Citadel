@@ -2,9 +2,9 @@
 
 ## Projet
 
-**srv_gest** — Application web de gestion centralisée de serveurs Windows et Linux avec bastion SSH sécurisé.
+**Citadel** — Application web de gestion centralisée de serveurs Windows et Linux avec bastion SSH sécurisé.
 
-- Dépôt GitLab : `https://gitlab.qiminfo.net/jean-francois.reithler/srv_gest.git`
+- Dépôt GitHub : `https://github.com/Jeefrth/Citadel.git`
 - Branche principale : `main`
 - Chef de projet : Claude (assistant IA)
 - Développeur : Jean-François Reithler

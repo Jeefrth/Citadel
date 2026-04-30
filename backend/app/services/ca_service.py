@@ -14,7 +14,7 @@ from pathlib import Path
 
 from app.core.config import settings
 
-logger = logging.getLogger("srv_gest.ca")
+logger = logging.getLogger("citadel.ca")
 
 # CA key storage directory — persistent, NOT /tmp
 _default_ca_dir = Path(__file__).resolve().parents[3] / "data" / "ca"
@@ -34,7 +34,7 @@ def _generate_ca_key():
     logger.info("Generating new CA key pair at %s", CA_DIR)
 
     subprocess.run(
-        ["ssh-keygen", "-t", "ed25519", "-f", str(CA_PRIVATE_KEY_PATH), "-N", "", "-q", "-C", "srv_gest-ca"],
+        ["ssh-keygen", "-t", "ed25519", "-f", str(CA_PRIVATE_KEY_PATH), "-N", "", "-q", "-C", "citadel-ca"],
         check=True,
     )
     CA_PRIVATE_KEY_PATH.chmod(0o600)
@@ -74,7 +74,7 @@ def sign_user_certificate(
         principals = [username]
 
     # Create temp directory for the ephemeral key pair
-    tmpdir = tempfile.mkdtemp(prefix="srv_gest_cert_")
+    tmpdir = tempfile.mkdtemp(prefix="citadel_cert_")
     key_path = os.path.join(tmpdir, "ephemeral")
     cert_path = key_path + "-cert.pub"
 
@@ -96,7 +96,7 @@ def sign_user_certificate(
             validity_str = f"+{hours}h{remaining_min}m"
 
     # Sign with CA
-    key_id = f"srv_gest-{username}-{int(time.time())}"
+    key_id = f"citadel-{username}-{int(time.time())}"
     subprocess.run(
         [
             "ssh-keygen", "-s", str(CA_PRIVATE_KEY_PATH),
@@ -131,12 +131,12 @@ def get_setup_instructions(server_hostname: str) -> str:
 # Run these commands as root on the target server:
 
 # 1. Add the CA public key
-echo '{pub_key}' | sudo tee /etc/ssh/srv_gest_ca.pub
+echo '{pub_key}' | sudo tee /etc/ssh/citadel_ca.pub
 
 # 2. Configure sshd to trust it
-echo 'TrustedUserCAKeys /etc/ssh/srv_gest_ca.pub' | sudo tee -a /etc/ssh/sshd_config
+echo 'TrustedUserCAKeys /etc/ssh/citadel_ca.pub' | sudo tee -a /etc/ssh/sshd_config
 
 # 3. Restart sshd
 sudo systemctl restart sshd
 
-# Done! srv_gest can now authenticate via ephemeral certificates."""
+# Done! citadel can now authenticate via ephemeral certificates."""

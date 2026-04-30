@@ -8,6 +8,7 @@ interface TerminalProps {
   serverId: string;
   serverName: string;
   getToken: () => Promise<string>;
+  certDuration?: number; // minutes, passed to backend for cert signing
   wsBaseUrl?: string;
   onDisconnected?: () => void;
 }
@@ -16,6 +17,7 @@ export default function Terminal({
   serverId,
   serverName,
   getToken,
+  certDuration,
   wsBaseUrl,
   onDisconnected,
 }: TerminalProps) {
@@ -84,16 +86,18 @@ export default function Terminal({
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // Send auth message with terminal dimensions
+      // Send auth message with terminal dimensions + cert duration
       const dims = fitAddon.proposeDimensions();
-      ws.send(
-        JSON.stringify({
-          type: "auth",
-          token,
-          cols: dims?.cols || 80,
-          rows: dims?.rows || 24,
-        })
-      );
+      const authMsg: Record<string, unknown> = {
+        type: "auth",
+        token,
+        cols: dims?.cols || 80,
+        rows: dims?.rows || 24,
+      };
+      if (certDuration) {
+        authMsg.cert_duration = certDuration;
+      }
+      ws.send(JSON.stringify(authMsg));
     };
 
     ws.onmessage = (event) => {

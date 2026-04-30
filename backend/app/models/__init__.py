@@ -6,6 +6,7 @@ from app.models.audit import AuditLog
 from app.models.update_job import UpdateJob
 from app.models.metric import ServerMetric, AlertRule
 from app.models.session_recording import SessionRecording
+from app.models.settings import AppSetting
 
 __all__ = [
     "User",
@@ -17,6 +18,7 @@ __all__ = [
     "ServerMetric",
     "AlertRule",
     "SessionRecording",
+    "AppSetting",
     "UserRole",
     "OSType",
     "CredentialType",
