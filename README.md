@@ -308,4 +308,4 @@ Le premier utilisateur qui se connecte via Entra ID est automatiquement admin.
 
 ## Licence
 
-Projet interne QIMinfo.
+MIT License - Copyright (c) 2026 Jean-Francois Reithler
