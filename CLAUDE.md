@@ -30,6 +30,7 @@
 
 - Architecture et schémas : `docs/architecture.md`
 - Schémas Excalidraw : `docs/01-*.excalidraw`, `docs/02-*.excalidraw`, `docs/03-*.excalidraw`
+- Roadmap (sprints D/E/F sécurité + axes ultérieurs) : `docs/roadmap.md`
 - README complet : `README.md`
 
 ## Historique des phases
