@@ -67,6 +67,115 @@ export interface AccountData {
   is_active: boolean;
   description: string | null;
   created_at: string;
+  // Secrets lifecycle (rotation / verification)
+  rotation_enabled: boolean;
+  rotation_interval_days: number;
+  rotation_supported: boolean;
+  /** Why the account cannot be rotated (certificate, SSH key...), null when supported. */
+  rotation_blocker: string | null;
+  last_rotated_at: string | null;
+  /** Null when rotation is off, unsupported, or the account was never rotated yet. */
+  next_rotation_at: string | null;
+  last_rotation_status: "ok" | "failed" | null;
+  last_rotation_message: string | null;
+  verify_status: VerifyStatus;
+  verify_message: string | null;
+  last_verified_at: string | null;
+}
+
+export type VerifyStatus = "unknown" | "ok" | "failed" | "error";
+
+/** Result of POST .../verify and POST .../rotate. */
+export interface AccountOperationResult {
+  ok: boolean;
+  message: string;
+  account: AccountData | null;
+}
+
+export type SecretHistoryStatus = "pending" | "active" | "retired" | "failed";
+
+/** One generated secret of an account (metadata only, never the secret). */
+export interface SecretHistoryEntry {
+  id: string;
+  status: SecretHistoryStatus;
+  reason: string; // manual | scheduled | ...
+  error: string | null;
+  actor_id: string | null;
+  created_at: string;
+  activated_at: string | null;
+}
+
+export type DiscoveredStatus = "new" | "ignored" | "gone";
+
+export interface DiscoveredAccountData {
+  id: string;
+  server_id: string;
+  server_name: string | null;
+  username: string;
+  /** Linux uid or Windows SID. */
+  uid: string | null;
+  /** Login shell (Linux only). */
+  shell: string | null;
+  enabled: boolean | null;
+  privileged: boolean;
+  /** Free text as reported by the target (lastlog line or ISO date). */
+  last_login: string | null;
+  status: DiscoveredStatus;
+  /** A Citadel account with this username exists on the server. */
+  managed: boolean;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface ManageDiscoveredBody {
+  credential_id?: string | null;
+  use_cert: boolean;
+  privileged?: boolean | null;
+  rotation_enabled: boolean;
+}
+
+export interface OperationMessage {
+  ok: boolean;
+  message: string;
+}
+
+export interface VaultStatusOk {
+  reachable: true;
+  initialized: boolean | null;
+  sealed: boolean | null;
+  version: string | null;
+  // Only present when SECRETS_BACKEND is vault and the vault is unsealed
+  transit_key?: string;
+  latest_version?: number;
+  min_decryption_version?: number;
+  outdated_blobs?: number;
+}
+
+export interface VaultStatusDown {
+  reachable: false;
+  error: string;
+}
+
+export interface SecretsStatus {
+  secrets_backend: "local" | "vault";
+  ca_backend: string;
+  vault_addr: string | null;
+  /** Encrypted blob counts keyed by "local" or "vault:v<N>". */
+  blobs: Record<string, number>;
+  local_blobs: number;
+  local_key_configured: boolean;
+  vault: VaultStatusOk | VaultStatusDown | null;
+}
+
+export interface SecretsMigrateResult {
+  migrated: number;
+  failed: number;
+  errors: string[];
+}
+
+export interface SecretsRotateKeyResult {
+  latest_version: number;
+  rewrapped: number;
 }
 
 export interface ConnectableAccount {

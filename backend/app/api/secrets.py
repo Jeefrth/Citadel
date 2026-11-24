@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.permissions import require_server
 from app.models.audit import AuditLog
 from app.models.base import UserRole
+from app.models.credential import Credential
 from app.models.pam import Account, DiscoveredAccount, SecretHistory
 from app.models.server import Server
 from app.models.user import User
@@ -141,6 +142,8 @@ async def manage_discovered(item_id: uuid.UUID, data: ManageDiscoveredAccount,
         raise HTTPException(status_code=409, detail="This account is already managed")
     if not data.use_cert and not data.credential_id:
         raise HTTPException(status_code=400, detail="Choose a credential or the ephemeral certificate")
+    if data.credential_id and not await db.get(Credential, data.credential_id):
+        raise HTTPException(status_code=400, detail="Credential not found")
     account = Account(
         server_id=row.server_id, username=row.username, credential_id=data.credential_id,
         use_cert=data.use_cert, privileged=row.privileged if data.privileged is None else data.privileged,

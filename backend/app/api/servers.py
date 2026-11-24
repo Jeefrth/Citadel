@@ -39,8 +39,9 @@ def account_read(account: Account) -> AccountRead:
     blocker = rotation_blocker(account)
     nxt = None
     if account.rotation_enabled and not blocker:
+        # Never rotated: due at the next scheduler pass
         nxt = (account.last_rotated_at + timedelta(days=account.rotation_interval_days)
-               if account.last_rotated_at else None)
+               if account.last_rotated_at else account.created_at)
     return AccountRead(
         rotation_enabled=account.rotation_enabled,
         rotation_interval_days=account.rotation_interval_days,
@@ -339,9 +340,14 @@ async def create_account(
     await db.flush()
     if account.is_default:
         await _clear_other_defaults(db, server.id, account.id)
+    account = (await db.execute(select(Account).where(Account.id == account.id))).scalar_one()
+    if account.rotation_enabled:
+        from app.services.secrets_ops import rotation_blocker
+        blocker = rotation_blocker(account)
+        if blocker:
+            raise HTTPException(status_code=400, detail=blocker)
     db.add(AuditLog(user_id=user.id, server_id=server.id, action="account.create", result=data.username))
     await db.commit()
-    account = (await db.execute(select(Account).where(Account.id == account.id))).scalar_one()
     return account_read(account)
 
 

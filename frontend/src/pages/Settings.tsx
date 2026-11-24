@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "@/services/api";
+import SecretsVaultCard from "@/components/SecretsVaultCard";
 import {
   Settings as SettingsIcon,
   Shield,
@@ -17,6 +18,7 @@ import {
   Copy,
   Check,
   Info,
+  Vault,
 } from "lucide-react";
 
 interface SettingMeta {
@@ -50,7 +52,7 @@ interface SystemInfo {
   alert_rules: number;
 }
 
-type Tab = "security" | "commands" | "network" | "ca" | "users" | "system";
+type Tab = "security" | "commands" | "network" | "ca" | "vault" | "users" | "system";
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>("security");
@@ -232,6 +234,7 @@ export default function Settings() {
     { id: "commands", icon: Terminal, label: "Commandes" },
     { id: "network", icon: Globe, label: "Réseau" },
     { id: "ca", icon: Key, label: "Certificats" },
+    { id: "vault", icon: Vault, label: "Coffre de secrets" },
     { id: "users", icon: Users, label: "Utilisateurs" },
     { id: "system", icon: Info, label: "Système" },
   ];
@@ -525,6 +528,9 @@ sudo systemctl restart sshd`}
               )}
             </div>
           )}
+
+          {/* Secrets vault */}
+          {activeTab === "vault" && <SecretsVaultCard />}
 
           {/* Users */}
           {activeTab === "users" && (

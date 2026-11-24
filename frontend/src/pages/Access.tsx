@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   Power,
+  Radar,
   ShieldCheck,
   Trash2,
   Users,
@@ -42,8 +43,9 @@ import {
   inputCls,
   type Option,
 } from "@/components/ui";
+import { DiscoveredAccountsPanel } from "@/components/DiscoveredAccounts";
 
-type Tab = "policies" | "groups" | "effective";
+type Tab = "policies" | "groups" | "effective" | "discovered";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -725,6 +727,7 @@ export default function Access() {
           { id: "policies", label: "Règles d'accès", icon: ShieldCheck },
           { id: "groups", label: "Groupes d'utilisateurs", icon: Users },
           { id: "effective", label: "Accès effectifs", icon: Eye },
+          { id: "discovered", label: "Comptes découverts", icon: Radar },
         ]}
         active={tab}
         onChange={setTab}
@@ -961,6 +964,9 @@ export default function Access() {
           )}
         </div>
       )}
+
+      {/* Discovered accounts (all servers) */}
+      {!loading && tab === "discovered" && <DiscoveredAccountsPanel servers={refs.servers} />}
 
       {editPolicy !== undefined && (
         <PolicyModal

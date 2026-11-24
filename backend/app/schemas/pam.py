@@ -36,6 +36,8 @@ class AccountCreate(BaseModel):
     privileged: bool = False
     is_default: bool = False
     description: str | None = None
+    rotation_enabled: bool = False
+    rotation_interval_days: int = Field(default=30, ge=1, le=365)
 
 
 class AccountUpdate(BaseModel):

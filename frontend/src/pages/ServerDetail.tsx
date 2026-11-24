@@ -5,6 +5,7 @@ import { useCurrentUser } from "@/services/useCurrentUser";
 import { hasAction, type ServerData } from "@/services/types";
 import Sparkline from "@/components/Sparkline";
 import AccountsSection from "@/components/AccountsSection";
+import { DiscoveredAccountsSection } from "@/components/DiscoveredAccounts";
 import { LabelChips } from "@/components/ui";
 import {
   ArrowLeft,
@@ -120,6 +121,8 @@ export default function ServerDetail() {
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const { isAdmin } = useCurrentUser();
+  // Bumped when managed accounts change, so both account blocks reload
+  const [accountsVersion, setAccountsVersion] = useState(0);
 
   useEffect(() => {
     if (!serverId) return;
@@ -392,7 +395,24 @@ export default function ServerDetail() {
       )}
 
       {isAdmin && (
-        <AccountsSection server={server} onChanged={reloadServer} />
+        <>
+          <AccountsSection
+            server={server}
+            reloadKey={accountsVersion}
+            onChanged={() => {
+              reloadServer();
+              setAccountsVersion((v) => v + 1);
+            }}
+          />
+          <DiscoveredAccountsSection
+            server={server}
+            reloadKey={accountsVersion}
+            onManaged={() => {
+              reloadServer();
+              setAccountsVersion((v) => v + 1);
+            }}
+          />
+        </>
       )}
     </div>
   );

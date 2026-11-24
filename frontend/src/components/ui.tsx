@@ -1,7 +1,7 @@
 // Small shared UI building blocks, styled like the existing pages
 // (plain Tailwind, same classes as the historical modals and forms).
 import { useMemo, useState, type ReactNode } from "react";
-import { Check, Loader2, Plus, Search, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Loader2, Plus, Search, X, type LucideIcon } from "lucide-react";
 
 export const inputCls =
   "w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -82,6 +82,8 @@ export function SaveButton({
   );
 }
 
+export type ChipTone = "default" | "primary" | "amber" | "blue" | "green" | "red";
+
 export function Chip({
   children,
   onRemove,
@@ -90,7 +92,7 @@ export function Chip({
 }: {
   children: ReactNode;
   onRemove?: () => void;
-  tone?: "default" | "primary" | "amber" | "blue" | "green";
+  tone?: ChipTone;
   title?: string;
 }) {
   const tones = {
@@ -99,6 +101,7 @@ export function Chip({
     amber: "bg-amber-100 text-amber-800",
     blue: "bg-blue-100 text-blue-800",
     green: "bg-green-100 text-green-800",
+    red: "bg-red-100 text-red-800",
   };
   return (
     <span
@@ -326,4 +329,123 @@ export function formatDate(iso: string | null | undefined, withTime = true): str
   return withTime
     ? d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
     : d.toLocaleDateString("fr-FR");
+}
+
+/** Dismissible success / error banner (same look as the connection test banner). */
+export interface NoticeData {
+  ok: boolean;
+  text: ReactNode;
+}
+
+export function Notice({ notice, onClose }: { notice: NoticeData | null; onClose: () => void }) {
+  if (!notice) return null;
+  return (
+    <div
+      className={`p-3 rounded-md text-sm flex items-start justify-between gap-3 ${
+        notice.ok
+          ? "bg-green-50 text-green-800 border border-green-200"
+          : "bg-red-50 text-red-800 border border-red-200"
+      }`}
+    >
+      <div className="flex items-start gap-2 min-w-0">
+        {notice.ok ? (
+          <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+        ) : (
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+        )}
+        <div className="break-words min-w-0">{notice.text}</div>
+      </div>
+      <button onClick={onClose} className="shrink-0" title="Fermer">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+/** Confirmation dialog for impactful actions (richer than window.confirm). */
+export function ConfirmModal({
+  title,
+  children,
+  confirmLabel = "Confirmer",
+  danger = false,
+  loading = false,
+  onConfirm,
+  onClose,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+  confirmLabel?: ReactNode;
+  danger?: boolean;
+  loading?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      title={title}
+      onClose={loading ? () => {} : onClose}
+      size="md"
+      footer={
+        <>
+          <button onClick={onClose} disabled={loading} className={btnSecondary}>
+            Annuler
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className={
+              danger
+                ? "flex items-center justify-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+                : btnPrimary
+            }
+          >
+            {loading && <Loader2 size={16} className="animate-spin" />}
+            {confirmLabel}
+          </button>
+        </>
+      }
+    >
+      <div className="text-sm space-y-2">{children}</div>
+    </Modal>
+  );
+}
+
+/** On / off switch with a label. */
+export function Toggle({
+  checked,
+  onChange,
+  disabled,
+  label,
+  title,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  label: ReactNode;
+  title?: string;
+}) {
+  return (
+    <label
+      title={title}
+      className={`flex items-center gap-2 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+          checked ? "bg-primary" : "bg-muted-foreground/30"
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-4" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+      {label}
+    </label>
+  );
 }
