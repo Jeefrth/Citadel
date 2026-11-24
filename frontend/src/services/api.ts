@@ -1,4 +1,9 @@
-import type { IPublicClientApplication } from "@azure/msal-browser";
+import {
+  BrowserAuthError,
+  CacheLookupPolicy,
+  InteractionRequiredAuthError,
+  type IPublicClientApplication,
+} from "@azure/msal-browser";
 import { loginRequest, apiConfig } from "./authConfig";
 
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
@@ -9,20 +14,50 @@ export function setMsalInstance(instance: IPublicClientApplication) {
   msalInstance = instance;
 }
 
+// Errors meaning "silent renewal is not possible, the user must go through Entra again"
+const INTERACTIVE_CODES = new Set(["monitor_window_timeout", "timed_out", "no_tokens_found", "block_iframe_reload"]);
+let redirecting = false;
+
+/**
+ * Access token for the Citadel API.
+ *
+ * Silent renewal uses the cache then the refresh token only, never the hidden
+ * iframe: with device-based Conditional Access (Intune, platform SSO) the
+ * iframe cannot complete and MSAL fails after a 10 s "monitor_window_timeout".
+ * When silent renewal is not possible, the whole tab is redirected to Entra
+ * (where Conditional Access can run) and comes back to the same page.
+ */
 async function getToken(): Promise<string | null> {
   if (DEV_MODE) return null;
 
   if (!msalInstance) throw new Error("MSAL not initialized");
 
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length === 0) throw new Error("No authenticated account");
+  const account = msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0];
+  if (!account) throw new Error("No authenticated account");
 
-  const response = await msalInstance.acquireTokenSilent({
-    ...loginRequest,
-    account: accounts[0],
-  });
-
-  return response.accessToken;
+  try {
+    const response = await msalInstance.acquireTokenSilent({
+      ...loginRequest,
+      account,
+      cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+    });
+    return response.accessToken;
+  } catch (e) {
+    const interactive =
+      e instanceof InteractionRequiredAuthError ||
+      (e instanceof BrowserAuthError && INTERACTIVE_CODES.has(e.errorCode));
+    if (!interactive) throw e;
+    if (!redirecting) {
+      redirecting = true;
+      await msalInstance.acquireTokenRedirect({
+        ...loginRequest,
+        account,
+        redirectStartPage: window.location.href,
+      });
+    }
+    // The page is navigating away: never resolve, so callers don't show an error
+    return new Promise<string>(() => {});
+  }
 }
 
 // FastAPI returns either a string or a list of validation errors in `detail`

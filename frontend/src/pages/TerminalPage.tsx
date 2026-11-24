@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "@/services/authConfig";
-import { api } from "@/services/api";
+import { api, getAuthToken } from "@/services/api";
 import { hasAction, type ConnectionChoice, type ServerData } from "@/services/types";
 import Terminal from "@/components/Terminal";
 import RdpViewer from "@/components/RdpViewer";
@@ -56,15 +56,8 @@ export default function TerminalPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const getToken = useCallback(async (): Promise<string> => {
-    const account = accounts[0];
-    if (!account) throw new Error("Not authenticated");
-    const response = await instance.acquireTokenSilent({
-      ...loginRequest,
-      account,
-    });
-    return response.accessToken;
-  }, [instance, accounts]);
+  // Same silent-then-redirect policy as the API client (no hidden iframe)
+  const getToken = useCallback(async (): Promise<string> => getAuthToken(), []);
 
   const requestTerminal = (srv: ServerData) => {
     setPendingServer(srv);
