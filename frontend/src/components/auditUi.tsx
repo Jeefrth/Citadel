@@ -2,7 +2,7 @@
 import { Monitor, Terminal as TerminalIcon } from "lucide-react";
 import type { ITerminalOptions } from "@xterm/xterm";
 import type { CommandDecision, CommandSource, RecordingStorageType, SessionProtocol } from "@/services/types";
-import { Chip, type ChipTone } from "@/components/ui";
+import { Chip, type ChipTone } from "@/components/kit";
 
 /** xterm options shared by the replay player and the live monitor (read-only). */
 export const READONLY_XTERM_OPTIONS: ITerminalOptions = {

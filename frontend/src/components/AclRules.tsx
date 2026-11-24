@@ -45,7 +45,7 @@ import {
   inputCls,
   type NoticeData,
   type Option,
-} from "@/components/ui";
+} from "@/components/kit";
 import { RULE_ACTION_INFO, RuleActionChip } from "@/components/governanceUi";
 
 export interface AclRefs {

@@ -1,47 +1,100 @@
+@import "@fontsource-variable/hanken-grotesk";
+@import "@fontsource-variable/jetbrains-mono";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Citadel, direction "Salle de contrôle".
+ * Dark is the default (long sessions next to terminals); light mirrors it.
+ * Colour = state only: live (amber), success (green), danger (red), info.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* light */
+    --background: 220 38% 97%;
+    --foreground: 222 45% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --card-foreground: 222 45% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 45% 10%;
+    --raised: 220 30% 95%;
+    --primary: 222 45% 12%;
+    --primary-foreground: 220 43% 97%;
+    --secondary: 220 30% 94%;
+    --secondary-foreground: 222 45% 12%;
+    --muted: 220 30% 94%;
+    --muted-foreground: 221 17% 43%;
+    --accent: 220 30% 93%;
+    --accent-foreground: 222 45% 10%;
+    --destructive: 350 63% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 219 25% 89%;
+    --input: 219 25% 86%;
+    --ring: 221 30% 45%;
+    --radius: 0.6rem;
+
+    --live: 36 71% 42%;
+    --live-foreground: 0 0% 100%;
+    --success: 152 67% 37%;
+    --success-foreground: 0 0% 100%;
+    --danger: 350 63% 51%;
+    --danger-foreground: 0 0% 100%;
+    --info: 220 67% 54%;
+    --info-foreground: 0 0% 100%;
+
+    --sidebar-background: 220 33% 95%;
+    --sidebar-foreground: 222 30% 22%;
+    --sidebar-primary: 222 45% 12%;
+    --sidebar-primary-foreground: 220 43% 97%;
+    --sidebar-accent: 220 28% 90%;
+    --sidebar-accent-foreground: 222 45% 10%;
+    --sidebar-border: 219 25% 88%;
+    --sidebar-ring: 221 30% 45%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    /* Nuit #0E1525, Ardoise #1A2336, Brume #8A97B0 */
+    --background: 222 45% 10%;
+    --foreground: 220 43% 93%;
+    --card: 221 35% 13%;
+    --card-foreground: 220 43% 93%;
+    --popover: 221 35% 15%;
+    --popover-foreground: 220 43% 93%;
+    --raised: 221 35% 16%;
+    --primary: 220 43% 93%;
+    --primary-foreground: 222 45% 10%;
+    --secondary: 220 33% 20%;
+    --secondary-foreground: 220 43% 93%;
+    --muted: 221 35% 16%;
+    --muted-foreground: 219 19% 62%;
+    --accent: 220 33% 19%;
+    --accent-foreground: 220 43% 95%;
+    --destructive: 350 84% 63%;
+    --destructive-foreground: 222 45% 10%;
+    --border: 223 31% 21%;
+    --input: 223 31% 24%;
+    --ring: 219 30% 70%;
+
+    /* Ambre #F2A93B, Vert #3DD68C, Rouge #F0526B */
+    --live: 36 88% 59%;
+    --live-foreground: 222 45% 10%;
+    --success: 151 65% 54%;
+    --success-foreground: 222 45% 10%;
+    --danger: 350 84% 63%;
+    --danger-foreground: 222 45% 10%;
+    --info: 221 89% 72%;
+    --info-foreground: 222 45% 10%;
+
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 219 22% 72%;
+    --sidebar-primary: 220 43% 93%;
+    --sidebar-primary-foreground: 222 45% 10%;
+    --sidebar-accent: 221 35% 14%;
+    --sidebar-accent-foreground: 220 43% 95%;
+    --sidebar-border: 223 31% 15%;
+    --sidebar-ring: 219 30% 70%;
   }
 }
 
@@ -49,7 +102,35 @@
   * {
     @apply border-border;
   }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 14px;
+    font-feature-settings: "ss01", "cv11";
+  }
+  /* Technical values (hosts, IPs, accounts, commands) */
+  code, kbd, samp, .font-mono {
+    font-feature-settings: "calt" 0;
+  }
+  ::selection {
+    @apply bg-live/30;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

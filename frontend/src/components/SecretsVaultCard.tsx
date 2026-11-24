@@ -9,7 +9,7 @@ import {
   type SecretsRotateKeyResult,
   type SecretsStatus,
 } from "@/services/types";
-import { Chip, ConfirmModal, ErrorBox, Notice, btnSecondary, type NoticeData } from "@/components/ui";
+import { Chip, ConfirmModal, ErrorBox, Notice, btnSecondary, type NoticeData } from "@/components/kit";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (

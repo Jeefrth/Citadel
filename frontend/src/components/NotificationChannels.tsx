@@ -28,7 +28,7 @@ import {
   iconBtnDanger,
   inputCls,
   type NoticeData,
-} from "@/components/ui";
+} from "@/components/kit";
 import { LEVEL_INFO, relativeTime } from "@/components/governanceUi";
 
 const TYPE_INFO: Record<ChannelType, { label: string; icon: typeof Mail }> = {

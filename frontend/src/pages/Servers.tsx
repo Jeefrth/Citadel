@@ -25,7 +25,7 @@ import {
   iconBtn,
   iconBtnDanger,
   inputCls,
-} from "@/components/ui";
+} from "@/components/kit";
 import {
   Server,
   Plus,

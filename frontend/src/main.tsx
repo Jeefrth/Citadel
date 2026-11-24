@@ -7,7 +7,11 @@ import {
   EventType,
   type Configuration,
 } from "@azure/msal-browser";
+import { ThemeProvider } from "next-themes";
+import { MotionConfig } from "motion/react";
 import { msalConfig } from "@/services/authConfig";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/sonner";
 import App from "@/App";
 import "@/index.css";
 
@@ -46,10 +50,18 @@ if (!DEV_MODE) {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <MsalProvider instance={msalInstance}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </MsalProvider>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="citadel-theme" disableTransitionOnChange>
+      {/* reducedMotion="user": honour the OS "reduce motion" setting everywhere */}
+      <MotionConfig reducedMotion="user">
+        <TooltipProvider delayDuration={300}>
+          <MsalProvider instance={msalInstance}>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </MsalProvider>
+          <Toaster position="bottom-right" richColors closeButton />
+        </TooltipProvider>
+      </MotionConfig>
+    </ThemeProvider>
   </React.StrictMode>
 );

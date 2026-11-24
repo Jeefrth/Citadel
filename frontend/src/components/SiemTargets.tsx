@@ -27,7 +27,7 @@ import {
   iconBtnDanger,
   inputCls,
   type NoticeData,
-} from "@/components/ui";
+} from "@/components/kit";
 import { relativeTime } from "@/components/governanceUi";
 
 const TRANSPORT_LABELS: Record<SiemTransport, string> = {

@@ -44,7 +44,7 @@ import {
   iconBtnDanger,
   inputCls,
   type Option,
-} from "@/components/ui";
+} from "@/components/kit";
 import { DiscoveredAccountsPanel } from "@/components/DiscoveredAccounts";
 import { CommandRulesPanel, ConnectionRulesPanel } from "@/components/AclRules";
 

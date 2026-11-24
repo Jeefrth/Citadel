@@ -19,7 +19,7 @@ import {
   formatDate,
   iconBtnDanger,
   inputCls,
-} from "@/components/ui";
+} from "@/components/kit";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Administrateur",

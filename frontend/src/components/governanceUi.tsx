@@ -9,7 +9,7 @@ import {
   type ConnectRuleAction,
   type NotificationLevel,
 } from "@/services/types";
-import { Chip, type ChipTone } from "@/components/ui";
+import { Chip, type ChipTone } from "@/components/kit";
 
 export const KIND_LABELS: Record<ApprovalKind, string> = {
   access: "Accès temporaire",

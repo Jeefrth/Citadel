@@ -5,7 +5,7 @@ import { Activity, Eye, Loader2, Power, RefreshCw } from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { errorMessage, type KillSessionResult, type LiveSession } from "@/services/types";
-import { Chip, ConfirmModal, ErrorBox, Field, Notice, btnSecondary, inputCls, type NoticeData } from "@/components/ui";
+import { Chip, ConfirmModal, ErrorBox, Field, Notice, btnSecondary, inputCls, type NoticeData } from "@/components/kit";
 import { ProtocolBadge, formatDuration } from "@/components/auditUi";
 import LiveMonitorViewer from "@/components/LiveMonitorViewer";
 

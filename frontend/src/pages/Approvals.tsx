@@ -44,7 +44,7 @@ import {
   formatDate,
   inputCls,
   type NoticeData,
-} from "@/components/ui";
+} from "@/components/kit";
 import { ApprovalStatusChip, KIND_LABELS, STATUS_INFO, formatHours, relativeTime } from "@/components/governanceUi";
 import { refreshGovernanceBadges } from "@/components/NotificationBell";
 

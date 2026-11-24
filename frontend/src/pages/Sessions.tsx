@@ -24,7 +24,7 @@ import {
   type SessionRecordingData,
   type SessionRecordingDetail,
 } from "@/services/types";
-import { Chip, ConfirmModal, Notice, iconBtnDanger, type NoticeData } from "@/components/ui";
+import { Chip, ConfirmModal, Notice, iconBtnDanger, type NoticeData } from "@/components/kit";
 import { ProtocolBadge, StorageChip, formatBytes, formatDuration } from "@/components/auditUi";
 import { RdpReplayPlayer, SshReplayPlayer } from "@/components/RecordingPlayers";
 

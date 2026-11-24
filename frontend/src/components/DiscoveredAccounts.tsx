@@ -28,7 +28,7 @@ import {
   iconBtn,
   inputCls,
   type NoticeData,
-} from "@/components/ui";
+} from "@/components/kit";
 import { DISCOVERED_STATUS, formatLastLogin, formRotationBlocker } from "@/components/secretsUi";
 
 /** Unmanaged privileged accounts still in use: the risky ones. */

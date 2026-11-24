@@ -6,7 +6,7 @@ import { hasAction, type ServerData } from "@/services/types";
 import Sparkline from "@/components/Sparkline";
 import AccountsSection from "@/components/AccountsSection";
 import { DiscoveredAccountsSection } from "@/components/DiscoveredAccounts";
-import { LabelChips } from "@/components/ui";
+import { LabelChips } from "@/components/kit";
 import {
   ArrowLeft,
   Cpu,

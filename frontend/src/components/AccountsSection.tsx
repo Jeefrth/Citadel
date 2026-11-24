@@ -38,7 +38,7 @@ import {
   iconBtnDanger,
   inputCls,
   type NoticeData,
-} from "@/components/ui";
+} from "@/components/kit";
 import {
   HISTORY_REASON,
   HISTORY_STATUS,

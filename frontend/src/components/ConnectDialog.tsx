@@ -7,7 +7,7 @@ import {
   type ConnectionChoice,
   type ServerData,
 } from "@/services/types";
-import { ErrorBox, inputCls } from "@/components/ui";
+import { ErrorBox, inputCls } from "@/components/kit";
 
 const DURATIONS: [number, string][] = [
   [5, "5 minutes"],

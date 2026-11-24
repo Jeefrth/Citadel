@@ -13,7 +13,7 @@ import {
   type ServerData,
   type UserData,
 } from "@/services/types";
-import { ErrorBox, Notice, btnSecondary, formatDate, type NoticeData } from "@/components/ui";
+import { ErrorBox, Notice, btnSecondary, formatDate, type NoticeData } from "@/components/kit";
 import { DECISION_INFO, DecisionChip, SOURCE_LABELS, formatClock } from "@/components/auditUi";
 
 const PAGE_SIZE = 50;

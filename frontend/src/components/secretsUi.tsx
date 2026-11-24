@@ -8,7 +8,7 @@ import type {
   SecretHistoryStatus,
   VerifyStatus,
 } from "@/services/types";
-import { Chip, formatDate, type ChipTone } from "@/components/ui";
+import { Chip, formatDate, type ChipTone } from "@/components/kit";
 
 // Backend messages are in English; translate the known rotation blockers
 // (secrets_ops.rotation_blocker) and fall back to the raw text otherwise.

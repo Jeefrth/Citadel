@@ -9,7 +9,7 @@ import {
   type RecordingStorageType,
   type StorageTestResult,
 } from "@/services/types";
-import { ErrorBox, Field, Notice, SaveButton, Toggle, btnSecondary, inputCls, type NoticeData } from "@/components/ui";
+import { ErrorBox, Field, Notice, SaveButton, Toggle, btnSecondary, inputCls, type NoticeData } from "@/components/kit";
 import { STORAGE_LABELS } from "@/components/auditUi";
 
 interface Form {
