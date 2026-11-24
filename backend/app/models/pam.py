@@ -177,6 +177,7 @@ class AccessPolicy(UUIDMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     valid_from: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_until: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expiry_notified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # PolicyAction values
     actions: Mapped[list] = mapped_column(JSONB, nullable=False, default=lambda: ["connect"])
     # Account usernames and/or virtual aliases (@ALL, @USER, @INPUT)

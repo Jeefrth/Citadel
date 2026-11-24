@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +19,7 @@ from app.models.base import UserRole
 from app.models.pam import AccessKey, AccessPolicy, Node, UserGroup
 from app.models.server import Server
 from app.models.user import User
+from app.services import policy_io
 from app.schemas.pam import (
     AccessKeyCreate, AccessKeyCreated, AccessKeyRead,
     AccessPolicyCreate, AccessPolicyRead, AccessPolicyUpdate,
@@ -240,6 +243,8 @@ async def update_policy(
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     scalars = data.model_dump(exclude_unset=True, exclude={"user_ids", "group_ids", "server_ids", "node_ids"})
+    if "valid_until" in scalars and scalars["valid_until"] != policy.valid_until:
+        policy.expiry_notified_at = None  # new end date: remind again
     for k, v in scalars.items():
         setattr(policy, k, v)
     _check_validity(policy.valid_from, policy.valid_until)
@@ -248,6 +253,37 @@ async def update_policy(
     await db.commit()
     await db.refresh(policy)
     return _policy_read(policy)
+
+
+@router.get("/access-policies/export")
+async def export_policies(db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+    data = await policy_io.export_policies(db)
+    db.add(AuditLog(user_id=user.id, action="access_policy.export", result=f"{len(data['policies'])} règle(s)"))
+    await db.commit()
+    return JSONResponse(data, headers={"Content-Disposition": "attachment; filename=citadel-regles-acces.json"})
+
+
+class PolicyImportIn(BaseModel):
+    payload: dict
+    overwrite: bool = False
+    dry_run: bool = True
+
+
+@router.post("/access-policies/import")
+async def import_policies(data: PolicyImportIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+    try:
+        report = await policy_io.import_policies(db, data.payload, overwrite=data.overwrite,
+                                                 dry_run=data.dry_run, actor_id=user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not data.dry_run:
+        db.add(AuditLog(user_id=user.id, action="access_policy.import",
+                        result=f"{len(report['created'])} créée(s), {len(report['updated'])} remplacée(s), "
+                               f"{len(report['skipped'])} ignorée(s), {len(report['errors'])} en erreur"))
+        await db.commit()
+    else:
+        await db.rollback()
+    return {"dry_run": data.dry_run, **report}
 
 
 @router.delete("/access-policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)

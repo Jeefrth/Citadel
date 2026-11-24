@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import decrypt_value
 from app.models.audit import AuditLog
 from app.models.base import OSType
-from app.models.operations import CloudAccount
+from app.models.operations import CloudAccount, CloudPendingVM
 from app.models.pam import Node
 from app.models.server import Server
 
@@ -139,11 +139,49 @@ async def _child_node(db: AsyncSession, parent_id, name: str):
     return node.id
 
 
+async def create_server(db: AsyncSession, account: CloudAccount, *, ref: str, name: str, computer_name: str | None,
+                        ip: str, os_type: OSType, tags: dict, resource_group: str | None) -> Server:
+    server = Server(
+        name=name, hostname=computer_name or name, ip_address=ip, os_type=os_type,
+        tags=tags, cloud_ref=ref, cloud_state="present",
+        node_id=await _child_node(db, account.node_id, resource_group) if resource_group else account.node_id,
+        zone_id=account.zone_id,
+    )
+    db.add(server)
+    return server
+
+
+async def _queue_for_review(db: AsyncSession, account: CloudAccount, ref: str, vm: "AzureVm", ip: str,
+                            os_type: OSType, tags: dict) -> bool:
+    """New VM with review on: one pending row per VM (an ignored VM stays ignored). True if new."""
+    row = (await db.execute(select(CloudPendingVM).where(CloudPendingVM.cloud_ref == ref))).scalar_one_or_none()
+    is_new = row is None
+    if row is None:
+        row = CloudPendingVM(cloud_account_id=account.id, cloud_ref=ref, name=vm.name)
+        db.add(row)
+    row.name, row.computer_name, row.ip_address = vm.name, vm.computer_name, ip
+    row.os_type = os_type.value
+    row.resource_group, row.location, row.power_state = vm.resource_group, vm.location, vm.power_state
+    row.tags = tags
+    row.last_seen = datetime.now(timezone.utc)
+    return is_new
+
+
+async def import_pending(db: AsyncSession, row: CloudPendingVM, account: CloudAccount) -> Server:
+    if (await db.execute(select(Server).where(Server.cloud_ref == row.cloud_ref))).scalar_one_or_none():
+        raise ValueError("Cette VM est déjà importée")
+    server = await create_server(db, account, ref=row.cloud_ref, name=row.name, computer_name=row.computer_name,
+                                 ip=row.ip_address, os_type=OSType(row.os_type), tags=row.tags or {},
+                                 resource_group=row.resource_group)
+    await db.delete(row)
+    return server
+
+
 async def sync_account(db: AsyncSession, account: CloudAccount, actor_id=None,
                        client: httpx.AsyncClient | None = None) -> dict:
     cfg = account.config or {}
     secret = decrypt_value(account.encrypted_secret) if account.encrypted_secret else ""
-    stats = {"created": 0, "updated": 0, "missing": 0, "skipped": 0}
+    stats = {"created": 0, "updated": 0, "missing": 0, "skipped": 0, "pending": 0, "new_pending": 0}
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=30)
     try:
@@ -161,13 +199,13 @@ async def sync_account(db: AsyncSession, account: CloudAccount, actor_id=None,
                 if not ip or (cfg.get("only_running") and vm.power_state not in (None, "running")):
                     stats["skipped"] += 1
                     continue
-                server = Server(
-                    name=vm.name, hostname=vm.computer_name or vm.name, ip_address=ip, os_type=os_type,
-                    tags={**vm.tags, **cloud_tags}, cloud_ref=ref, cloud_state="present",
-                    node_id=await _child_node(db, account.node_id, vm.resource_group) if vm.resource_group else account.node_id,
-                    zone_id=account.zone_id,
-                )
-                db.add(server)
+                if account.review_new:
+                    if await _queue_for_review(db, account, ref, vm, ip, os_type, {**vm.tags, **cloud_tags}):
+                        stats["new_pending"] += 1
+                    stats["pending"] += 1
+                    continue
+                await create_server(db, account, ref=ref, name=vm.name, computer_name=vm.computer_name, ip=ip,
+                                    os_type=os_type, tags={**vm.tags, **cloud_tags}, resource_group=vm.resource_group)
                 stats["created"] += 1
             else:
                 if ip:
@@ -187,7 +225,8 @@ async def sync_account(db: AsyncSession, account: CloudAccount, actor_id=None,
                 stats["missing"] += 1
         account.last_sync_status = "ok"
         account.last_sync_message = (f"{len(vms)} VM : {stats['created']} ajoutée(s), {stats['updated']} mise(s) à jour, "
-                                     f"{stats['missing']} disparue(s), {stats['skipped']} ignorée(s)")
+                                     f"{stats['missing']} disparue(s), {stats['skipped']} ignorée(s)"
+                                     + (f", {stats['pending']} en attente de revue" if stats["pending"] else ""))
     except Exception as e:  # noqa: BLE001
         await db.rollback()
         account = await db.get(CloudAccount, account.id)
@@ -201,5 +240,9 @@ async def sync_account(db: AsyncSession, account: CloudAccount, actor_id=None,
     if actor_id:
         db.add(AuditLog(user_id=actor_id, action="cloud.sync", status="success" if "error" not in stats else "failure",
                         result=f"{account.name}: {account.last_sync_message}"[:500]))
+    if stats.get("new_pending"):
+        from app.services.notifications import notify
+        await notify(db, "cloud.pending", f"{stats['new_pending']} nouvelle(s) VM à valider ({account.name})",
+                     "Importer ou ignorer depuis Infrastructure > Cloud.", link="/infrastructure")
     await db.commit()
     return stats

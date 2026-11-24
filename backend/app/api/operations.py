@@ -22,7 +22,7 @@ from app.core.security import encrypt_value
 from app.models.audit import AuditLog
 from app.models.base import OSType, UserRole
 from app.models.credential import Credential
-from app.models.operations import CloudAccount, Gateway, Job, Playbook, Zone
+from app.models.operations import CloudAccount, CloudPendingVM, Gateway, Job, Playbook, Zone
 from app.models.pam import Node, PolicyAction
 from app.models.user import User
 from app.services import cloud_sync, jobs as jobs_svc, routing, sftp
@@ -550,6 +550,7 @@ class CloudIn(BaseModel):
     zone_id: uuid.UUID | None = None
     is_active: bool = True
     sync_interval_minutes: int = Field(default=60, ge=5, le=10080)
+    review_new: bool = False  # new VMs wait for an admin instead of being imported
 
 
 def _cloud_read(a: CloudAccount) -> dict:
@@ -558,7 +559,7 @@ def _cloud_read(a: CloudAccount) -> dict:
             "zone_id": str(a.zone_id) if a.zone_id else None, "is_active": a.is_active,
             "sync_interval_minutes": a.sync_interval_minutes, "last_sync_at": a.last_sync_at,
             "last_sync_status": a.last_sync_status, "last_sync_message": a.last_sync_message,
-            "created_at": a.created_at}
+            "review_new": a.review_new, "created_at": a.created_at}
 
 
 def _check_cloud(cfg: dict) -> None:
@@ -622,3 +623,48 @@ async def sync_cloud(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
     stats = await cloud_sync.sync_account(db, a, actor_id=user.id)
     a = await db.get(CloudAccount, account_id)
     return {"stats": stats, "account": _cloud_read(a)}
+
+
+# ── Cloud review queue (new VMs waiting for an admin) ───
+
+
+def _pending_read(p: CloudPendingVM) -> dict:
+    return {"id": str(p.id), "cloud_account_id": str(p.cloud_account_id), "cloud_ref": p.cloud_ref,
+            "name": p.name, "computer_name": p.computer_name, "ip_address": p.ip_address, "os_type": p.os_type,
+            "resource_group": p.resource_group, "location": p.location, "power_state": p.power_state,
+            "tags": p.tags or {}, "status": p.status, "first_seen": p.first_seen, "last_seen": p.last_seen}
+
+
+@router.get("/cloud-pending")
+async def list_cloud_pending(status: str = Query(default="pending", pattern="^(pending|ignored)$"),
+                             db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+    rows = (await db.execute(select(CloudPendingVM).where(CloudPendingVM.status == status)
+                             .order_by(CloudPendingVM.first_seen.desc()))).scalars().all()
+    return [_pending_read(p) for p in rows]
+
+
+class PendingDecision(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    action: str = Field(pattern="^(import|ignore|restore)$")
+
+
+@router.post("/cloud-pending/decide")
+async def decide_cloud_pending(data: PendingDecision, db: AsyncSession = Depends(get_db),
+                               user: User = Depends(admin_only)):
+    rows = (await db.execute(select(CloudPendingVM).where(CloudPendingVM.id.in_(data.ids)))).scalars().all()
+    done, errors = 0, []
+    for p in rows:
+        if data.action == "import":
+            account = await db.get(CloudAccount, p.cloud_account_id)
+            try:
+                server = await cloud_sync.import_pending(db, p, account)
+            except ValueError as e:
+                errors.append(f"{p.name} : {e}")
+                continue
+            db.add(AuditLog(user_id=user.id, action="cloud.import", result=f"{server.name} ({p.cloud_ref})"))
+        else:
+            p.status = "ignored" if data.action == "ignore" else "pending"
+            db.add(AuditLog(user_id=user.id, action=f"cloud.{data.action}", result=f"{p.name} ({p.cloud_ref})"))
+        done += 1
+    await db.commit()
+    return {"done": done, "errors": errors}

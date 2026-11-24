@@ -1,11 +1,15 @@
 """Session recordings: list, replay (SSH events / RDP guac dump), integrity, deletion."""
 
+import csv
+import io
 import json
+import tempfile
 import uuid
+import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response
-from pydantic import BaseModel
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -145,3 +149,85 @@ async def delete_all_sessions(db: AsyncSession = Depends(get_db),
                               user: User = Depends(require_role(UserRole.ADMIN))):
     recs = (await db.execute(select(SessionRecording).where(SessionRecording.ended_at.is_not(None)))).scalars().all()
     return {"deleted": await _delete(db, list(recs), user, "delete-all")}
+
+
+class BulkDownloadRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+def to_asciicast(events: list[dict], rec: SessionRecording) -> str:
+    """asciinema v2 (.cast): plays with `asciinema play` or any asciinema player."""
+    import base64
+    header = {"version": 2, "width": 120, "height": 32,
+              "timestamp": int(rec.started_at.timestamp()) if rec.started_at else 0,
+              "title": f"{rec.user_name} @ {rec.server_name} ({rec.account or ''})"}
+    lines = [json.dumps(header, ensure_ascii=False)]
+    for ev in events:
+        kind = ev.get("type")
+        if kind not in ("o", "i"):
+            continue
+        text = base64.b64decode(ev.get("data", "")).decode("utf-8", errors="replace")
+        lines.append(json.dumps([round(ev.get("t", 0) / 1000, 3), kind, text], ensure_ascii=False))
+    return "\n".join(lines) + "\n"
+
+
+@router.post("/bulk-download")
+async def bulk_download(body: BulkDownloadRequest, request: Request, db: AsyncSession = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """ZIP of recordings (SSH as asciinema .cast, RDP as Guacamole dump) + manifest.csv.
+    Each file is integrity-checked (SHA-256) on the way out; failures are listed, not hidden."""
+    query = select(SessionRecording).where(SessionRecording.id.in_(body.ids))
+    if user.role != UserRole.ADMIN:
+        query = query.where(SessionRecording.user_id == user.id)
+    recs = (await db.execute(query.order_by(SessionRecording.started_at))).scalars().all()
+    if not recs:
+        raise HTTPException(status_code=404, detail="No recording found")
+
+    spool = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    manifest = io.StringIO()
+    w = csv.writer(manifest)
+    w.writerow(["fichier", "session", "protocole", "utilisateur", "serveur", "compte", "debut", "fin",
+                "sha256_stocke", "integrite"])
+    ok = 0
+    with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED) as z:
+        for rec in recs:
+            stamp = rec.started_at.strftime("%Y%m%d-%H%M%S") if rec.started_at else "inconnu"
+            base = f"{stamp}_{rec.protocol}_{rec.session_id[:12]}"
+            status_txt, name = "ok", ""
+            try:
+                if rec.storage_key:
+                    content = await recording_storage.load(db, rec.storage_type, rec.storage_key, rec.sha256)
+                elif rec.events is not None:
+                    content = json.dumps(rec.events).encode()
+                else:
+                    raise recording_storage.StorageError("contenu absent (session en cours ?)")
+                if rec.protocol == "rdp":
+                    name = base + ".guac"
+                    z.writestr(name, content)
+                else:
+                    name = base + ".cast"
+                    z.writestr(name, to_asciicast(json.loads(content), rec))
+                ok += 1
+            except recording_storage.IntegrityError as e:
+                status_txt = f"ALTERE : {e}"
+            except Exception as e:  # noqa: BLE001
+                status_txt = f"erreur : {e}"[:300]
+            w.writerow([name, rec.session_id, rec.protocol, rec.user_name, rec.server_name, rec.account or "",
+                        rec.started_at.isoformat() if rec.started_at else "",
+                        rec.ended_at.isoformat() if rec.ended_at else "", rec.sha256 or "", status_txt])
+        z.writestr("manifest.csv", manifest.getvalue())
+    db.add(AuditLog(user_id=user.id, action="recording.download",
+                    ip_address=getattr(request.state, "client_ip", None),
+                    result=f"{ok}/{len(recs)} enregistrement(s) : " + ", ".join(r.session_id[:12] for r in recs)[:400]))
+    await db.commit()
+    spool.seek(0)
+
+    def _iter():
+        try:
+            while chunk := spool.read(256 * 1024):
+                yield chunk
+        finally:
+            spool.close()
+    return StreamingResponse(_iter(), media_type="application/zip",
+                             headers={"Content-Disposition": "attachment; filename=citadel-enregistrements.zip",
+                                      "Cache-Control": "no-store"})

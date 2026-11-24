@@ -75,3 +75,9 @@ Toujours dans l'application (cloche). Canaux externes, chacun abonné à des év
 ## IP source derrière un reverse proxy
 
 Citadel n'utilise `X-Forwarded-For` que si la requête vient d'un proxy listé dans `TRUSTED_PROXIES`. En production, nginx (le conteneur `frontend`, à l'adresse fixe `172.31.250.10`) **écrase** cet en-tête avec l'adresse réelle du client sur `/api/` et `/ws/`, et lui seul est déclaré de confiance. Ne jamais mettre des plages entières (`10.0.0.0/8`...) dans `TRUSTED_PROXIES` : un client de ces plages pourrait alors choisir l'IP vue par les ACL. Si un autre reverse proxy est placé devant nginx, configurer `set_real_ip_from` / `real_ip_header` dans nginx.
+
+## Fin des règles d'accès, import et export (lot 6)
+
+- **Rappel** : `access_expiry_notice_days` jours (3 par défaut, 0 : jamais) avant la fin d'une règle d'accès, les personnes concernées (utilisateurs et membres des groupes) et les admins sont prévenus (événement `access.expiring`). Un seul rappel par date de fin ; changer la date réarme le rappel.
+- **Export** (Accès > Exporter) : JSON portable, les références sont des noms (utilisateurs par e-mail, ou `oid:<id Entra>` sans e-mail ; groupes et serveurs par nom ; nœuds par chemin `Prod/Web`).
+- **Import** : toujours une simulation d'abord (créées, remplacées, ignorées, en erreur avec la raison). Une règle dont une référence est inconnue n'est pas importée du tout. Une règle qui existe déjà est ignorée, sauf si « remplacer » est coché.

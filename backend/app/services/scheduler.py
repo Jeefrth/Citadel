@@ -6,6 +6,7 @@ runs a cycle at a time (safe with several uvicorn workers).
 
 import asyncio
 import logging
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
@@ -42,6 +43,9 @@ async def run_cycle() -> dict:
             if acc.last_sync_at is None or acc.last_sync_at + timedelta(minutes=acc.sync_interval_minutes) <= now:
                 await sync_account(db, acc)
                 stats["cloud_synced"] += 1
+
+        # 0d. Access policies about to expire (lot 6)
+        stats["expiry_reminders"] = await remind_expiring_policies(db, now)
 
         # 1. Due rotations
         accounts = (await db.execute(
@@ -138,3 +142,33 @@ async def scheduler_loop(stop: asyncio.Event) -> None:
         except asyncio.TimeoutError:
             pass
     await client.aclose()
+
+
+async def remind_expiring_policies(db, now: datetime) -> int:
+    """One reminder per policy end date, to the people it grants and to the admins."""
+    from app.models.pam import AccessPolicy
+    from app.services.notifications import admin_ids, notify
+    from app.services.settings_service import get_setting_int
+
+    days = await get_setting_int(db, "access_expiry_notice_days")
+    if days <= 0:
+        return 0
+    rows = (await db.execute(select(AccessPolicy).where(
+        AccessPolicy.is_active.is_(True), AccessPolicy.valid_until.is_not(None),
+        AccessPolicy.valid_until > now, AccessPolicy.valid_until <= now + timedelta(days=days),
+        AccessPolicy.expiry_notified_at.is_(None),
+    ))).scalars().all()
+    admins = await admin_ids(db)
+    for p in rows:
+        people = {u.id for u in p.users} | {u.id for g in p.groups for u in g.users}
+        when = p.valid_until.astimezone(ZoneInfo(settings.TIMEZONE)).strftime("%d/%m/%Y %H:%M")
+        if people:
+            await notify(db, "access.expiring", f"Votre accès « {p.name} » se termine le {when}",
+                         "Faites une demande d'accès si vous en avez encore besoin.", link="/account",
+                         recipients=list(people - set(admins)), level="warning")
+        await notify(db, "access.expiring", f"La règle d'accès « {p.name} » se termine le {when}",
+                     f"{len(people)} personne(s) concernée(s).", link="/access", recipients=admins, level="info")
+        p.expiry_notified_at = now
+    if rows:
+        await db.commit()
+    return len(rows)

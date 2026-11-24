@@ -58,3 +58,24 @@ Chaque cible a un curseur persistant par flux (`audit`, `commands`) : envoi au m
 - guacd n'est plus publié sur le réseau (il n'a pas d'authentification) : seul le backend le joint.
 - Les tickets de supervision RDP ne peuvent pas ouvrir de session, et inversement.
 - En production, le backend tourne avec l'UID 1000 (celui de guacd) pour lire les dumps RDP ; le job d'initialisation prépare les répertoires partagés.
+
+## Connexions et appareils (lot 6)
+
+- **Journal des connexions** (Audit > Connexions) : chaque connexion à Citadel, réussie ou refusée (règle de connexion, compte désactivé), avec la méthode (Entra ou clé d'accès), l'IP et l'appareil. Une connexion est enregistrée au premier appel d'un appareil, puis après 8 h sans activité. Chacun voit les siennes (Mon compte), les admins voient tout. Export CSV.
+- **Appareils** : chaque navigateur envoie un identifiant aléatoire (en-tête `X-Citadel-Device`, gardé dans le navigateur) ; une clé d'accès est son propre appareil. « Déconnecter » un navigateur fait répondre l'API `401 device_revoked` et l'interface se déconnecte. La session Entra, elle, reste valide : pour couper l'accès d'une personne, **désactiver son compte Citadel** (effet immédiat) ou révoquer ses sessions dans Entra. Déconnecter une clé d'accès la désactive.
+
+## Rapports (lot 6)
+
+Audit > Rapports, sur une période (30 jours par défaut) :
+
+| Rapport | Contenu |
+|---|---|
+| Utilisateurs | rôle, dernière connexion, connexions réussies et refusées, sessions, commandes (dont bloquées), appareils actifs |
+| Serveurs | sessions, utilisateurs distincts, commandes (dont bloquées), transferts de fichiers, comptes |
+| Comptes | secret (coffre, certificat, aucun), rotation et âge du secret, dernière vérification |
+
+Affichage imprimable (PDF par l'impression du navigateur) ou CSV (formules neutralisées). Chaque consultation est tracée (`report.view`).
+
+## Téléchargement groupé des enregistrements (lot 6)
+
+Sélection de sessions > Télécharger : une archive ZIP avec les sessions SSH au format **asciinema** (`.cast`, `asciinema play fichier.cast`), les sessions RDP au format Guacamole (`.guac`) et un `manifest.csv`. Chaque enregistrement est vérifié (SHA-256) à la sortie : un fichier altéré n'est pas inclus et le manifeste l'indique. 200 sessions au plus par archive. Les non-admins ne téléchargent que leurs propres sessions.

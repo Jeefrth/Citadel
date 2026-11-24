@@ -111,6 +111,27 @@ class CloudAccount(UUIDMixin, TimestampMixin, Base):
     zone_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="SET NULL"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    review_new: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # new VMs wait for an admin
     last_sync_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_sync_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+
+class CloudPendingVM(UUIDMixin, Base):
+    """A VM found by a sync with review_new on: waits for an admin to import or ignore it."""
+    __tablename__ = "cloud_pending_vms"
+    __table_args__ = (UniqueConstraint("cloud_ref", name="uq_cloud_pending_ref"),)
+
+    cloud_account_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("cloud_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    cloud_ref: Mapped[str] = mapped_column(String(500), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    computer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    os_type: Mapped[str] = mapped_column(String(20), nullable=False, default="linux")
+    resource_group: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    power_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    tags: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")  # pending | ignored
+    first_seen: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

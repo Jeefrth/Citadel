@@ -99,6 +99,15 @@ async def _validate_token(token: str) -> dict:
     return payload
 
 
+def _claim_email(claims: dict) -> str:
+    # v2 access tokens often carry "upn" but not "preferred_username"
+    for k in ("preferred_username", "upn", "email", "unique_name"):
+        v = claims.get(k)
+        if v and "@" in v:
+            return v
+    return ""
+
+
 async def _sync_user(claims: dict, db: AsyncSession) -> User:
     """Find or create local user from Entra ID token claims."""
     oid = claims.get("oid")
@@ -120,7 +129,7 @@ async def _sync_user(claims: dict, db: AsyncSession) -> User:
 
         user = User(
             entra_object_id=oid,
-            email=claims.get("preferred_username", claims.get("email", "")),
+            email=_claim_email(claims),
             display_name=claims.get("name", "Unknown"),
             role=UserRole.ADMIN if is_first_user else UserRole.VIEWER,
             is_active=True,
@@ -129,6 +138,8 @@ async def _sync_user(claims: dict, db: AsyncSession) -> User:
 
     user.last_login = datetime.now(timezone.utc)
     user.display_name = claims.get("name", user.display_name)
+    if not user.email:
+        user.email = _claim_email(claims)
     await db.commit()
     await db.refresh(user)
     return user
@@ -155,7 +166,8 @@ async def _get_or_create_dev_user(db: AsyncSession) -> User:
     return user
 
 
-async def enforce_login_acl(db: AsyncSession, user: User, ip: str | None) -> None:
+async def enforce_login_acl(db: AsyncSession, user: User, ip: str | None,
+                            method: str = "entra", user_agent: str | None = None) -> None:
     """Connection ACL, scope "login" (C3): source IP / time window for Citadel itself."""
     from app.core.governance import evaluate_connection
     from app.models.audit import AuditLog
@@ -164,6 +176,8 @@ async def enforce_login_acl(db: AsyncSession, user: User, ip: str | None) -> Non
     if decision.action != "allow":
         db.add(AuditLog(user_id=user.id, action="login.denied", status="failure", ip_address=ip,
                         result=f"rule={decision.rule}"))
+        from app.services.devices import record_denied
+        await record_denied(db, user, ip, f"règle « {decision.rule} »", method, user_agent)
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -190,16 +204,22 @@ async def get_current_user(
 
     user = await authenticate_token(credentials.credentials, db)
 
+    from app.core.governance import client_ip
+    from app.services import devices
+    ip = client_ip(request.client.host if request.client else None, request.headers)
+    request.state.client_ip = ip
+    method = "access_key" if getattr(user, "_via_access_key", False) else "entra"
+
     if not user.is_active:
+        await devices.record_denied(db, user, ip, "compte désactivé", method, request.headers.get("user-agent"))
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated",
         )
 
-    from app.core.governance import client_ip
-    ip = client_ip(request.client.host if request.client else None, request.headers)
-    request.state.client_ip = ip
-    await enforce_login_acl(db, user, ip)
+    await enforce_login_acl(db, user, ip, method=method, user_agent=request.headers.get("user-agent"))
+    await devices.touch(db, user, request, ip, getattr(user, "_access_key_prefix", None))
     return user
 
 
@@ -230,6 +250,7 @@ async def _authenticate_access_key(token: str, db: AsyncSession) -> User:
     user = key.user
     await db.commit()
     user._via_access_key = True  # lets sensitive endpoints refuse token-on-token
+    user._access_key_prefix = key.prefix
     return user
 
 

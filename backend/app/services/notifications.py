@@ -38,6 +38,8 @@ EVENTS = {
     "rotation.failed": "Échec de rotation de mot de passe",
     "discovery.privileged": "Compte privilégié non géré découvert",
     "session.killed": "Session terminée par un administrateur",
+    "access.expiring": "Règle d'accès bientôt expirée",
+    "cloud.pending": "Nouvelles VM cloud à valider",
     "test": "Message de test",
 }
 
