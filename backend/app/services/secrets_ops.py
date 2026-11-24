@@ -186,6 +186,9 @@ async def rotate_account(db: AsyncSession, account: Account, actor_id=None, reas
         account.last_rotation_message = _short(change.message)
         await _audit(db, actor_id, server.id, "account.rotate", "failure",
                      f"{account.username}: {_short(change.message, 200)}")
+        from app.services.notifications import notify
+        await notify(db, "rotation.failed", f"Échec de rotation : {account.username}@{server.name}",
+                     _short(change.message, 300), link=f"/servers/{server.id}", level="critical")
         await db.commit()
         return OpResult(False, f"Rotation failed: {change.message}")
 
@@ -328,6 +331,8 @@ async def discover_accounts(db: AsyncSession, server: Server) -> OpResult:
     now = _now()
     seen = set()
     new_count = 0
+    managed = {a.username for a in server.accounts}
+    new_privileged: list[str] = []
     for item in found:
         seen.add(item["username"])
         row = existing.get(item["username"])
@@ -335,6 +340,8 @@ async def discover_accounts(db: AsyncSession, server: Server) -> OpResult:
             row = DiscoveredAccount(server_id=server.id, username=item["username"], first_seen=now)
             db.add(row)
             new_count += 1
+            if item["privileged"] and item["username"] not in managed:
+                new_privileged.append(item["username"])
         elif row.status == "gone":
             row.status = "new"
         for k in ("uid", "shell", "enabled", "privileged", "last_login"):
@@ -344,6 +351,10 @@ async def discover_accounts(db: AsyncSession, server: Server) -> OpResult:
         if name not in seen and row.status != "gone":
             row.status = "gone"
     server.accounts_discovered_at = now
+    if new_privileged:
+        from app.services.notifications import notify
+        await notify(db, "discovery.privileged", f"Compte(s) privilégié(s) non géré(s) sur {server.name}",
+                     ", ".join(new_privileged), link=f"/servers/{server.id}", level="warning")
     await db.commit()
     return OpResult(True, f"{len(found)} account(s) found, {new_count} new")
 

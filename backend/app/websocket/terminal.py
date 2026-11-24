@@ -8,7 +8,13 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from app.core.auth import authenticate_token, _get_or_create_dev_user
 from app.core.config import settings
 from app.core.database import async_session
+from app.core.auth import enforce_login_acl
+from app.core.governance import client_ip
 from app.core.permissions import require_server, resolve_for_user
+from app.models.server import Server
+from app.models.user import User
+from app.services.enforcement import GovernanceDenied, check_command, enforce_connect
+from app.websocket.line_tracker import KILL_LINE, LineTracker
 from app.models.pam import PolicyAction
 from app.models.audit import AuditLog
 from app.models.session_recording import SessionRecording
@@ -117,6 +123,20 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             await websocket.close()
             return
 
+        # Connection ACL (source IP, hours, review)
+        ip = client_ip(websocket.client.host if websocket.client else None, websocket.headers)
+        try:
+            await enforce_login_acl(db, user, ip)
+            await enforce_connect(db, user, server, account.username, ip)
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "message": e.detail})
+            await websocket.close()
+            return
+        except GovernanceDenied as e:
+            await websocket.send_json({"type": "error", "message": e.message})
+            await websocket.close()
+            return
+
         if server.os_type != OSType.LINUX:
             await websocket.send_json({
                 "type": "error",
@@ -175,6 +195,7 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
 
     # Start recording
     recorder = SessionRecorder()
+    tracker = LineTracker()
     stop_event = asyncio.Event()
     last_activity = time.time()
     session_start = time.time()
@@ -245,6 +266,7 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                     break
                 if data:
                     recorder.record_output(data)
+                    tracker.on_output(data)
                     try:
                         await websocket.send_json({
                             "type": "output",
@@ -268,7 +290,30 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                 if msg["type"] == "input":
                     data = base64.b64decode(msg["data"])
                     recorder.record_input(data)
-                    await session_manager.write(session.session_id, data)
+                    for chunk, enter in tracker.split(data):
+                        if chunk:
+                            tracker.feed(chunk)
+                            await session_manager.write(session.session_id, chunk)
+                        if not enter:
+                            continue
+                        await tracker.settle()
+                        command = tracker.take_line()
+                        if command:
+                            async with async_session() as cdb:
+                                cuser = await cdb.get(User, user_id)
+                                cserver = await cdb.get(Server, srv_id)
+                                outcome = await check_command(
+                                    cdb, cuser, cserver, account.username, command, ip, source="terminal")
+                            if not outcome.allowed:
+                                # Never send Enter: clear the typed line, get a fresh prompt
+                                note = f"\r\n\x1b[1;31m[Citadel] {outcome.message}\x1b[0m\r\n"
+                                await websocket.send_json({
+                                    "type": "output",
+                                    "data": base64.b64encode(note.encode()).decode("ascii"),
+                                })
+                                await session_manager.write(session.session_id, KILL_LINE + b"\r")
+                                continue
+                        await session_manager.write(session.session_id, b"\r")
                 elif msg["type"] == "resize":
                     await session_manager.resize(
                         session.session_id,

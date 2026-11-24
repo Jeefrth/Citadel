@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ from app.schemas.server import (
     ServerCreate, ServerRead, ServerUpdate,
 )
 from app.services import tickets
+from app.services.enforcement import GovernanceDenied, enforce_connect
 
 router = APIRouter()
 
@@ -437,6 +438,7 @@ async def list_connectable_accounts(
 async def create_connect_ticket(
     server_id: uuid.UUID,
     body: ConnectTicketRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -453,6 +455,10 @@ async def create_connect_ticket(
     )
     if account.use_cert or not account.password:
         raise HTTPException(status_code=400, detail="RDP requires a password account")
+    try:
+        await enforce_connect(db, user, server, account.username, getattr(request.state, "client_ip", None))
+    except GovernanceDenied as e:
+        raise HTTPException(status_code=403, detail=e.message)
     ticket = await tickets.issue_ticket(
         user.id, server.id, "rdp", account,
         extra={

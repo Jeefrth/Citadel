@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     ACCOUNT_VERIFY_INTERVAL_HOURS: int = 24
     ACCOUNT_DISCOVERY_INTERVAL_HOURS: int = 24
 
+    # Governance (lot 3)
+    TIMEZONE: str = "Europe/Zurich"           # time windows of connection rules
+    PUBLIC_URL: str = "http://localhost:5173"  # links in notifications
+    # Comma-separated CIDRs of reverse proxies allowed to set X-Forwarded-For
+    TRUSTED_PROXIES: str = ""
+    APPROVAL_PENDING_HOURS: int = 24   # a pending request expires after
+    CONNECT_GRANT_MINUTES: int = 60    # an approved connection can be opened during
+    COMMAND_GRANT_MINUTES: int = 30    # an approved command can be run once during
+
     # Dev mode (bypass auth)
     DEV_MODE: bool = False
 

@@ -32,6 +32,7 @@
 - Schémas Excalidraw : `docs/01-*.excalidraw`, `docs/02-*.excalidraw`, `docs/03-*.excalidraw`
 - Roadmap (sprints D/E/F sécurité + axes ultérieurs) : `docs/roadmap.md`
 - Coffre de secrets (OpenBao) et cycle de vie des comptes : `docs/vault.md`
+- Gouvernance (ACL, validations, notifications) : `docs/governance.md`
 - README complet : `README.md`
 
 ## Historique des phases
@@ -46,6 +47,7 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **Sprint PAM-3** (11/2026) : ACL de connexion et de commandes (API + terminal, `websocket/line_tracker.py`), validation à 4 yeux, demandes d'accès, notifications. Voir `docs/governance.md`
 - **Sprint PAM-2** (11/2026) : coffre OpenBao (Transit, CA SSH, AppRole, bootstrap idempotent), migration local → coffre et rotation de clé, rotation des mots de passe, vérification et collecte des comptes, planificateur (verrou Redis). Voir `docs/vault.md`
 - **Sprint PAM-1** (11/2026, inspiré de JumpServer, réimplémenté) : règles d'accès (C1), comptes par serveur (B1), comptes virtuels @ALL/@USER/@INPUT (B9), arborescence de nœuds (A1), étiquettes (A2), favoris (A5), clés API personnelles (F4), tickets RDP à usage unique
 
@@ -149,6 +151,7 @@ Services dev : `openbao` (2.7.2, UI sur 127.0.0.1:8200), `vault-bootstrap` (job 
 9. **Comptes** : un serveur a N comptes (`Account`) dont un « par défaut » utilisé par l'automatisation (monitoring, mises à jour, commandes). Secret = `Credential` référencé ou certificat éphémère. Comptes virtuels dans les règles : `@ALL`, `@USER` (partie locale de l'UPN + certificat), `@INPUT` (saisi à la connexion, jamais stocké).
 10. **RDP par ticket** : `POST /connect-ticket` contrôle les droits et résout le compte, puis le WebSocket n'accepte qu'un ticket Redis à usage unique (60 s). Aucun jeton ni mot de passe dans les URL (uvicorn journalise les query strings).
 11. **Clés API** : `ctk_<prefix>_<secret>`, seul le SHA-256 est stocké, héritent des droits de l'utilisateur, ne peuvent pas créer d'autres clés.
+12. **Gouvernance** : point de contrôle unique `services/enforcement.py` (terminal, ticket RDP, execute). Règles ordonnées par priorité, première correspondance gagnante, aucune = autorisé. 4 yeux strict (jamais sa propre demande). IP client via `core/governance.client_ip` (X-Forwarded-For seulement depuis `TRUSTED_PROXIES`).
 
 ## Commandes utiles
 

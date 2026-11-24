@@ -11,6 +11,9 @@ from app.models.update_job import UpdateJob
 from app.models.metric import ServerMetric, AlertRule
 from app.models.session_recording import SessionRecording
 from app.models.settings import AppSetting
+from app.models.governance import (
+    ConnectionRule, CommandRule, ApprovalRequest, Notification, NotificationChannel,
+)
 
 __all__ = [
     "User",
@@ -32,6 +35,11 @@ __all__ = [
     "AlertRule",
     "SessionRecording",
     "AppSetting",
+    "ConnectionRule",
+    "CommandRule",
+    "ApprovalRequest",
+    "Notification",
+    "NotificationChannel",
     "UserRole",
     "OSType",
     "CredentialType",

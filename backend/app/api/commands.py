@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.audit import AuditLog
 from app.models.base import UserRole
-from app.core.command_filter import check_command
+from app.services.enforcement import GovernanceDenied, check_command as check_command_acl, enforce_connect
 from app.core.permissions import default_account, require_server, resolve_for_user
 from app.models.pam import PolicyAction
 from app.schemas.command import (
@@ -69,11 +69,14 @@ async def execute_command(
     """
     server, grant = await require_server(db, user, server_id, PolicyAction.EXECUTE.value)
     account = resolve_for_user(server, grant, user, account_id=body.account_id)
-
-    # Security: block dangerous commands (reads patterns from DB)
-    allowed, reason = await check_command(body.command, db)
-    if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+    ip = getattr(request.state, "client_ip", None)
+    try:
+        await enforce_connect(db, user, server, account.username, ip)
+    except GovernanceDenied as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=e.message)
+    outcome = await check_command_acl(db, user, server, account.username, body.command, ip)
+    if not outcome.allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=outcome.message)
 
     try:
         result = await connection_manager.execute_command(

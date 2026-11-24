@@ -7,6 +7,7 @@
 - **Sprint B** : Mini-CA Ed25519, certificats SSH éphémères.
 - **Sprint C** : MFA par session, command filter, timeout 30 min, CA persistante.
 - **Sprint PAM-1** (11/2026) : règles d'accès, comptes par serveur, comptes virtuels, arborescence de nœuds, étiquettes, favoris, clés API, tickets RDP.
+- **Sprint PAM-3** (11/2026) : ACL de connexion (login / connect, IP, horaires) et de commandes (API + terminal interactif), validation à 4 yeux, demandes d'accès temporaires, notifications (cloche, e-mail, Teams, webhook).
 - **Sprint PAM-2** (11/2026) : coffre OpenBao (Transit + CA SSH + AppRole), migration et rotation de clé, rotation des mots de passe, vérification et collecte des comptes, planificateur. Correctifs : émetteurs Entra explicites, CORS restreint.
 
 ## Fonctionnalités inspirées de JumpServer
@@ -17,7 +18,7 @@ Analyse du 24/11/2026 de `jumpserver/jumpserver` (v5.2.1). JumpServer est sous *
 |-----|---------|--------|
 | 1. Socle PAM | C1 règles d'accès, B1 comptes par actif, B9 comptes virtuels, A1 nœuds, A2 étiquettes, A5 favoris, F4 clés API | ✅ Sprint PAM-1 |
 | 2. Secrets | B10 coffre OpenBao (= D1), B3 rotation automatique, B5 collecte des comptes, B6 vérification des comptes | ✅ Sprint PAM-2 (voir `docs/vault.md`) |
-| 3. Gouvernance | C3 ACL de connexion (IP, horaires), C5 ACL de commandes (refuser / alerter / valider), G1 demandes d'accès, G2 validation (= D2), G4 notifications | À choisir |
+| 3. Gouvernance | C3 ACL de connexion (IP, horaires), C5 ACL de commandes (refuser / alerter / valider), G1 demandes d'accès, G2 validation (= D2), G4 notifications | ✅ Sprint PAM-3 (voir `docs/governance.md`) |
 | 4. Audit | D2 enregistrement RDP, D3 journal des commandes indexé, D4 supervision en direct, D5 coupure de session, D8 stockage externe, D9 SIEM (= E1) | À choisir |
 | 5. Opérations | E1 SFTP web, E2 commandes multi-serveurs, E3 playbooks Ansible, A4 passerelles et zones, A8 synchro cloud | À choisir |
 | Écartés pour l'instant | A9 à A11 (bases, Kubernetes, web), A14 RemoteApp, C7 masquage SQL, C9 multi-organisations, H2 haute dispo | Plus tard |
@@ -43,7 +44,7 @@ L'objectif des sprints D / E / F est de transformer Citadel d'un bastion fonctio
 - Rotation de clé : migration Alembic pour ré-encrypter les credentials avec un champ `key_version`.
 - Suppression de la clé du `.env` en production.
 
-#### D2. Workflow d'approbation 4-yeux
+#### D2. Workflow d'approbation 4-yeux (✅ fait en PAM-3)
 
 - Nouveau modèle `ApprovalRequest` (action, requester, approvers, status, reason).
 - Endpoint `/api/approvals` + UI : admin peut tagger des serveurs ou patterns de commandes comme "sensibles".

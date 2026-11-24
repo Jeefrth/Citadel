@@ -24,8 +24,12 @@ MAX_PER_CYCLE = 20  # keep cycles short; the rest is picked up next time
 
 async def run_cycle() -> dict:
     now = datetime.now(timezone.utc)
-    stats = {"rotated": 0, "rotation_failed": 0, "verified": 0, "discovered": 0}
+    stats = {"rotated": 0, "rotation_failed": 0, "verified": 0, "discovered": 0, "approvals_expired": 0}
     async with async_session() as db:
+        # 0. Pending approvals past their deadline
+        from app.services.approvals import expire_pending
+        stats["approvals_expired"] = await expire_pending(db)
+
         # 1. Due rotations
         accounts = (await db.execute(
             select(Account).where(Account.is_active.is_(True), Account.rotation_enabled.is_(True))

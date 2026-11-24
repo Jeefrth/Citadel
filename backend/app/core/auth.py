@@ -3,7 +3,7 @@ import hmac
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select, func
@@ -155,7 +155,24 @@ async def _get_or_create_dev_user(db: AsyncSession) -> User:
     return user
 
 
+async def enforce_login_acl(db: AsyncSession, user: User, ip: str | None) -> None:
+    """Connection ACL, scope "login" (C3): source IP / time window for Citadel itself."""
+    from app.core.governance import evaluate_connection
+    from app.models.audit import AuditLog
+
+    decision = await evaluate_connection(db, user, "login", ip)
+    if decision.action != "allow":
+        db.add(AuditLog(user_id=user.id, action="login.denied", status="failure", ip_address=ip,
+                        result=f"rule={decision.rule}"))
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access to Citadel denied by rule '{decision.rule}'",
+        )
+
+
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -179,6 +196,10 @@ async def get_current_user(
             detail="User account is deactivated",
         )
 
+    from app.core.governance import client_ip
+    ip = client_ip(request.client.host if request.client else None, request.headers)
+    request.state.client_ip = ip
+    await enforce_login_acl(db, user, ip)
     return user
 
 
