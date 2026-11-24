@@ -27,7 +27,6 @@ asyncssh==2.20.0
 pywinrm==0.5.0
 
 # RDP (Guacamole)
-pyguacamole==0.13
 
 # Testing
 pytest==8.3.5
