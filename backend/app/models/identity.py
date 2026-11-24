@@ -1,7 +1,7 @@
 """Identity trail (lot 6): Citadel sign-ins and the devices / keys in use."""
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -62,3 +62,14 @@ class SSHConnectToken(UUIDMixin, Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class CustomRole(UUIDMixin, Base):
+    """A named set of administration capabilities given on top of a base role (lot 7).
+    The base role (operator / viewer) keeps capping the actions on servers."""
+    __tablename__ = "custom_roles"
+
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    permissions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

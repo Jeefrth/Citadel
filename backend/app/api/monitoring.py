@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.models.user import User
 from app.models.server import Server
@@ -295,7 +295,7 @@ async def list_alert_rules(
 async def create_alert_rule(
     data: AlertRuleCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     rule = AlertRule(**data.model_dump())
     db.add(rule)
@@ -308,7 +308,7 @@ async def create_alert_rule(
 async def delete_alert_rule(
     rule_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     await db.execute(delete(AlertRule).where(AlertRule.id == rule_id))
     await db.commit()
@@ -321,7 +321,7 @@ async def delete_alert_rule(
 async def cleanup_old_metrics(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     """Delete metrics older than N days."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)

@@ -40,6 +40,8 @@ EVENTS = {
     "session.killed": "Session terminée par un administrateur",
     "access.expiring": "Règle d'accès bientôt expirée",
     "cloud.pending": "Nouvelles VM cloud à valider",
+    "backup.failed": "Échec de la sauvegarde des comptes",
+    "risk.found": "Nouveaux risques détectés",
     "test": "Message de test",
 }
 

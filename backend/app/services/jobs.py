@@ -178,6 +178,9 @@ async def _run_job(job_id) -> None:
     try:
         if job.kind == "command":
             await _run_command_job(job_id)
+        elif job.kind == "push":
+            from app.services.account_push import run_push_job
+            await run_push_job(job_id)
         else:
             await _run_playbook_job(job_id)
     except asyncio.CancelledError:

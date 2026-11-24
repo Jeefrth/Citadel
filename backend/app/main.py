@@ -11,7 +11,7 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations, identity, reports
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations, identity, reports, backups, applications, risks, roles
 from app.websocket import terminal, rdp, monitor
 
 # Structured logging
@@ -89,6 +89,10 @@ app.include_router(audit.router, prefix="/api", tags=["audit"])
 app.include_router(operations.router, prefix="/api", tags=["operations"])
 app.include_router(identity.router, prefix="/api", tags=["identity"])
 app.include_router(reports.router, prefix="/api", tags=["reports"])
+app.include_router(backups.router, prefix="/api", tags=["backups"])
+app.include_router(applications.router, prefix="/api", tags=["applications"])
+app.include_router(risks.router, prefix="/api", tags=["risks"])
+app.include_router(roles.router, prefix="/api", tags=["roles"])
 app.include_router(terminal.router, tags=["terminal"])
 app.include_router(rdp.router, tags=["rdp"])
 app.include_router(monitor.router, tags=["monitor"])

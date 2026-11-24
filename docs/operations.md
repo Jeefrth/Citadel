@@ -67,3 +67,18 @@ ssh -p 2222 'prenom.nom@domaine.ch#root#web-01'@citadel     compte précis
 - L'authentification forte Entra ne s'applique pas au proxy : protéger les clés privées par une phrase de passe et restreindre si besoin les IP par une règle de connexion `login`.
 
 Le RDP natif (`.rdp` pour mstsc) n'est pas proposé : il faudrait un proxy RDP complet, hors de portée ; le RDP reste dans le navigateur.
+
+## Modèles et push de comptes (lot 7)
+
+Comptes > Modèles : un modèle décrit un compte système (nom, Linux / Windows / les deux, type de secret, privilégié, sudo, groupes, rotation). « Pousser » le crée sur une sélection de serveurs (serveurs, nœuds, étiquettes), en tâche (suivi dans Tâches).
+
+Sur chaque serveur, avec son compte par défaut (qui doit avoir les droits root / administrateur) :
+- **Linux** : `useradd` si absent, groupes, secret, règle sudo dans `/etc/sudoers.d/citadel-<nom>` vérifiée par `visudo` avant d'être activée (supprimée si le modèle n'a pas de sudo).
+  - mot de passe : généré (24 caractères par défaut), posé par `chpasswd` via l'entrée standard ;
+  - clé SSH : paire ed25519 générée, clé publique ajoutée à `authorized_keys` ;
+  - certificat : aucun secret, Citadel signe des certificats éphémères (le serveur doit faire confiance à la CA, voir docs/vault.md).
+  - Pour les clés et certificats, le mot de passe du compte est mis à `*` (aucun mot de passe, compte non verrouillé : un compte verrouillé `!` est refusé par sshd même avec une clé quand PAM est désactivé).
+- **Windows** : compte local (`New-LocalUser` / `Set-LocalUser`), mot de passe uniquement, groupes locaux (par exemple `Administrators`, `Remote Desktop Users`).
+- Puis Citadel **vérifie la connexion avec le nouveau secret** avant d'enregistrer le compte (identifiant dédié, chiffré dans le coffre). Le secret n'est jamais affiché.
+
+Un compte déjà géré par Citadel sur un serveur est ignoré, sauf avec « mettre à jour » (nouveau secret). Noms système refusés (`root`, `administrator`...).

@@ -79,3 +79,19 @@ Affichage imprimable (PDF par l'impression du navigateur) ou CSV (formules neutr
 ## Téléchargement groupé des enregistrements (lot 6)
 
 Sélection de sessions > Télécharger : une archive ZIP avec les sessions SSH au format **asciinema** (`.cast`, `asciinema play fichier.cast`), les sessions RDP au format Guacamole (`.guac`) et un `manifest.csv`. Chaque enregistrement est vérifié (SHA-256) à la sortie : un fichier altéré n'est pas inclus et le manifeste l'indique. 200 sessions au plus par archive. Les non-admins ne téléchargent que leurs propres sessions.
+
+## Détection des risques (lot 7)
+
+Audit > Risques : analyse une fois par jour (ou à la demande), chaque risque garde sa date de première détection, disparaît seul une fois corrigé, ou peut être ignoré par un admin avec une raison. Les nouveaux risques élevés ou moyens sont notifiés (`risk.found`).
+
+| Contrôle | Gravité |
+|---|---|
+| Mot de passe géré plus vieux que `risk_secret_max_age_days` (90 j) | élevée si compte à privilèges, sinon moyenne |
+| Compte à privilèges sans rotation | moyenne |
+| Secret qui ne fonctionne plus (vérification en échec) | élevée / moyenne |
+| Compte à privilèges découvert mais non géré | élevée |
+| Utilisateur sans connexion depuis `risk_dormant_days` (60 j) | élevée pour un admin, sinon moyenne |
+| Clé d'accès sans expiration ; clé d'accès ou clé SSH inutilisée depuis 90 j | moyenne / faible |
+| Application sans restriction d'IP | moyenne |
+| Règle d'accès très large (tous les comptes, exécution, sans fin ni cible) | moyenne |
+| Compte sans secret | faible |

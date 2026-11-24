@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.core.permissions import (
-    ServerGrant, account_auth, compute_grants, connectable_accounts, node_descendants,
+    ServerGrant, account_auth, compute_grants, visible_server_ids, connectable_accounts, node_descendants,
     require_server, resolve_for_user, ADMIN_GRANT,
 )
 from app.core.security import encrypt_value
@@ -147,8 +147,9 @@ async def list_servers(
     user: User = Depends(get_current_user),
 ):
     grants = await compute_grants(db, user)
+    inventory = grants is not None and await visible_server_ids(db, user) is None  # custom role: sees all
     query = select(Server).order_by(Server.name)
-    if grants is not None:
+    if grants is not None and not inventory:
         if not grants:
             return []
         query = query.where(Server.id.in_(list(grants.keys())))
@@ -185,7 +186,7 @@ async def list_servers(
         ]
 
     paths = await node_paths(db)
-    return [to_read(s, ADMIN_GRANT if grants is None else grants[s.id], fav, paths) for s in servers]
+    return [to_read(s, ADMIN_GRANT if grants is None else grants.get(s.id, ServerGrant()), fav, paths) for s in servers]
 
 
 @router.get("/labels/", response_model=dict[str, list[str]])
@@ -211,7 +212,7 @@ async def list_labels(
 async def create_server(
     data: ServerCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     payload = data.model_dump(exclude={"default_account"})
     server = Server(**payload)
@@ -246,7 +247,7 @@ async def update_server(
     server_id: uuid.UUID,
     data: ServerUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     server, grant = await require_server(db, user, server_id)
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -261,7 +262,7 @@ async def update_server(
 async def delete_server(
     server_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     server, _ = await require_server(db, user, server_id)
     await db.execute(sa_delete(ServerMetric).where(ServerMetric.server_id == server_id))
@@ -306,7 +307,7 @@ async def remove_favorite(
 async def list_accounts(
     server_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     server, _ = await require_server(db, user, server_id)
     return [account_read(a) for a in server.accounts]
@@ -329,7 +330,7 @@ async def create_account(
     server_id: uuid.UUID,
     data: AccountCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     server, _ = await require_server(db, user, server_id)
     if any(a.username == data.username for a in server.accounts):
@@ -362,7 +363,7 @@ async def update_account(
     account_id: uuid.UUID,
     data: AccountUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     account = (await db.execute(
         select(Account).where(Account.id == account_id, Account.server_id == server_id)
@@ -410,7 +411,7 @@ async def delete_account(
     server_id: uuid.UUID,
     account_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     account = (await db.execute(
         select(Account).where(Account.id == account_id, Account.server_id == server_id)
@@ -480,7 +481,7 @@ async def create_connect_ticket(
 @router.get("/credentials/", response_model=list[CredentialRead])
 async def list_credentials(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     result = await db.execute(select(Credential).order_by(Credential.name))
     return result.scalars().all()
@@ -490,7 +491,7 @@ async def list_credentials(
 async def create_credential(
     data: CredentialCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     cred = Credential(
         name=data.name,
@@ -512,7 +513,7 @@ async def update_credential(
     cred_id: uuid.UUID,
     data: CredentialUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     cred = await db.get(Credential, cred_id)
     if not cred:
@@ -537,7 +538,7 @@ async def update_credential(
 async def delete_credential(
     cred_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_perm("servers")),
 ):
     cred = await db.get(Credential, cred_id)
     if not cred:

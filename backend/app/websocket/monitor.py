@@ -53,8 +53,9 @@ async def monitor_ssh(websocket: WebSocket, session_id: str):
             await websocket.send_json({"type": "error", "message": f"Auth failed: {getattr(e, 'detail', e)}"})
             await websocket.close()
             return
-        if user.role != UserRole.ADMIN or not user.is_active:
-            await websocket.send_json({"type": "error", "message": "Admins only"})
+        from app.core.auth import has_perm
+        if not has_perm(user, "audit") or not user.is_active:
+            await websocket.send_json({"type": "error", "message": "Permission 'audit' required"})
             await websocket.close()
             return
         meta = await live.get(session_id)

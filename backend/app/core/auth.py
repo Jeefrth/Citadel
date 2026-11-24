@@ -262,6 +262,39 @@ async def authenticate_token(token: str, db: AsyncSession) -> User:
     return await _sync_user(claims, db)
 
 
+# Administration capabilities a custom role can give (lot 7). Admins have them all.
+# Kept admin-only on purpose: users and roles, settings, notification channels,
+# recording storage, SIEM, vault maintenance, backups, applications, deleting
+# recordings (anything that could grant more rights or export every secret).
+CAPABILITIES = {
+    "audit": "Audit : journal des commandes, enregistrements de tous, sessions en direct (observer), connexions, appareils, rapports, risques",
+    "sessions": "Contrôle des sessions : terminer une session en direct, déconnecter un appareil",
+    "servers": "Inventaire : serveurs, comptes, identifiants, nœuds, zones et passerelles, cloud, alertes",
+    "secrets": "Secrets : vérification, rotation, historique, collecte des comptes, modèles et push de comptes",
+    "policies": "Droits : groupes, règles d'accès (import / export), ACL de connexion et de commandes",
+    "playbooks": "Playbooks Ansible : créer et modifier (le contenu s'exécute sur les serveurs)",
+}
+
+
+def has_perm(user: User, cap: str) -> bool:
+    if user.role == UserRole.ADMIN:
+        return True
+    role = getattr(user, "custom_role", None)
+    return bool(role and cap in (role.permissions or []))
+
+
+def require_perm(cap: str):
+    """FastAPI dependency: admin, or a custom role granting this capability."""
+    if cap not in CAPABILITIES:
+        raise ValueError(f"unknown capability {cap}")
+
+    async def _check(user: User = Depends(get_current_user)) -> User:
+        if not has_perm(user, cap):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{cap}' required")
+        return user
+    return _check
+
+
 def require_role(*roles: UserRole):
     """FastAPI dependency factory: require specific roles."""
     async def _check_role(user: User = Depends(get_current_user)) -> User:

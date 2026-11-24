@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.core.governance import (
     Decision, approver_ids, can_approve, evaluate_command, evaluate_connection, request_approval,
@@ -105,7 +105,7 @@ def _conn_read(r: ConnectionRule, names) -> ConnectionRuleRead:
 
 
 @router.get("/acl/connection-rules", response_model=list[ConnectionRuleRead])
-async def list_connection_rules(db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def list_connection_rules(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
     rows = (await db.execute(select(ConnectionRule).order_by(ConnectionRule.scope, ConnectionRule.priority, ConnectionRule.name))).scalars().all()
     names = await _names(db)
     return [_conn_read(r, names) for r in rows]
@@ -113,7 +113,7 @@ async def list_connection_rules(db: AsyncSession = Depends(get_db), _: User = De
 
 @router.post("/acl/connection-rules", response_model=ConnectionRuleRead, status_code=201)
 async def create_connection_rule(data: ConnectionRuleIn, request: Request,
-                                 db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                                 db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     await _unique_name(db, ConnectionRule, data.name)
     rule = ConnectionRule(**_dump_rule(data))
     await _assert_no_self_lockout(db, user, request, rule)
@@ -125,7 +125,7 @@ async def create_connection_rule(data: ConnectionRuleIn, request: Request,
 
 @router.put("/acl/connection-rules/{rule_id}", response_model=ConnectionRuleRead)
 async def update_connection_rule(rule_id: uuid.UUID, data: ConnectionRuleIn, request: Request,
-                                 db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                                 db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     rule = await db.get(ConnectionRule, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -140,7 +140,7 @@ async def update_connection_rule(rule_id: uuid.UUID, data: ConnectionRuleIn, req
 
 @router.delete("/acl/connection-rules/{rule_id}", status_code=204)
 async def delete_connection_rule(rule_id: uuid.UUID, request: Request,
-                                 db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                                 db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     rule = await db.get(ConnectionRule, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -159,14 +159,14 @@ def _cmd_read(r: CommandRule, names) -> CommandRuleRead:
 
 
 @router.get("/acl/command-rules", response_model=list[CommandRuleRead])
-async def list_command_rules(db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def list_command_rules(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
     rows = (await db.execute(select(CommandRule).order_by(CommandRule.priority, CommandRule.name))).scalars().all()
     names = await _names(db)
     return [_cmd_read(r, names) for r in rows]
 
 
 @router.post("/acl/command-rules", response_model=CommandRuleRead, status_code=201)
-async def create_command_rule(data: CommandRuleIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_command_rule(data: CommandRuleIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     await _unique_name(db, CommandRule, data.name)
     rule = CommandRule(**_dump_rule(data))
     db.add(rule)
@@ -177,7 +177,7 @@ async def create_command_rule(data: CommandRuleIn, db: AsyncSession = Depends(ge
 
 @router.put("/acl/command-rules/{rule_id}", response_model=CommandRuleRead)
 async def update_command_rule(rule_id: uuid.UUID, data: CommandRuleIn,
-                              db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                              db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     rule = await db.get(CommandRule, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -190,7 +190,7 @@ async def update_command_rule(rule_id: uuid.UUID, data: CommandRuleIn,
 
 
 @router.delete("/acl/command-rules/{rule_id}", status_code=204)
-async def delete_command_rule(rule_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_command_rule(rule_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     rule = await db.get(CommandRule, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -200,7 +200,7 @@ async def delete_command_rule(rule_id: uuid.UUID, db: AsyncSession = Depends(get
 
 
 @router.post("/acl/command-rules/test", response_model=DecisionOut)
-async def test_command(data: CommandTestIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def test_command(data: CommandTestIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     """Dry run: what would happen if this user ran this command on this server?"""
     target_user = await db.get(User, data.user_id) if data.user_id else user
     server = await db.get(Server, data.server_id)

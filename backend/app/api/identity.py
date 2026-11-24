@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.models.audit import AuditLog
 from app.models.base import UserRole
@@ -45,7 +45,7 @@ async def my_devices(request: Request, db: AsyncSession = Depends(get_db), user:
 
 @router.get("/devices")
 async def all_devices(request: Request, user_id: uuid.UUID | None = None, active_only: bool = True,
-                      db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                      db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("audit"))):
     stmt = select(UserDevice).order_by(UserDevice.last_seen.desc()).limit(500)
     if user_id:
         stmt = stmt.where(UserDevice.user_id == user_id)
@@ -77,7 +77,7 @@ async def revoke_my_device(device_id: uuid.UUID, request: Request, db: AsyncSess
 
 @router.post("/devices/{device_id}/revoke")
 async def revoke_device(device_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db),
-                        user: User = Depends(admin_only)):
+                        user: User = Depends(require_perm("sessions"))):
     return await _revoke(db, await db.get(UserDevice, device_id), user, request)
 
 
@@ -110,7 +110,7 @@ async def login_events(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     """Admins: everyone. Others: their own sign-ins only."""
-    if user.role != UserRole.ADMIN:
+    if not has_perm(user, "audit"):
         user_id = user.id
     stmt = _login_query(user_id, result, method, date_from, date_to)
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
@@ -122,7 +122,7 @@ async def login_events(
 async def export_login_events(
     user_id: uuid.UUID | None = None, result: str | None = Query(default=None, pattern="^(success|denied)$"),
     method: str | None = None, date_from: datetime | None = None, date_to: datetime | None = None,
-    db: AsyncSession = Depends(get_db), _: User = Depends(admin_only),
+    db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("audit")),
 ):
     rows = (await db.execute(_login_query(user_id, result, method, date_from, date_to)
                              .order_by(LoginEvent.created_at.desc()).limit(100000))).scalars().all()
@@ -210,7 +210,7 @@ async def delete_ssh_key(key_id: uuid.UUID, request: Request, db: AsyncSession =
 
 
 @router.get("/ssh-keys")
-async def all_ssh_keys(db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def all_ssh_keys(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("audit"))):
     names = dict((await db.execute(select(User.id, User.display_name))).all())
     rows = (await db.execute(select(UserSSHKey).order_by(UserSSHKey.created_at.desc()))).scalars().all()
     return [{**_key_read(k), "user_id": str(k.user_id), "user_name": names.get(k.user_id, "")} for k in rows]

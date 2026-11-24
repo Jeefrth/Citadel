@@ -77,3 +77,45 @@ Le mode compose fourni convient à un usage personnel ou de labo. Pour la produc
 - **TLS** sur le listener si le coffre est accédé hors du réseau compose (`VAULT_CACERT` côté backend).
 - **Sauvegardes** : `bao operator raft snapshot save` régulièrement. Sans le coffre, les secrets de la base sont irrécupérables.
 - **Rotation du secret_id AppRole** : `python -m app.cli vault-bootstrap --rotate-secret-id`.
+
+## Sauvegarde chiffrée des comptes (lot 7)
+
+Paramètres > Sauvegardes. Une archive contient tous les comptes gérés (serveur, adresse, port, identifiant, mot de passe ou clé privée), chiffrée en **AES-256-GCM** avec une clé dérivée (scrypt, N=2^15) d'une **phrase de passe** choisie par un admin (16 caractères au moins). Citadel la garde chiffrée dans le coffre mais ne la réaffiche jamais : la conserver hors de Citadel (coffre-fort personnel), c'est le seul moyen de relire une sauvegarde si Citadel a disparu.
+
+- Destinations : téléchargement (à la demande), stockage des enregistrements (local / S3 / Azure, sous `backups/`), e-mail (pièce jointe via les canaux e-mail actifs).
+- Planification : `backup_interval_days` (0 = à la demande), `backup_destinations`, `backup_email_recipients`. Échec : notification `backup.failed`.
+- Historique : date, déclencheur, destinations, nombre de comptes, taille, SHA-256 (l'archive elle-même n'est pas gardée en base).
+- Le téléchargement et le changement de phrase de passe sont refusés avec une clé d'accès (session Entra obligatoire).
+
+Relire une sauvegarde (fichier `.cab`) :
+
+```bash
+python -m app.cli backup-decrypt citadel-comptes-AAAAMMJJ-HHMMSS.cab -o comptes.json   # fichier en mode 600
+```
+
+Sans Citadel, avec Python et le paquet `cryptography` :
+
+```python
+import base64, json, getpass
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+head, env = open("sauvegarde.cab").read().split("\n", 2)[:2]
+env = json.loads(env)
+key = Scrypt(salt=base64.b64decode(env["salt"]), length=32, n=env["n"], r=env["r"], p=env["p"]).derive(getpass.getpass().encode())
+print(AESGCM(key).decrypt(base64.b64decode(env["nonce"]), base64.b64decode(env["ciphertext"]), head.encode()).decode())
+```
+
+## API pour les applications (lot 7)
+
+Paramètres > Applications : une application (script, CI, outil) lit les secrets qui lui sont accordés avec **sa propre clé** (`cap_...`, affichée une seule fois, seul son SHA-256 est gardé ; régénérable).
+
+- Portée : serveurs, nœuds (avec sous-nœuds) ou étiquettes, et noms de comptes (`*` = tous).
+- Adresses autorisées (CIDR) ; une application sans restriction d'IP est signalée comme risque. Expiration (365 jours par défaut).
+- Chaque lecture et chaque refus est dans le journal d'audit (`app.secret_read`).
+
+```bash
+curl -H "Authorization: Bearer cap_..." "https://citadel/api/app/v1/secret?server=web-01&account=deploy"
+# {"server":"web-01","address":"10.0.0.5","port":22,"username":"deploy","type":"ssh_password","password":"..."}
+```
+
+Un nom de serveur ambigu répond 409 : utiliser alors l'identifiant du serveur.

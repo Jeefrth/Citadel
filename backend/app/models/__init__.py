@@ -2,6 +2,7 @@ from app.models.base import UserRole, OSType, CredentialType, ServerStatus, JobS
 from app.models.user import User
 from app.models.server import Server
 from app.models.pam import (
+    AccountTemplate, AccountBackup, Application, RiskFinding,
     Node, Account, UserGroup, AccessPolicy, UserFavorite, AccessKey, PolicyAction,
     SecretHistory, SecretStatus, DiscoveredAccount,
 )
@@ -12,7 +13,7 @@ from app.models.metric import ServerMetric, AlertRule
 from app.models.session_recording import SessionRecording
 from app.models.settings import AppSetting
 from app.models.operations import Zone, Gateway, Playbook, Job, JobTarget, CloudAccount, CloudPendingVM
-from app.models.identity import UserDevice, LoginEvent, UserSSHKey, SSHConnectToken
+from app.models.identity import UserDevice, LoginEvent, UserSSHKey, SSHConnectToken, CustomRole
 from app.models.audit_trail import CommandLog, RecordingStorage, SiemTarget
 from app.models.governance import (
     ConnectionRule, CommandRule, ApprovalRequest, Notification, NotificationChannel,

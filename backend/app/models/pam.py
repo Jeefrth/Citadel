@@ -222,3 +222,76 @@ class AccessKey(UUIDMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     user = relationship("User", lazy="joined")
+
+
+class AccountTemplate(UUIDMixin, TimestampMixin, Base):
+    """Blueprint of an OS account pushed to many servers at once (lot 7)."""
+    __tablename__ = "account_templates"
+
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    os_scope: Mapped[str] = mapped_column(String(10), nullable=False, default="any")      # any | linux | windows
+    secret_type: Mapped[str] = mapped_column(String(20), nullable=False, default="password")  # password | ssh_key | cert
+    password_length: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
+    privileged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sudo: Mapped[str] = mapped_column(String(20), nullable=False, default="none")          # none | password | nopasswd
+    groups: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)              # extra OS groups
+    rotation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rotation_interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+
+
+class AccountBackup(UUIDMixin, Base):
+    """History of encrypted account backups (lot 7). The archive itself is not kept here."""
+    __tablename__ = "account_backups"
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False)              # manual | scheduled
+    destinations: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # download | storage | email
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")  # success | partial | failed
+    message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    accounts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class Application(UUIDMixin, TimestampMixin, Base):
+    """A program that fetches secrets from Citadel with its own key (lot 7).
+    Scope like an access policy: servers / nodes / labels x account usernames."""
+    __tablename__ = "applications"
+
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    key_prefix: Mapped[str] = mapped_column(String(16), unique=True, nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    allowed_ips: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)   # CIDRs; empty = any
+    server_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    node_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    labels: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    accounts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)      # usernames; "*" = any
+    last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class RiskFinding(UUIDMixin, Base):
+    """A risk found by the periodic scan (lot 7). key identifies the object + check,
+    so a risk keeps its history until it disappears (resolved) or is ignored."""
+    __tablename__ = "risk_findings"
+
+    key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False)      # high | medium | low
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    link: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_seen: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    resolved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ignored_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ignored_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)

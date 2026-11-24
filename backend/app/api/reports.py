@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import require_role
+from app.core.auth import require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.models.audit import AuditLog
 from app.models.base import UserRole
@@ -31,7 +31,7 @@ def _cell(v):
 async def get_report(kind: str, request: Request,
                      date_from: datetime | None = None, date_to: datetime | None = None,
                      format: str = Query(default="json", pattern="^(json|csv)$"),
-                     db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                     db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("audit"))):
     if kind not in REPORTS:
         raise HTTPException(status_code=404, detail="Unknown report")
     end = date_to or datetime.now(timezone.utc)

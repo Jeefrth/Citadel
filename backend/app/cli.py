@@ -210,6 +210,24 @@ def cmd_rotate_key(_args) -> None:
     print(json.dumps(_run_async(secrets_admin.rotate_key_standalone()), indent=2))
 
 
+def cmd_backup_decrypt(args) -> None:
+    """Works without a database or a vault: only the file and the passphrase."""
+    import getpass
+    from app.services.account_backup import decrypt_archive
+    with open(args.file, "rb") as f:
+        blob = f.read()
+    passphrase = getpass.getpass("Phrase de passe des sauvegardes : ")
+    data = decrypt_archive(blob, passphrase)
+    out = json.dumps(data, indent=2, ensure_ascii=False)
+    if args.output:
+        fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(out)
+        print(f"{len(data.get('accounts', []))} compte(s) écrits dans {args.output} (mode 600)", file=sys.stderr)
+    else:
+        print(out)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -220,6 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("secrets-status").set_defaults(func=cmd_status)
     sub.add_parser("secrets-migrate", help="Re-encrypt local AES blobs with the vault").set_defaults(func=cmd_migrate)
     sub.add_parser("secrets-rotate-key", help="Rotate the transit key and rewrap every blob").set_defaults(func=cmd_rotate_key)
+    d = sub.add_parser("backup-decrypt", help="Decrypt an account backup (.cab) with its passphrase")
+    d.add_argument("file")
+    d.add_argument("-o", "--output", help="write JSON here (mode 600) instead of stdout")
+    d.set_defaults(func=cmd_backup_decrypt)
     args = parser.parse_args(argv)
     try:
         args.func(args)

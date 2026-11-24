@@ -87,3 +87,20 @@ Citadel n'utilise `X-Forwarded-For` que si la requête vient d'un proxy listé d
 Paramètres > Masquage : des règles (expression régulière, remplacement) appliquées à tout ce que le serveur affiche dans un terminal (web ou proxy SSH), **avant** l'utilisateur, l'observation en direct et l'enregistrement : la valeur masquée n'est stockée nulle part. Les commandes tapées sont masquées de la même façon dans le journal des commandes. Modèles fournis : numéro de carte, `password=...`, jeton Bearer, clé privée, clé AWS. Un bouton permet d'essayer les règles sur un texte.
 
 Limite : la recherche se fait par paquet de sortie ; une valeur coupée entre deux paquets peut passer. Ce n'est pas une prévention de fuite, c'est une réduction de l'exposition à l'écran et dans les enregistrements.
+
+## Rôles personnalisés (lot 7)
+
+Paramètres > Rôles : un rôle personnalisé ajoute des **permissions d'administration** à un utilisateur operator ou viewer. Le rôle de base continue de plafonner les actions sur les serveurs (un viewer n'exécute jamais rien), et l'accès aux serveurs reste donné par les règles d'accès.
+
+| Permission | Donne accès à |
+|---|---|
+| `audit` | journal des commandes et enregistrements de tous, observation des sessions en direct, connexions, appareils, clés SSH, rapports, risques, toutes les tâches ; voit tout l'inventaire (sans pouvoir s'y connecter) |
+| `sessions` | terminer une session en direct, déconnecter un appareil |
+| `servers` | serveurs, comptes, identifiants, nœuds, zones et passerelles, comptes cloud et VM à valider, règles d'alerte ; voit tout l'inventaire |
+| `secrets` | vérifier, faire tourner, historique, collecte des comptes, modèles et push de comptes |
+| `policies` | groupes, règles d'accès (import / export, droits effectifs), ACL de connexion et de commandes |
+| `playbooks` | créer et modifier les playbooks Ansible |
+
+Restent **réservés aux admins** : utilisateurs et rôles, paramètres (dont masquage), canaux de notification, stockage des enregistrements, SIEM, maintenance du coffre, sauvegardes, applications, suppression d'enregistrements, ignorer un risque. Ce sont les fonctions qui permettraient de s'attribuer plus de droits ou d'exporter tous les secrets.
+
+Attention : `policies` permet de s'accorder des accès (règles d'accès) et `servers` de créer des comptes ; à réserver à des personnes de confiance. Citadel refuse de retirer ou désactiver le dernier admin actif, et chaque changement de rôle est tracé (`user.update`).

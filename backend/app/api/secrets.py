@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.servers import account_read
-from app.core.auth import require_role
+from app.core.auth import require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.core.permissions import require_server
 from app.models.audit import AuditLog
@@ -41,7 +41,7 @@ async def _account(db: AsyncSession, server_id: uuid.UUID, account_id: uuid.UUID
 
 @router.post("/servers/{server_id}/accounts/{account_id}/verify", response_model=OperationResult)
 async def verify_account(server_id: uuid.UUID, account_id: uuid.UUID,
-                         db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                         db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
     account = await _account(db, server_id, account_id)
     res = await secrets_ops.verify_account(db, account)
     return OperationResult(ok=res.ok, message=res.message, account=account_read(account))
@@ -49,7 +49,7 @@ async def verify_account(server_id: uuid.UUID, account_id: uuid.UUID,
 
 @router.post("/servers/{server_id}/accounts/{account_id}/rotate", response_model=OperationResult)
 async def rotate_account(server_id: uuid.UUID, account_id: uuid.UUID,
-                         db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                         db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
     account = await _account(db, server_id, account_id)
     res = await secrets_ops.rotate_account(db, account, actor_id=user.id, reason="manual")
     account = (await db.execute(
@@ -60,7 +60,7 @@ async def rotate_account(server_id: uuid.UUID, account_id: uuid.UUID,
 
 @router.get("/servers/{server_id}/accounts/{account_id}/history", response_model=list[SecretHistoryRead])
 async def account_history(server_id: uuid.UUID, account_id: uuid.UUID,
-                          db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                          db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
     """Rotation history (metadata only, never the secrets)."""
     await _account(db, server_id, account_id)
     rows = (await db.execute(
@@ -91,7 +91,7 @@ async def _discovered_read(db: AsyncSession, rows: list[DiscoveredAccount]) -> l
 
 @router.post("/servers/{server_id}/discover-accounts", response_model=OperationResult)
 async def discover_server_accounts(server_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                                   user: User = Depends(admin_only)):
+                                   user: User = Depends(require_perm("secrets"))):
     server, _ = await require_server(db, user, server_id)
     res = await secrets_ops.discover_accounts(db, server)
     db.add(AuditLog(user_id=user.id, server_id=server.id, action="account.discover",
@@ -105,7 +105,7 @@ async def list_discovered(
     server_id: uuid.UUID | None = None,
     status: str | None = Query(default=None, pattern="^(new|ignored|gone)$"),
     unmanaged_only: bool = False,
-    db: AsyncSession = Depends(get_db), user: User = Depends(admin_only),
+    db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets")),
 ):
     q = select(DiscoveredAccount).order_by(DiscoveredAccount.server_id, DiscoveredAccount.username)
     if server_id:
@@ -120,7 +120,7 @@ async def list_discovered(
 
 @router.patch("/discovered-accounts/{item_id}", response_model=DiscoveredAccountRead)
 async def update_discovered(item_id: uuid.UUID, data: DiscoveredAccountUpdate,
-                            db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                            db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
     row = await db.get(DiscoveredAccount, item_id)
     if not row:
         raise HTTPException(status_code=404, detail="Discovered account not found")
@@ -131,7 +131,7 @@ async def update_discovered(item_id: uuid.UUID, data: DiscoveredAccountUpdate,
 
 @router.post("/discovered-accounts/{item_id}/manage", response_model=AccountRead, status_code=201)
 async def manage_discovered(item_id: uuid.UUID, data: ManageDiscoveredAccount,
-                            db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                            db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
     """Turn a discovered OS account into a managed Citadel account."""
     row = await db.get(DiscoveredAccount, item_id)
     if not row:

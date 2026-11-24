@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import async_session, get_db
 from app.core.permissions import require_server, resolve_for_user
 from app.core.security import encrypt_value
@@ -23,9 +23,9 @@ from app.models.audit import AuditLog
 from app.models.base import OSType, UserRole
 from app.models.credential import Credential
 from app.models.operations import CloudAccount, CloudPendingVM, Gateway, Job, Playbook, Zone
-from app.models.pam import Node, PolicyAction
+from app.models.pam import AccountTemplate, Node, PolicyAction
 from app.models.user import User
-from app.services import cloud_sync, jobs as jobs_svc, routing, sftp
+from app.services import account_push, cloud_sync, jobs as jobs_svc, routing, sftp
 from app.services.enforcement import GovernanceDenied, enforce_connect
 from app.services.settings_service import get_setting_int
 
@@ -266,7 +266,7 @@ async def list_zones(db: AsyncSession = Depends(get_db), _: User = Depends(get_c
 
 
 @router.post("/zones", status_code=201)
-async def create_zone(data: ZoneIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_zone(data: ZoneIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     if (await db.execute(select(Zone.id).where(Zone.name == data.name))).first():
         raise HTTPException(status_code=409, detail="A zone with this name already exists")
     z = Zone(**data.model_dump())
@@ -279,7 +279,7 @@ async def create_zone(data: ZoneIn, db: AsyncSession = Depends(get_db), user: Us
 
 @router.patch("/zones/{zone_id}")
 async def update_zone(zone_id: uuid.UUID, data: ZoneIn, db: AsyncSession = Depends(get_db),
-                      user: User = Depends(admin_only)):
+                      user: User = Depends(require_perm("servers"))):
     z = await db.get(Zone, zone_id)
     if not z:
         raise HTTPException(status_code=404, detail="Zone not found")
@@ -290,7 +290,7 @@ async def update_zone(zone_id: uuid.UUID, data: ZoneIn, db: AsyncSession = Depen
 
 
 @router.delete("/zones/{zone_id}", status_code=204)
-async def delete_zone(zone_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_zone(zone_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     z = await db.get(Zone, zone_id)
     if not z:
         raise HTTPException(status_code=404, detail="Zone not found")
@@ -308,7 +308,7 @@ async def _check_gw_credential(db, data: GatewayIn):
 
 @router.post("/zones/{zone_id}/gateways", status_code=201)
 async def add_gateway(zone_id: uuid.UUID, data: GatewayIn, db: AsyncSession = Depends(get_db),
-                      user: User = Depends(admin_only)):
+                      user: User = Depends(require_perm("servers"))):
     if not await db.get(Zone, zone_id):
         raise HTTPException(status_code=404, detail="Zone not found")
     await _check_gw_credential(db, data)
@@ -322,7 +322,7 @@ async def add_gateway(zone_id: uuid.UUID, data: GatewayIn, db: AsyncSession = De
 
 @router.patch("/gateways/{gateway_id}")
 async def update_gateway(gateway_id: uuid.UUID, data: GatewayIn, db: AsyncSession = Depends(get_db),
-                         user: User = Depends(admin_only)):
+                         user: User = Depends(require_perm("servers"))):
     g = await db.get(Gateway, gateway_id)
     if not g:
         raise HTTPException(status_code=404, detail="Gateway not found")
@@ -336,7 +336,7 @@ async def update_gateway(gateway_id: uuid.UUID, data: GatewayIn, db: AsyncSessio
 
 
 @router.delete("/gateways/{gateway_id}", status_code=204)
-async def delete_gateway(gateway_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_gateway(gateway_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     g = await db.get(Gateway, gateway_id)
     if not g:
         raise HTTPException(status_code=404, detail="Gateway not found")
@@ -346,7 +346,7 @@ async def delete_gateway(gateway_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 
 @router.post("/gateways/{gateway_id}/check")
-async def check_gateway(gateway_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def check_gateway(gateway_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("servers"))):
     g = (await db.execute(select(Gateway).where(Gateway.id == gateway_id))).scalar_one_or_none()
     if not g:
         raise HTTPException(status_code=404, detail="Gateway not found")
@@ -385,7 +385,7 @@ async def list_playbooks(db: AsyncSession = Depends(get_db), _: User = Depends(g
 
 
 @router.post("/playbooks", status_code=201)
-async def create_playbook(data: PlaybookIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_playbook(data: PlaybookIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("playbooks"))):
     _check_playbook(data.content)
     if (await db.execute(select(Playbook.id).where(Playbook.name == data.name))).first():
         raise HTTPException(status_code=409, detail="A playbook with this name already exists")
@@ -398,7 +398,7 @@ async def create_playbook(data: PlaybookIn, db: AsyncSession = Depends(get_db), 
 
 @router.put("/playbooks/{playbook_id}")
 async def update_playbook(playbook_id: uuid.UUID, data: PlaybookIn, db: AsyncSession = Depends(get_db),
-                          user: User = Depends(admin_only)):
+                          user: User = Depends(require_perm("playbooks"))):
     p = await db.get(Playbook, playbook_id)
     if not p:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -411,7 +411,7 @@ async def update_playbook(playbook_id: uuid.UUID, data: PlaybookIn, db: AsyncSes
 
 
 @router.delete("/playbooks/{playbook_id}", status_code=204)
-async def delete_playbook(playbook_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_playbook(playbook_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("playbooks"))):
     p = await db.get(Playbook, playbook_id)
     if not p:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -508,7 +508,7 @@ async def create_job(data: JobIn, request: Request, db: AsyncSession = Depends(g
 async def list_jobs(limit: int = Query(default=50, ge=1, le=200), db: AsyncSession = Depends(get_db),
                     user: User = Depends(get_current_user)):
     q = select(Job).order_by(Job.created_at.desc()).limit(limit)
-    if user.role != UserRole.ADMIN:
+    if not has_perm(user, "audit"):
         q = q.where(Job.user_id == user.id)
     names = {str(i): n for i, n in (await db.execute(select(User.id, User.display_name))).all()}
     return [_job_read(j, user_names=names) for j in (await db.execute(q)).scalars().all()]
@@ -516,7 +516,7 @@ async def list_jobs(limit: int = Query(default=50, ge=1, le=200), db: AsyncSessi
 
 async def _get_job(db, user, job_id) -> Job:
     j = (await db.execute(select(Job).where(Job.id == job_id).execution_options(populate_existing=True))).scalar_one_or_none()
-    if not j or (user.role != UserRole.ADMIN and j.user_id != user.id):
+    if not j or (not has_perm(user, "audit") and j.user_id != user.id):
         raise HTTPException(status_code=404, detail="Job not found")
     return j
 
@@ -571,12 +571,12 @@ def _check_cloud(cfg: dict) -> None:
 
 
 @router.get("/cloud-accounts")
-async def list_cloud(db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def list_cloud(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("servers"))):
     return [_cloud_read(a) for a in (await db.execute(select(CloudAccount).order_by(CloudAccount.name))).scalars().all()]
 
 
 @router.post("/cloud-accounts", status_code=201)
-async def create_cloud(data: CloudIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_cloud(data: CloudIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     _check_cloud(data.config)
     if not data.secret:
         raise HTTPException(status_code=400, detail="Client secret is required")
@@ -591,7 +591,7 @@ async def create_cloud(data: CloudIn, db: AsyncSession = Depends(get_db), user: 
 
 @router.patch("/cloud-accounts/{account_id}")
 async def update_cloud(account_id: uuid.UUID, data: CloudIn, db: AsyncSession = Depends(get_db),
-                       user: User = Depends(admin_only)):
+                       user: User = Depends(require_perm("servers"))):
     a = await db.get(CloudAccount, account_id)
     if not a:
         raise HTTPException(status_code=404, detail="Cloud account not found")
@@ -606,7 +606,7 @@ async def update_cloud(account_id: uuid.UUID, data: CloudIn, db: AsyncSession = 
 
 
 @router.delete("/cloud-accounts/{account_id}", status_code=204)
-async def delete_cloud(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_cloud(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     a = await db.get(CloudAccount, account_id)
     if not a:
         raise HTTPException(status_code=404, detail="Cloud account not found")
@@ -616,7 +616,7 @@ async def delete_cloud(account_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/cloud-accounts/{account_id}/sync")
-async def sync_cloud(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def sync_cloud(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     a = await db.get(CloudAccount, account_id)
     if not a:
         raise HTTPException(status_code=404, detail="Cloud account not found")
@@ -637,7 +637,7 @@ def _pending_read(p: CloudPendingVM) -> dict:
 
 @router.get("/cloud-pending")
 async def list_cloud_pending(status: str = Query(default="pending", pattern="^(pending|ignored)$"),
-                             db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+                             db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("servers"))):
     rows = (await db.execute(select(CloudPendingVM).where(CloudPendingVM.status == status)
                              .order_by(CloudPendingVM.first_seen.desc()))).scalars().all()
     return [_pending_read(p) for p in rows]
@@ -650,7 +650,7 @@ class PendingDecision(BaseModel):
 
 @router.post("/cloud-pending/decide")
 async def decide_cloud_pending(data: PendingDecision, db: AsyncSession = Depends(get_db),
-                               user: User = Depends(admin_only)):
+                               user: User = Depends(require_perm("servers"))):
     rows = (await db.execute(select(CloudPendingVM).where(CloudPendingVM.id.in_(data.ids)))).scalars().all()
     done, errors = 0, []
     for p in rows:
@@ -668,3 +668,105 @@ async def decide_cloud_pending(data: PendingDecision, db: AsyncSession = Depends
         done += 1
     await db.commit()
     return {"done": done, "errors": errors}
+
+
+# ── Account templates and push (lot 7) ──────────────────
+
+
+class TemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=500)
+    username: str = Field(min_length=1, max_length=64)
+    os_scope: str = Field(default="any", pattern="^(any|linux|windows)$")
+    secret_type: str = Field(default="password", pattern="^(password|ssh_key|cert)$")
+    password_length: int = Field(default=24, ge=16, le=64)
+    privileged: bool = False
+    sudo: str = Field(default="none", pattern="^(none|password|nopasswd)$")
+    groups: list[str] = Field(default_factory=list, max_length=20)
+    rotation_enabled: bool = False
+    rotation_interval_days: int = Field(default=30, ge=1, le=365)
+
+
+def _tpl_read(t: AccountTemplate) -> dict:
+    return {"id": str(t.id), "name": t.name, "description": t.description, "username": t.username,
+            "os_scope": t.os_scope, "secret_type": t.secret_type, "password_length": t.password_length,
+            "privileged": t.privileged, "sudo": t.sudo, "groups": t.groups or [],
+            "rotation_enabled": t.rotation_enabled, "rotation_interval_days": t.rotation_interval_days,
+            "created_at": t.created_at}
+
+
+def _check_tpl(data: TemplateIn) -> None:
+    try:
+        account_push.validate_template(data.username, data.os_scope, data.secret_type, data.sudo, data.groups)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/account-templates")
+async def list_templates(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("secrets"))):
+    rows = (await db.execute(select(AccountTemplate).order_by(AccountTemplate.name))).scalars().all()
+    return [_tpl_read(t) for t in rows]
+
+
+@router.post("/account-templates", status_code=201)
+async def create_template(data: TemplateIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
+    _check_tpl(data)
+    if (await db.execute(select(AccountTemplate.id).where(AccountTemplate.name == data.name))).first():
+        raise HTTPException(status_code=409, detail="A template with this name already exists")
+    t = AccountTemplate(**data.model_dump())
+    db.add(t)
+    db.add(AuditLog(user_id=user.id, action="account_template.create", result=f"{data.name} ({data.username})"))
+    await db.commit()
+    return _tpl_read(t)
+
+
+@router.patch("/account-templates/{template_id}")
+async def update_template(template_id: uuid.UUID, data: TemplateIn, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(require_perm("secrets"))):
+    t = await db.get(AccountTemplate, template_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    _check_tpl(data)
+    for k, v in data.model_dump().items():
+        setattr(t, k, v)
+    db.add(AuditLog(user_id=user.id, action="account_template.update", result=data.name))
+    await db.commit()
+    return _tpl_read(t)
+
+
+@router.delete("/account-templates/{template_id}", status_code=204)
+async def delete_template(template_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
+    t = await db.get(AccountTemplate, template_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.add(AuditLog(user_id=user.id, action="account_template.delete", result=f"{t.name} (comptes déjà poussés conservés)"))
+    await db.delete(t)
+    await db.commit()
+
+
+class PushIn(BaseModel):
+    selector: Selector
+    update_existing: bool = False
+    parallelism: int = Field(default=5, ge=1, le=20)
+
+
+@router.post("/account-templates/{template_id}/push", status_code=201)
+async def push_template(template_id: uuid.UUID, data: PushIn, request: Request, db: AsyncSession = Depends(get_db),
+                        user: User = Depends(require_perm("secrets"))):
+    t = await db.get(AccountTemplate, template_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    try:
+        job = await jobs_svc.create_job(
+            db, user, kind="push", name=f"Push du compte {t.username} ({t.name})",
+            selector=data.selector.model_dump(mode="json"),
+            extra_vars={"template_id": str(t.id), "update_existing": data.update_existing},
+            parallelism=data.parallelism, timeout=120, client_ip=getattr(request.state, "client_ip", None),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    job = (await db.execute(select(Job).where(Job.id == job.id))).scalar_one()
+    db.add(AuditLog(user_id=user.id, action="account.push_start", ip_address=getattr(request.state, "client_ip", None),
+                    result=f"{t.name} -> {len(job.targets)} serveur(s)"))
+    await db.commit()
+    return _job_read(job)

@@ -129,7 +129,15 @@ async def compute_grants(db: AsyncSession, user: User) -> dict[uuid.UUID, Server
     return grants
 
 
+def _sees_inventory(user: User) -> bool:
+    from app.core.auth import has_perm
+    return has_perm(user, "servers") or has_perm(user, "audit")
+
+
 async def visible_server_ids(db: AsyncSession, user: User) -> set[uuid.UUID] | None:
+    """Servers a user may list. Inventory / audit roles see all of them (without any action)."""
+    if _sees_inventory(user):
+        return None
     grants = await compute_grants(db, user)
     return None if grants is None else set(grants.keys())
 
@@ -148,6 +156,8 @@ async def require_server(
     sid = uuid.UUID(str(server_id))
     server = (await db.execute(select(Server).where(Server.id == sid))).scalar_one_or_none()
     grant = await get_grant(db, user, sid) if server else None
+    if server and grant is None and _sees_inventory(user):
+        grant = ServerGrant()  # visible for management / audit, no action on it
     if not server or grant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
     if action and action not in grant.actions:

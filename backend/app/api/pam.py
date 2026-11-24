@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, hash_access_key, require_role, ACCESS_KEY_PREFIX
+from app.core.auth import get_current_user, hash_access_key, require_role, ACCESS_KEY_PREFIX, has_perm, require_perm
 from app.core.database import get_db
 from app.core.permissions import compute_grants, node_descendants
 from app.models.audit import AuditLog
@@ -92,7 +92,7 @@ async def _check_parent(db: AsyncSession, node_id: uuid.UUID | None, parent_id: 
 
 
 @router.post("/nodes", response_model=NodeRead, status_code=status.HTTP_201_CREATED)
-async def create_node(data: NodeCreate, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_node(data: NodeCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     await _check_parent(db, None, data.parent_id)
     node = Node(**data.model_dump())
     db.add(node)
@@ -103,7 +103,7 @@ async def create_node(data: NodeCreate, db: AsyncSession = Depends(get_db), user
 
 @router.patch("/nodes/{node_id}", response_model=NodeRead)
 async def update_node(
-    node_id: uuid.UUID, data: NodeUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only),
+    node_id: uuid.UUID, data: NodeUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers")),
 ):
     node = await db.get(Node, node_id)
     if not node:
@@ -119,7 +119,7 @@ async def update_node(
 
 
 @router.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_node(node_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_node(node_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("servers"))):
     """Delete a node and its sub-nodes; their servers are moved to the root."""
     node = await db.get(Node, node_id)
     if not node:
@@ -133,12 +133,12 @@ async def delete_node(node_id: uuid.UUID, db: AsyncSession = Depends(get_db), us
 
 
 @router.get("/user-groups", response_model=list[UserGroupRead])
-async def list_groups(db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def list_groups(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
     return (await db.execute(select(UserGroup).order_by(UserGroup.name))).scalars().all()
 
 
 @router.post("/user-groups", response_model=UserGroupRead, status_code=status.HTTP_201_CREATED)
-async def create_group(data: UserGroupCreate, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_group(data: UserGroupCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     if (await db.execute(select(UserGroup).where(UserGroup.name == data.name))).first():
         raise HTTPException(status_code=409, detail="Group name already exists")
     group = UserGroup(name=data.name, description=data.description)
@@ -152,7 +152,7 @@ async def create_group(data: UserGroupCreate, db: AsyncSession = Depends(get_db)
 
 @router.patch("/user-groups/{group_id}", response_model=UserGroupRead)
 async def update_group(
-    group_id: uuid.UUID, data: UserGroupUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only),
+    group_id: uuid.UUID, data: UserGroupUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies")),
 ):
     group = await db.get(UserGroup, group_id)
     if not group:
@@ -170,7 +170,7 @@ async def update_group(
 
 
 @router.delete("/user-groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_group(group_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_group(group_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     group = await db.get(UserGroup, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -212,13 +212,13 @@ def _check_validity(valid_from, valid_until):
 
 
 @router.get("/access-policies", response_model=list[AccessPolicyRead])
-async def list_policies(db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def list_policies(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
     rows = (await db.execute(select(AccessPolicy).order_by(AccessPolicy.name))).scalars().all()
     return [_policy_read(p) for p in rows]
 
 
 @router.post("/access-policies", response_model=AccessPolicyRead, status_code=status.HTTP_201_CREATED)
-async def create_policy(data: AccessPolicyCreate, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def create_policy(data: AccessPolicyCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     if (await db.execute(select(AccessPolicy).where(AccessPolicy.name == data.name))).first():
         raise HTTPException(status_code=409, detail="Policy name already exists")
     _check_validity(data.valid_from, data.valid_until)
@@ -237,7 +237,7 @@ async def create_policy(data: AccessPolicyCreate, db: AsyncSession = Depends(get
 
 @router.patch("/access-policies/{policy_id}", response_model=AccessPolicyRead)
 async def update_policy(
-    policy_id: uuid.UUID, data: AccessPolicyUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only),
+    policy_id: uuid.UUID, data: AccessPolicyUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies")),
 ):
     policy = await db.get(AccessPolicy, policy_id)
     if not policy:
@@ -256,7 +256,7 @@ async def update_policy(
 
 
 @router.get("/access-policies/export")
-async def export_policies(db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def export_policies(db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     data = await policy_io.export_policies(db)
     db.add(AuditLog(user_id=user.id, action="access_policy.export", result=f"{len(data['policies'])} règle(s)"))
     await db.commit()
@@ -270,7 +270,7 @@ class PolicyImportIn(BaseModel):
 
 
 @router.post("/access-policies/import")
-async def import_policies(data: PolicyImportIn, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def import_policies(data: PolicyImportIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     try:
         report = await policy_io.import_policies(db, data.payload, overwrite=data.overwrite,
                                                  dry_run=data.dry_run, actor_id=user.id)
@@ -287,7 +287,7 @@ async def import_policies(data: PolicyImportIn, db: AsyncSession = Depends(get_d
 
 
 @router.delete("/access-policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+async def delete_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     policy = await db.get(AccessPolicy, policy_id)
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
@@ -297,7 +297,7 @@ async def delete_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/users/{user_id}/access", response_model=list[MyServerAccess])
-async def user_effective_access(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(admin_only)):
+async def user_effective_access(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
     """Effective access of any user (admin troubleshooting: 'why can X see Y?')."""
     target = await db.get(User, user_id)
     if not target:

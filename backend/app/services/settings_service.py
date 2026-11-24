@@ -12,6 +12,26 @@ from app.models.settings import AppSetting
 
 # Default settings with descriptions
 DEFAULTS = {
+    "risk_secret_max_age_days": {
+        "value": "90",
+        "description": "Un mot de passe géré plus ancien que ce nombre de jours est signalé comme risque.",
+    },
+    "risk_dormant_days": {
+        "value": "60",
+        "description": "Un utilisateur sans connexion depuis ce nombre de jours est signalé comme inactif.",
+    },
+    "backup_interval_days": {
+        "value": "0",
+        "description": "Sauvegarde chiffrée des comptes tous les N jours. 0 : seulement à la demande.",
+    },
+    "backup_destinations": {
+        "value": '["storage"]',
+        "description": "Où envoyer les sauvegardes planifiées : liste JSON parmi \"storage\" (stockage des enregistrements) et \"email\".",
+    },
+    "backup_email_recipients": {
+        "value": "[]",
+        "description": "Destinataires des sauvegardes par e-mail (liste JSON). Vide : ceux des canaux e-mail.",
+    },
     "data_masking_rules": {
         "value": "[]",
         "description": "Masquage dans la sortie des terminaux : liste JSON de règles {name, pattern, replacement, enabled}.",

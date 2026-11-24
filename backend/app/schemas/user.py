@@ -15,6 +15,9 @@ class UserRead(BaseModel):
     is_active: bool
     created_at: datetime
     last_login: datetime | None
+    custom_role_id: uuid.UUID | None = None
+    custom_role_name: str | None = None
+    permissions: list[str] = []
 
     model_config = {"from_attributes": True}
 
@@ -22,3 +25,4 @@ class UserRead(BaseModel):
 class UserUpdate(BaseModel):
     role: UserRole | None = None
     is_active: bool | None = None
+    custom_role_id: uuid.UUID | None = None  # send null to remove

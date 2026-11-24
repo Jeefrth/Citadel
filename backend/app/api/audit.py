@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.core.security import encrypt_value
 from app.models.audit import AuditLog
@@ -30,7 +30,7 @@ admin_only = require_role(UserRole.ADMIN)
 
 
 @router.get("/live-sessions")
-async def list_live_sessions(_: User = Depends(admin_only)):
+async def list_live_sessions(_: User = Depends(require_perm("audit"))):
     return await live.list_active()
 
 
@@ -40,7 +40,7 @@ class KillIn(BaseModel):
 
 @router.post("/live-sessions/{session_id}/kill")
 async def kill_session(session_id: str, data: KillIn, request: Request,
-                       db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)):
+                       db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("sessions"))):
     meta = await live.get(session_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Session not found or already closed")
@@ -58,7 +58,7 @@ async def kill_session(session_id: str, data: KillIn, request: Request,
 
 @router.post("/live-sessions/{session_id}/monitor-ticket")
 async def monitor_ticket(session_id: str, request: Request, db: AsyncSession = Depends(get_db),
-                         user: User = Depends(admin_only)):
+                         user: User = Depends(require_perm("audit"))):
     """One-time ticket to watch an RDP session read-only (/ws/monitor-rdp)."""
     meta = await live.get(session_id)
     if not meta or meta.get("protocol") != "rdp":
@@ -77,7 +77,7 @@ async def monitor_ticket(session_id: str, request: Request, db: AsyncSession = D
 
 def _command_query(user: User, q, user_id, server_id, decision, source, session_id, date_from, date_to):
     stmt = select(CommandLog)
-    if user.role != UserRole.ADMIN:
+    if not has_perm(user, "audit"):
         stmt = stmt.where(CommandLog.user_id == user.id)  # users only see their own commands
     elif user_id:
         stmt = stmt.where(CommandLog.user_id == user_id)
@@ -127,7 +127,7 @@ async def export_commands(
     q: str | None = None, user_id: uuid.UUID | None = None, server_id: uuid.UUID | None = None,
     decision: str | None = None, source: str | None = None,
     date_from: datetime | None = None, date_to: datetime | None = None,
-    db: AsyncSession = Depends(get_db), user: User = Depends(admin_only),
+    db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("audit")),
 ):
     stmt = _command_query(user, q, user_id, server_id, decision, source, None, date_from, date_to)
     rows = (await db.execute(stmt.order_by(CommandLog.created_at.desc()).limit(100000))).scalars().all()

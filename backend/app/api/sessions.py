@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role
+from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.models.audit import AuditLog
 from app.models.base import UserRole
@@ -36,7 +36,7 @@ async def list_sessions(
 ):
     """List recorded sessions (admins: all, others: their own)."""
     query = select(SessionRecording).order_by(SessionRecording.started_at.desc())
-    if user.role != UserRole.ADMIN:
+    if not has_perm(user, "audit"):
         query = query.where(SessionRecording.user_id == user.id)
     if server_id:
         query = query.where(SessionRecording.server_id == server_id)
@@ -49,7 +49,7 @@ async def list_sessions(
 
 async def _get_visible(db: AsyncSession, user: User, recording_id: uuid.UUID) -> SessionRecording:
     rec = (await db.execute(select(SessionRecording).where(SessionRecording.id == recording_id))).scalar_one_or_none()
-    if not rec or (user.role != UserRole.ADMIN and rec.user_id != user.id):
+    if not rec or (not has_perm(user, "audit") and rec.user_id != user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
     return rec
 
@@ -100,7 +100,7 @@ async def get_rdp_recording(recording_id: uuid.UUID, request: Request, db: Async
 
 @router.get("/{recording_id}/verify")
 async def verify_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                           user: User = Depends(require_role(UserRole.ADMIN))):
+                           user: User = Depends(require_perm("audit"))):
     """Re-read the stored object and check its SHA-256."""
     rec = await _get_visible(db, user, recording_id)
     if not rec.storage_key:
@@ -177,7 +177,7 @@ async def bulk_download(body: BulkDownloadRequest, request: Request, db: AsyncSe
     """ZIP of recordings (SSH as asciinema .cast, RDP as Guacamole dump) + manifest.csv.
     Each file is integrity-checked (SHA-256) on the way out; failures are listed, not hidden."""
     query = select(SessionRecording).where(SessionRecording.id.in_(body.ids))
-    if user.role != UserRole.ADMIN:
+    if not has_perm(user, "audit"):
         query = query.where(SessionRecording.user_id == user.id)
     recs = (await db.execute(query.order_by(SessionRecording.started_at))).scalars().all()
     if not recs:

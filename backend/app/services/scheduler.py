@@ -47,6 +47,14 @@ async def run_cycle() -> dict:
         # 0d. Access policies about to expire (lot 6)
         stats["expiry_reminders"] = await remind_expiring_policies(db, now)
 
+        # 0e. Encrypted account backup (lot 7)
+        from app.services.account_backup import scheduled as scheduled_backup
+        stats["backups"] = await scheduled_backup(db, now)
+
+        # 0f. Risk detection, once a day (lot 7)
+        from app.services.risks import scheduled as scheduled_risks
+        stats["risk_scans"] = await scheduled_risks(db, now)
+
         # 1. Due rotations
         accounts = (await db.execute(
             select(Account).where(Account.is_active.is_(True), Account.rotation_enabled.is_(True))
