@@ -69,4 +69,4 @@ Toujours dans l'application (cloche). Canaux externes, chacun abonné à des év
 
 ## IP source derrière un reverse proxy
 
-Citadel n'utilise `X-Forwarded-For` que si la requête vient d'un proxy listé dans `TRUSTED_PROXIES` (CIDR). En production derrière nginx, y mettre le réseau du proxy, sinon toutes les requêtes semblent venir du proxy.
+Citadel n'utilise `X-Forwarded-For` que si la requête vient d'un proxy listé dans `TRUSTED_PROXIES`. En production, nginx (le conteneur `frontend`, à l'adresse fixe `172.31.250.10`) **écrase** cet en-tête avec l'adresse réelle du client sur `/api/` et `/ws/`, et lui seul est déclaré de confiance. Ne jamais mettre des plages entières (`10.0.0.0/8`...) dans `TRUSTED_PROXIES` : un client de ces plages pourrait alors choisir l'IP vue par les ACL. Si un autre reverse proxy est placé devant nginx, configurer `set_real_ip_from` / `real_ip_header` dans nginx.

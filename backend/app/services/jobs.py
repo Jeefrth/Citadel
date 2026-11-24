@@ -261,6 +261,90 @@ async def _run_command_job(job_id) -> None:
     await asyncio.gather(*(one(tid) for tid in target_ids))
 
 
+# ── Extra vars hardening ─────────────────────────────────
+
+# Ansible gives extra vars the highest precedence (above inventory host vars),
+# so a free-form value could replace the connection (ansible_connection=local,
+# ansible_host=<attacker>, ansible_ssh_common_args=ProxyCommand...) or run a
+# Jinja lookup on the controller. Extra vars are therefore restricted.
+EXTRA_VAR_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+RESERVED_VARS = {
+    "hostvars", "groups", "group_names", "inventory_hostname", "inventory_hostname_short",
+    "inventory_dir", "inventory_file", "playbook_dir", "play_hosts", "role_path", "role_name",
+    "omit", "environment", "vars", "lookup", "query", "q", "item", "connection", "become",
+    "become_user", "become_method", "remote_user", "delegate_to",
+}
+TEMPLATE_MARKERS = ("{{", "{%", "{#")
+
+
+def _check_value(value, path: str, depth: int = 0) -> None:
+    if depth > 5:
+        raise ValueError(f"Variable « {path} » : structure trop profonde")
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    if isinstance(value, str):
+        if len(value) > 4096:
+            raise ValueError(f"Variable « {path} » : valeur trop longue")
+        if any(m in value for m in TEMPLATE_MARKERS):
+            raise ValueError(f"Variable « {path} » : la syntaxe de modèle ({{{{ }}}}, {{% %}}) est interdite")
+        return
+    if isinstance(value, list):
+        for i, v in enumerate(value):
+            _check_value(v, f"{path}[{i}]", depth + 1)
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(k, str) or any(m in k for m in TEMPLATE_MARKERS):
+                raise ValueError(f"Variable « {path} » : clé invalide")
+            _check_value(v, f"{path}.{k}", depth + 1)
+        return
+    raise ValueError(f"Variable « {path} » : type non pris en charge")
+
+
+def validate_extra_vars(extra_vars: dict, playbook: Playbook, is_admin: bool) -> dict:
+    """Run-time variables: declared keys only for non-admins, never Ansible's own
+    variables, never templating. Raises ValueError with a user-facing message."""
+    if not isinstance(extra_vars, dict):
+        raise ValueError("Les variables doivent être un objet JSON")
+    declared = set((playbook.variables or {}).keys())
+    for key, value in extra_vars.items():
+        if not isinstance(key, str) or not EXTRA_VAR_KEY.match(key):
+            raise ValueError(f"Nom de variable invalide : « {key} »")
+        if key.lower().startswith("ansible_") or key in RESERVED_VARS:
+            raise ValueError(f"La variable « {key} » est réservée à Ansible et ne peut pas être passée au lancement")
+        if not is_admin and key not in declared:
+            raise ValueError(f"La variable « {key} » n'est pas déclarée dans ce playbook "
+                             "(seules les variables par défaut du playbook peuvent être remplacées)")
+        _check_value(value, key)
+    return extra_vars
+
+
+class _Unsafe(str):
+    """Rendered as `!unsafe 'value'`: Ansible never templates it."""
+
+
+def _unsafe_tree(value):
+    if isinstance(value, str):
+        return _Unsafe(value)
+    if isinstance(value, list):
+        return [_unsafe_tree(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _unsafe_tree(v) for k, v in value.items()}
+    return value
+
+
+def render_vars_file(defaults: dict, extra: dict) -> str:
+    """YAML vars file: admin-authored defaults as-is, run-time values tagged !unsafe."""
+    import yaml
+
+    class _Dumper(yaml.SafeDumper):
+        pass
+
+    _Dumper.add_representer(_Unsafe, lambda d, v: d.represent_scalar("!unsafe", str(v), style="'"))
+    merged = {**(defaults or {}), **_unsafe_tree(extra or {})}
+    return yaml.dump(merged, Dumper=_Dumper, allow_unicode=True, sort_keys=False)
+
+
 # ── Playbook jobs ────────────────────────────────────────
 
 _HOST_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -348,12 +432,17 @@ async def _run_playbook_job(job_id) -> None:
             with open(inv_path, "w") as f:
                 json.dump({"all": {"hosts": hosts}}, f)
             os.chmod(inv_path, 0o600)
-            vars_path = os.path.join(workdir, "vars.json")
+            vars_path = os.path.join(workdir, "vars.yml")
+            # Re-checked here too (defence in depth: the API already validated them)
+            validate_extra_vars(job.extra_vars or {}, playbook, is_admin=user.role == UserRole.ADMIN)
             with open(vars_path, "w") as f:
-                json.dump({**(playbook.variables or {}), **(job.extra_vars or {})}, f)
+                f.write(render_vars_file(playbook.variables or {}, job.extra_vars or {}))
             forks, timeout = max(1, min(job.parallelism, 50)), job.timeout
 
-        env = {**os.environ, "ANSIBLE_HOST_KEY_CHECKING": "False", "ANSIBLE_NOCOLOR": "1",
+        # Minimal environment: never hand the backend's own variables (DB URL, vault
+        # settings, encryption key...) to the Ansible process.
+        env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "LANG": "C.UTF-8",
+               "ANSIBLE_HOST_KEY_CHECKING": "False", "ANSIBLE_NOCOLOR": "1",
                "ANSIBLE_FORCE_COLOR": "0", "ANSIBLE_RETRY_FILES_ENABLED": "False",
                "ANSIBLE_LOCAL_TEMP": os.path.join(workdir, "tmp"), "ANSIBLE_SSH_ARGS": "-o ControlMaster=no",
                "HOME": workdir}

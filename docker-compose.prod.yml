@@ -70,8 +70,8 @@ services:
       - .env
     environment:
       VAULT_ADDR: http://openbao:8200
-      # Only nginx can reach the backend (no published port): trust its X-Forwarded-For
-      TRUSTED_PROXIES: 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16
+      # Only the nginx container (fixed address below) may set X-Forwarded-For
+      TRUSTED_PROXIES: 172.31.250.10/32
       GUACD_HOST: guacd
     depends_on:
       db:
@@ -93,6 +93,9 @@ services:
       - recordings:/recordings
 
   frontend:
+    networks:
+      default:
+        ipv4_address: 172.31.250.10
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -113,3 +116,9 @@ volumes:
   openbao-approle:
   ca_data:
   pgdata:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24

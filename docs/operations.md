@@ -21,6 +21,7 @@ Chaque serveur est traité comme une commande interactive : droit `execute`, ACL
 
 - Playbooks stockés dans Citadel (YAML, `hosts: all`), avec variables par défaut ; création et modification **réservées aux admins**.
 - Lancement : droit `execute` sur chaque cible. Les ACL de commandes **ne s'appliquent pas** au contenu d'un playbook (d'où la restriction aux admins pour l'écrire).
+- Variables passées au lancement : un opérateur ne peut remplacer que les variables par défaut déclarées dans le playbook. Pour tout le monde, les variables d'Ansible (`ansible_*`, `hostvars`, `become`...) et toute syntaxe de modèle (`{{`, `{%`) sont refusées, et les valeurs sont écrites `!unsafe` (jamais évaluées). Sans cela, une variable comme `ansible_connection=local` ou `ansible_host=<autre machine>` ferait exécuter le playbook sur le bastion ou enverrait les identifiants ailleurs. Le processus Ansible ne reçoit qu'un environnement minimal.
 - Citadel génère un inventaire temporaire (dossier `0700`, supprimé à la fin) avec le compte de chaque serveur : mot de passe (via `sshpass`), clé, ou certificat éphémère signé pour 2 h. Serveurs Windows en WinRM (NTLM) : les modules `ansible.windows` ne sont pas inclus dans ansible-core, utiliser `ansible.builtin.raw` ou installer la collection.
 - Journal Ansible en direct, résultat par serveur d'après le récapitulatif. Une ligne `ansible-playbook <nom>` par serveur dans le journal des commandes (source `playbook`).
 

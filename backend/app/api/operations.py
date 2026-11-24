@@ -474,6 +474,7 @@ async def create_job(data: JobIn, request: Request, db: AsyncSession = Depends(g
                      user: User = Depends(require_role(UserRole.ADMIN, UserRole.OPERATOR))):
     playbook = None
     if data.kind == "command":
+        data.extra_vars = {}
         if not (data.command or "").strip():
             raise HTTPException(status_code=400, detail="Command is required")
         name = data.name or data.command.strip().splitlines()[0][:120]
@@ -481,6 +482,10 @@ async def create_job(data: JobIn, request: Request, db: AsyncSession = Depends(g
         playbook = await db.get(Playbook, data.playbook_id) if data.playbook_id else None
         if playbook is None:
             raise HTTPException(status_code=400, detail="Playbook not found")
+        try:
+            jobs_svc.validate_extra_vars(data.extra_vars, playbook, is_admin=user.role == UserRole.ADMIN)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         name = data.name or f"Playbook {playbook.name}"
     try:
         job = await jobs_svc.create_job(
