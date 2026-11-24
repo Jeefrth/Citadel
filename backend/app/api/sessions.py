@@ -23,6 +23,8 @@ async def list_sessions(
 ):
     """List recorded sessions, optionally filtered by server."""
     query = select(SessionRecording).order_by(SessionRecording.started_at.desc())
+    if user.role != UserRole.ADMIN:
+        query = query.where(SessionRecording.user_id == user.id)
 
     if server_id:
         query = query.where(SessionRecording.server_id == server_id)
@@ -43,7 +45,7 @@ async def get_session(
         select(SessionRecording).where(SessionRecording.id == recording_id)
     )
     recording = result.scalar_one_or_none()
-    if not recording:
+    if not recording or (user.role != UserRole.ADMIN and recording.user_id != user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found"
         )

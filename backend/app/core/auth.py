@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from datetime import datetime, timezone
 
 import httpx
@@ -99,7 +101,7 @@ async def _validate_token(token: str) -> dict:
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token validation failed: {e}",
+            detail=f"Token validation failed: {last_error}",
         )
 
     return payload
@@ -177,8 +179,7 @@ async def get_current_user(
             detail="Not authenticated",
         )
 
-    claims = await _validate_token(credentials.credentials)
-    user = await _sync_user(claims, db)
+    user = await authenticate_token(credentials.credentials, db)
 
     if not user.is_active:
         raise HTTPException(
@@ -187,6 +188,44 @@ async def get_current_user(
         )
 
     return user
+
+
+ACCESS_KEY_PREFIX = "ctk_"
+
+
+def hash_access_key(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def _authenticate_access_key(token: str, db: AsyncSession) -> User:
+    """Personal API token: ctk_<prefix>_<secret>, only its SHA-256 is stored (F4)."""
+    from app.models.pam import AccessKey
+
+    parts = token.split("_", 2)
+    if len(parts) != 3:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed access key")
+    key = (await db.execute(select(AccessKey).where(AccessKey.prefix == parts[1]))).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if (
+        key is None
+        or not key.is_active
+        or not hmac.compare_digest(key.key_hash, hash_access_key(token))
+        or (key.expires_at is not None and key.expires_at < now)
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired access key")
+    key.last_used_at = now
+    user = key.user
+    await db.commit()
+    user._via_access_key = True  # lets sensitive endpoints refuse token-on-token
+    return user
+
+
+async def authenticate_token(token: str, db: AsyncSession) -> User:
+    """Authenticate either an Entra ID access token or a Citadel access key."""
+    if token.startswith(ACCESS_KEY_PREFIX):
+        return await _authenticate_access_key(token, db)
+    claims = await _validate_token(token)
+    return await _sync_user(claims, db)
 
 
 def require_role(*roles: UserRole):

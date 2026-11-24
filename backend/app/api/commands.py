@@ -9,6 +9,8 @@ from app.models.user import User
 from app.models.audit import AuditLog
 from app.models.base import UserRole
 from app.core.command_filter import check_command
+from app.core.permissions import default_account, require_server, resolve_for_user
+from app.models.pam import PolicyAction
 from app.schemas.command import (
     CommandRequest,
     CommandResponse,
@@ -29,11 +31,13 @@ async def test_connection(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Test SSH or WinRM connectivity to a server."""
+    """Test SSH or WinRM connectivity with the server's default account."""
+    server, _ = await require_server(db, user, server_id)
     try:
-        result = await connection_manager.test_connection(str(server_id), db)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        account = default_account(server)
+    except HTTPException:
+        account = None
+    result = await connection_manager.test_connection(server, account, db)
 
     db.add(AuditLog(
         user_id=user.id,
@@ -58,7 +62,14 @@ async def execute_command(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
-    """Execute a command on a remote server (SSH or PowerShell)."""
+    """Execute a command on a remote server (SSH or PowerShell).
+
+    Requires the 'execute' action; runs as body.account_id or the default
+    account, which must be granted to the user.
+    """
+    server, grant = await require_server(db, user, server_id, PolicyAction.EXECUTE.value)
+    account = resolve_for_user(server, grant, user, account_id=body.account_id)
+
     # Security: block dangerous commands (reads patterns from DB)
     allowed, reason = await check_command(body.command, db)
     if not allowed:
@@ -66,10 +77,10 @@ async def execute_command(
 
     try:
         result = await connection_manager.execute_command(
-            str(server_id), body.command, db, timeout=body.timeout
+            server, account, body.command, timeout=body.timeout
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -82,7 +93,7 @@ async def execute_command(
         action="server.execute_command",
         command=body.command,
         status="success" if result.exit_code == 0 else "failure",
-        result=result.stdout[:500] if result.stdout else result.stderr[:500],
+        result=f"[{account.label}] " + (result.stdout[:500] if result.stdout else result.stderr[:500]),
         ip_address=request.client.host if request.client else None,
     ))
     await db.commit()
@@ -99,11 +110,14 @@ async def get_system_info(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Retrieve system information from a remote server."""
+    """Retrieve system information from a remote server (default account)."""
+    server, _ = await require_server(db, user, server_id)
     try:
-        info = await connection_manager.get_system_info(str(server_id), db)
+        info = await connection_manager.get_system_info(server, default_account(server))
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

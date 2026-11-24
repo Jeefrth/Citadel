@@ -16,9 +16,10 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 && \
+    libpq5 openssh-client && \
     rm -rf /var/lib/apt/lists/* && \
-    addgroup --system app && adduser --system --ingroup app app
+    addgroup --system app && adduser --system --ingroup app app && \
+    mkdir -p /data/ca && chown app:app /data/ca && chmod 700 /data/ca
 
 COPY --from=builder /install /usr/local
 COPY . .

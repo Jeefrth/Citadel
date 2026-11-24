@@ -39,6 +39,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-citadel}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-citadel}
       REDIS_URL: redis://redis:6379/0
+      GUACD_HOST: guacd
     depends_on:
       db:
         condition: service_healthy
@@ -46,6 +47,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      # Mini-CA private key must survive rebuilds (gitignored)
+      - ./data/ca:/data/ca
 
   guacd:
     image: guacamole/guacd:latest

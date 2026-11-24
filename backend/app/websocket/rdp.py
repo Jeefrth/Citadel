@@ -6,25 +6,26 @@ guacd handles the actual RDP connection.
 """
 
 import asyncio
+import os
+import uuid
 import socket
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from app.core.auth import _validate_token, _sync_user, _get_or_create_dev_user
-from app.core.config import settings
 from app.core.database import async_session
 from app.core.security import decrypt_value
 from app.models.server import Server
-from app.models.credential import Credential
+from app.models.user import User
+from app.services.tickets import consume_ticket
 from app.models.audit import AuditLog
 
 router = APIRouter()
 logger = logging.getLogger("citadel.rdp")
 
-GUACD_HOST = "localhost"
-GUACD_PORT = 4822
+GUACD_HOST = os.environ.get("GUACD_HOST", "localhost")
+GUACD_PORT = int(os.environ.get("GUACD_PORT", "4822"))
 
 
 def _guac_encode(*args: str) -> bytes:
@@ -59,7 +60,8 @@ def _guac_decode(data: bytes) -> list[list[str]]:
 
 
 def _connect_guacd(hostname: str, port: int, username: str, password: str,
-                   width: int, height: int, dpi: int = 96) -> socket.socket:
+                   width: int, height: int, dpi: int = 96,
+                   disable_copy: bool = False, disable_paste: bool = False) -> socket.socket:
     """Connect to guacd and perform the Guacamole handshake for RDP."""
     # Split DOMAIN\user format into separate fields
     domain = ""
@@ -102,6 +104,8 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
         "enable-wallpaper": "false",
         "enable-theming": "false",
         "enable-font-smoothing": "true",
+        "disable-copy": "true" if disable_copy else "false",
+        "disable-paste": "true" if disable_paste else "false",
     }
 
     # Step 4: Send size, audio, video, image, then connect
@@ -132,7 +136,7 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
 async def rdp_websocket(websocket: WebSocket, server_id: str):
     """RDP session via pure Guacamole protocol over WebSocket.
 
-    Auth via query params: ?token=xxx&width=1024&height=768
+    Auth via a one-time ticket: ?ticket=xxx&width=1024&height=768
     After connection, raw Guacamole protocol is exchanged.
     """
     # Accept with guacamole subprotocol if requested
@@ -146,59 +150,52 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
     query_string = websocket.scope.get("query_string", b"").decode().rstrip("?")
     from urllib.parse import parse_qs
     params = parse_qs(query_string)
-    token = params.get("token", [""])[0]
+    ticket = params.get("ticket", [""])[0]
     width = int(params.get("width", ["1024"])[0])
     height = int(params.get("height", ["768"])[0])
 
-    # Authenticate
-    async with async_session() as db:
-        if settings.DEV_MODE:
-            user = await _get_or_create_dev_user(db)
-        else:
-            if not token:
-                await websocket.close(code=4001, reason="No token")
-                return
-            try:
-                claims = await _validate_token(token)
-                user = await _sync_user(claims, db)
-            except Exception as e:
-                await websocket.close(code=4001, reason=f"Auth failed: {e}")
-                return
+    # Authenticate with a one-time ticket issued by POST /api/servers/{id}/connect-ticket.
+    # Policy check and account resolution already happened at issuance.
+    consumed = await consume_ticket(ticket)
+    if consumed is None:
+        await websocket.close(code=4001, reason="Invalid or expired ticket")
+        return
+    payload, account = consumed
+    if payload["protocol"] != "rdp" or payload["server_id"] != str(server_id):
+        await websocket.close(code=4003, reason="Ticket not valid for this connection")
+        return
 
-        # Get server + credentials
-        result = await db.execute(select(Server).where(Server.id == server_id))
-        server = result.scalar_one_or_none()
-        if not server:
-            await websocket.close(code=4004, reason="Server not found")
+    async with async_session() as db:
+        user = (await db.execute(select(User).where(User.id == uuid.UUID(payload["user_id"])))).scalar_one_or_none()
+        server = (await db.execute(select(Server).where(Server.id == uuid.UUID(server_id)))).scalar_one_or_none()
+        if user is None or not user.is_active or server is None:
+            await websocket.close(code=4003, reason="Forbidden")
             return
 
-        credential = None
-        if server.credential_id:
-            cred_result = await db.execute(
-                select(Credential).where(Credential.id == server.credential_id)
-            )
-            credential = cred_result.scalar_one_or_none()
-
-        if not credential or not credential.encrypted_password:
-            await websocket.close(code=4003, reason="No RDP credential (password required)")
+        if account.use_cert or not account.password:
+            await websocket.close(code=4003, reason="RDP requires a password account")
             return
 
         rdp_host = server.ip_address
-        rdp_port = 3389  # Standard RDP port
-        rdp_user = credential.username
-        rdp_pass = decrypt_value(credential.encrypted_password)
+        rdp_port = server.rdp_port or 3389
+        rdp_user = account.username
+        rdp_pass = decrypt_value(account.password)
+        # Clipboard ACL: driven by policy actions captured in the ticket
+        disable_copy = not payload["extra"].get("copy", False)
+        disable_paste = not payload["extra"].get("paste", False)
 
         user_id = user.id
         srv_id = server.id
 
-        db.add(AuditLog(user_id=user_id, server_id=srv_id, action="rdp.open"))
+        db.add(AuditLog(user_id=user_id, server_id=srv_id, action="rdp.open", result=f"account={account.label}"))
         await db.commit()
 
     # Connect to guacd
     try:
         sock = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: _connect_guacd(rdp_host, rdp_port, rdp_user, rdp_pass, width, height),
+            lambda: _connect_guacd(rdp_host, rdp_port, rdp_user, rdp_pass, width, height,
+                                   disable_copy=disable_copy, disable_paste=disable_paste),
         )
     except Exception as e:
         logger.error("guacd connection failed: %s", e)

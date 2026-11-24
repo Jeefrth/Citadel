@@ -2,12 +2,11 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import ResolvedAccount
 from app.models.server import Server
-from app.models.credential import Credential
-from app.models.base import OSType, ServerStatus, CredentialType
+from app.models.base import OSType, ServerStatus
 from app.services import ssh_service, winrm_service
 
 
@@ -39,25 +38,6 @@ class SystemInfo:
     disk_usage: str
 
 
-async def _get_server_with_credential(
-    server_id: str, db: AsyncSession
-) -> tuple[Server, Credential | None]:
-    """Fetch server and its associated credential."""
-    result = await db.execute(select(Server).where(Server.id == server_id))
-    server = result.scalar_one_or_none()
-    if not server:
-        raise ValueError(f"Server {server_id} not found")
-
-    credential = None
-    if server.credential_id:
-        cred_result = await db.execute(
-            select(Credential).where(Credential.id == server.credential_id)
-        )
-        credential = cred_result.scalar_one_or_none()
-
-    return server, credential
-
-
 def _get_service(server: Server):
     """Return the appropriate service module based on server OS type."""
     if server.os_type == OSType.LINUX:
@@ -75,61 +55,34 @@ def _get_port(server: Server) -> int:
     return server.winrm_port
 
 
-def _get_auth_kwargs(credential: Credential | None, server: Server | None = None, cert_minutes: int | None = None) -> dict:
-    """Build auth keyword arguments based on credential type or server cert mode."""
-    # Auto cert mode: server has cert_auth_enabled, no credential needed
-    if credential is None and server and server.cert_auth_enabled:
-        return {
-            "use_ephemeral_cert": True,
-            "cert_validity_minutes": cert_minutes or 1,  # 1 min for commands, configurable for terminal
-        }
-
-    if credential is None:
-        raise ValueError("No credential or cert auth configured")
-
-    if credential.type == CredentialType.EPHEMERAL_CERT:
-        return {
-            "use_ephemeral_cert": True,
-            "cert_validity_minutes": cert_minutes or credential.cert_validity_minutes or 480,
-        }
-    return {
-        "password": credential.encrypted_password,
-        "ssh_key": credential.encrypted_ssh_key,
-    }
-
-
-def _get_username(server: Server, credential: Credential | None) -> str:
-    """Get SSH username from credential or server."""
-    if credential:
-        return credential.username
-    if server.ssh_username:
-        return server.ssh_username
-    raise ValueError("No username configured (set ssh_username on server or assign a credential)")
+def _auth_kwargs(server: Server, account: ResolvedAccount) -> dict:
+    """Service kwargs for an account. One-shot operations use 1-minute certs."""
+    if account.use_cert:
+        if server.os_type != OSType.LINUX:
+            raise ValueError("Ephemeral certificates are only supported on Linux (SSH)")
+        return {"use_ephemeral_cert": True, "cert_validity_minutes": 1}
+    if server.os_type == OSType.WINDOWS:
+        return {"password": account.password}
+    return {"password": account.password, "ssh_key": account.ssh_key}
 
 
 async def test_connection(
-    server_id: str, db: AsyncSession
+    server: Server, account: ResolvedAccount | None, db: AsyncSession
 ) -> ConnectionTestResult:
-    """Test connectivity to a server and update its status."""
-    server, credential = await _get_server_with_credential(server_id, db)
-
-    if not credential and not server.cert_auth_enabled:
+    """Test connectivity to a server with its default account and update its status."""
+    if account is None:
         return ConnectionTestResult(
             server_id=str(server.id),
             server_name=server.name,
             success=False,
-            message="No credential assigned and cert auth not enabled",
+            message="No default account configured",
         )
 
     try:
-        username = _get_username(server, credential)
-        auth_kwargs = _get_auth_kwargs(credential, server, cert_minutes=1)
+        auth_kwargs = _auth_kwargs(server, account)
     except ValueError as e:
         return ConnectionTestResult(
-            server_id=str(server.id),
-            server_name=server.name,
-            success=False,
-            message=str(e),
+            server_id=str(server.id), server_name=server.name, success=False, message=str(e),
         )
 
     service = _get_service(server)
@@ -139,12 +92,11 @@ async def test_connection(
     success, message = await service.test_connection(
         host=server.ip_address,
         port=port,
-        username=username,
+        username=account.username,
         **auth_kwargs,
     )
     elapsed = (asyncio.get_event_loop().time() - start) * 1000
 
-    # Update server status in DB
     server.status = ServerStatus.ONLINE if success else ServerStatus.OFFLINE
     if success:
         server.last_seen = datetime.now(timezone.utc)
@@ -160,52 +112,28 @@ async def test_connection(
 
 
 async def execute_command(
-    server_id: str, command: str, db: AsyncSession, timeout: int = 30
+    server: Server, account: ResolvedAccount, command: str, timeout: int = 30
 ) -> CommandResult:
-    """Execute a command on a remote server."""
-    server, credential = await _get_server_with_credential(server_id, db)
-
-    username = _get_username(server, credential)
-    auth_kwargs = _get_auth_kwargs(credential, server, cert_minutes=1)
-
-    service = _get_service(server)
-    port = _get_port(server)
-
-    result = await service.execute_command(
+    """Execute a command on a remote server with the given account."""
+    result = await _get_service(server).execute_command(
         host=server.ip_address,
-        port=port,
-        username=username,
+        port=_get_port(server),
+        username=account.username,
         command=command,
         timeout=timeout,
-        **auth_kwargs,
+        **_auth_kwargs(server, account),
     )
-
-    return CommandResult(
-        exit_code=result.exit_code,
-        stdout=result.stdout,
-        stderr=result.stderr,
-    )
+    return CommandResult(exit_code=result.exit_code, stdout=result.stdout, stderr=result.stderr)
 
 
-async def get_system_info(
-    server_id: str, db: AsyncSession
-) -> SystemInfo:
+async def get_system_info(server: Server, account: ResolvedAccount) -> SystemInfo:
     """Get system information from a remote server."""
-    server, credential = await _get_server_with_credential(server_id, db)
-
-    username = _get_username(server, credential)
-    auth_kwargs = _get_auth_kwargs(credential, server, cert_minutes=1)
-
-    service = _get_service(server)
-    port = _get_port(server)
-
-    info = await service.get_system_info(
+    info = await _get_service(server).get_system_info(
         host=server.ip_address,
-        port=port,
-        username=username,
-        **auth_kwargs,
+        port=_get_port(server),
+        username=account.username,
+        **_auth_kwargs(server, account),
     )
-
     return SystemInfo(
         hostname=info.hostname,
         os=info.os,

@@ -35,9 +35,10 @@ def test_server_create_with_all_fields():
         ssh_port=22,
         winrm_port=5986,
         tags={"env": "prod", "role": "dc"},
-        credential_id=uuid.uuid4(),
-        group_id=uuid.uuid4(),
+        node_id=uuid.uuid4(),
+        default_account={"username": "Administrator", "credential_id": str(uuid.uuid4())},
     )
+    assert data.default_account.username == "Administrator"
     assert data.os_type == OSType.WINDOWS
     assert data.tags["env"] == "prod"
 

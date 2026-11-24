@@ -3,15 +3,13 @@ import base64
 import json
 import time
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.core.auth import _validate_token, _sync_user, _get_or_create_dev_user
+from app.core.auth import authenticate_token, _get_or_create_dev_user
 from app.core.config import settings
 from app.core.database import async_session
-from app.models.server import Server
-from app.models.credential import Credential
+from app.core.permissions import require_server, resolve_for_user
+from app.models.pam import PolicyAction
 from app.models.audit import AuditLog
 from app.models.session_recording import SessionRecording
 from app.models.base import OSType
@@ -96,40 +94,34 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             # Configure: Entra ID → Security → Conditional Access → require MFA for this app
 
             try:
-                claims = await _validate_token(token)
-                user = await _sync_user(claims, db)
+                user = await authenticate_token(token, db)
+                if not user.is_active:
+                    raise ValueError("User account is deactivated")
             except Exception as e:
                 await websocket.send_json({"type": "error", "message": f"Auth failed: {e}"})
                 await websocket.close()
                 return
 
-        # Step 2: Get server and credential
-        result = await db.execute(select(Server).where(Server.id == server_id))
-        server = result.scalar_one_or_none()
-        if not server:
-            await websocket.send_json({"type": "error", "message": "Server not found"})
-            await websocket.close()
-            return
-
-        credential = None
-        if server.credential_id:
-            cred_result = await db.execute(
-                select(Credential).where(Credential.id == server.credential_id)
+        # Step 2: Authorize (policy) and resolve the connection account
+        try:
+            server, grant = await require_server(db, user, server_id, PolicyAction.CONNECT.value)
+            account = resolve_for_user(
+                server, grant, user,
+                account_id=msg.get("account_id"),
+                virtual=msg.get("virtual_account"),
+                input_username=msg.get("input_username"),
+                input_password=msg.get("input_password"),
             )
-            credential = cred_result.scalar_one_or_none()
-
-        if not credential and not server.cert_auth_enabled:
-            await websocket.send_json({"type": "error", "message": "No credential and cert auth not enabled"})
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "message": e.detail})
             await websocket.close()
             return
 
-        # Determine username
-        if credential:
-            ssh_user = credential.username
-        elif server.ssh_username:
-            ssh_user = server.ssh_username
-        else:
-            await websocket.send_json({"type": "error", "message": "No SSH username configured"})
+        if server.os_type != OSType.LINUX:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Interactive terminal not supported for Windows. Use RDP or execute command.",
+            })
             await websocket.close()
             return
 
@@ -138,38 +130,23 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         rows = msg.get("rows", 24)
         # Client can request a specific cert duration (minutes)
         requested_duration = msg.get("cert_duration", None)
+        use_cert = account.use_cert
+        cert_minutes = requested_duration or account.cert_minutes or 480
 
         try:
-            from app.models.base import CredentialType
-
-            # Determine auth mode
-            use_cert = server.cert_auth_enabled and not credential
-            if credential and credential.type == CredentialType.EPHEMERAL_CERT:
-                use_cert = True
-
-            cert_minutes = requested_duration or (credential.cert_validity_minutes if credential and use_cert else None) or 480
-
-            if server.os_type == OSType.LINUX:
-                session = await session_manager.create_ssh_session(
-                    server_id=str(server.id),
-                    user_id=str(user.id),
-                    host=server.ip_address,
-                    port=server.ssh_port,
-                    username=ssh_user,
-                    password=credential.encrypted_password if credential and not use_cert else None,
-                    ssh_key=credential.encrypted_ssh_key if credential and not use_cert else None,
-                    use_ephemeral_cert=use_cert,
-                    cert_validity_minutes=cert_minutes,
-                    cols=cols,
-                    rows=rows,
-                )
-            else:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Interactive terminal not supported for Windows. Use execute command.",
-                })
-                await websocket.close()
-                return
+            session = await session_manager.create_ssh_session(
+                server_id=str(server.id),
+                user_id=str(user.id),
+                host=server.ip_address,
+                port=server.ssh_port,
+                username=account.username,
+                password=account.password,
+                ssh_key=account.ssh_key,
+                use_ephemeral_cert=use_cert,
+                cert_validity_minutes=cert_minutes,
+                cols=cols,
+                rows=rows,
+            )
         except Exception as e:
             await websocket.send_json({"type": "error", "message": f"Connection failed: {e}"})
             await websocket.close()
@@ -191,7 +168,8 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             user_id=user_id,
             server_id=srv_id,
             action="terminal.open",
-            result=f"cert={cert_max_seconds}s" if cert_max_seconds else "password/key",
+            result=(f"account={account.label} "
+                    + (f"cert={cert_max_seconds}s" if cert_max_seconds else "password/key")),
         ))
         await db.commit()
 

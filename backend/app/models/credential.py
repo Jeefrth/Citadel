@@ -1,5 +1,5 @@
 from sqlalchemy import String, Integer, Enum, LargeBinary
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.base import UUIDMixin, TimestampMixin, CredentialType
@@ -24,4 +24,3 @@ class Credential(UUIDMixin, TimestampMixin, Base):
         Integer, nullable=True, default=480
     )
 
-    servers = relationship("Server", back_populates="credential")

@@ -9,7 +9,7 @@ from app.core.auth import get_current_user, require_role
 from app.core.database import get_db
 from app.models.user import User
 from app.models.server import Server
-from app.models.credential import Credential
+from app.core.permissions import default_account, require_server, visible_server_ids
 from app.models.metric import ServerMetric, AlertRule
 from app.models.base import UserRole, OSType, ServerStatus
 from app.schemas.monitoring import (
@@ -35,21 +35,11 @@ async def collect_metrics(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Collect real-time metrics from a server and store in history."""
-    result = await db.execute(select(Server).where(Server.id == server_id))
-    server = result.scalar_one_or_none()
-    if not server:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
-
-    if not server.credential_id:
-        raise HTTPException(status_code=400, detail="No credential assigned")
-
-    cred_result = await db.execute(
-        select(Credential).where(Credential.id == server.credential_id)
-    )
-    credential = cred_result.scalar_one_or_none()
-    if not credential:
-        raise HTTPException(status_code=400, detail="Credential not found")
+    """Collect real-time metrics from a server (default account) and store in history."""
+    server, _ = await require_server(db, user, server_id)
+    credential = default_account(server)
+    if credential.use_cert:
+        raise HTTPException(status_code=400, detail="Metrics need a password or SSH key account (ephemeral cert not supported yet)")
 
     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
 
@@ -58,14 +48,14 @@ async def collect_metrics(
             metrics = await monitoring_service.collect_linux_metrics(
                 host=server.ip_address, port=port,
                 username=credential.username,
-                password=credential.encrypted_password,
-                ssh_key=credential.encrypted_ssh_key,
+                password=credential.password,
+                ssh_key=credential.ssh_key,
             )
         else:
             metrics = await monitoring_service.collect_windows_metrics(
                 host=server.ip_address, port=port,
                 username=credential.username,
-                password=credential.encrypted_password,
+                password=credential.password,
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Metrics collection failed: {e}")
@@ -119,6 +109,7 @@ async def get_latest_metrics(
     user: User = Depends(get_current_user),
 ):
     """Get the most recent metrics for a server."""
+    await require_server(db, user, server_id)
     result = await db.execute(
         select(ServerMetric)
         .where(ServerMetric.server_id == server_id)
@@ -154,6 +145,7 @@ async def get_metrics_history(
     user: User = Depends(get_current_user),
 ):
     """Get metrics history for a server."""
+    await require_server(db, user, server_id)
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     result = await db.execute(
@@ -183,8 +175,12 @@ async def get_dashboard_summary(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get dashboard summary with all servers and their latest metrics."""
-    result = await db.execute(select(Server).order_by(Server.name))
+    """Get dashboard summary with visible servers and their latest metrics."""
+    query = select(Server).order_by(Server.name)
+    visible = await visible_server_ids(db, user)
+    if visible is not None:
+        query = query.where(Server.id.in_(list(visible) or [uuid.uuid4()]))
+    result = await db.execute(query)
     servers = result.scalars().all()
 
     # Load alert rules

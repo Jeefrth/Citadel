@@ -4,6 +4,7 @@ from pydantic import BaseModel
 class CommandRequest(BaseModel):
     command: str
     timeout: int = 30
+    account_id: str | None = None  # default account when omitted
 
 
 class CommandResponse(BaseModel):

@@ -22,14 +22,14 @@ async def test_health_check(client):
 
 async def test_auth_me_requires_token(client):
     response = await client.get("/api/auth/me")
-    assert response.status_code == 403  # No bearer token
+    assert response.status_code == 401  # No bearer token
 
 
 async def test_servers_list_requires_token(client):
     response = await client.get("/api/servers/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 async def test_users_list_requires_token(client):
     response = await client.get("/api/users/")
-    assert response.status_code == 403
+    assert response.status_code == 401

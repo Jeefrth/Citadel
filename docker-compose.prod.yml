@@ -42,6 +42,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    volumes:
+      # Mini-CA private key must survive rebuilds
+      - ca_data:/data/ca
 
   frontend:
     build:
@@ -58,4 +61,5 @@ services:
       - backend
 
 volumes:
+  ca_data:
   pgdata:

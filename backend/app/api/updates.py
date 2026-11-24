@@ -9,7 +9,10 @@ from app.core.auth import get_current_user, require_role
 from app.core.database import get_db
 from app.models.user import User
 from app.models.server import Server
-from app.models.credential import Credential
+from app.core.permissions import (
+    ResolvedAccount, default_account, require_server, visible_server_ids,
+)
+from app.models.pam import PolicyAction
 from app.models.update_job import UpdateJob
 from app.models.audit import AuditLog
 from app.models.base import UserRole, OSType, JobStatus
@@ -25,25 +28,13 @@ from app.services import update_service
 router = APIRouter()
 
 
-async def _get_server_and_cred(
-    server_id: uuid.UUID, db: AsyncSession
-) -> tuple[Server, Credential]:
-    result = await db.execute(select(Server).where(Server.id == server_id))
-    server = result.scalar_one_or_none()
-    if not server:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
-
-    if not server.credential_id:
-        raise HTTPException(status_code=400, detail="No credential assigned to this server")
-
-    cred_result = await db.execute(
-        select(Credential).where(Credential.id == server.credential_id)
-    )
-    credential = cred_result.scalar_one_or_none()
-    if not credential:
-        raise HTTPException(status_code=400, detail="Credential not found")
-
-    return server, credential
+def _password_account(account: ResolvedAccount) -> ResolvedAccount:
+    if account.use_cert:
+        raise HTTPException(
+            status_code=400,
+            detail="Update management needs a password or SSH key account (ephemeral cert not supported yet)",
+        )
+    return account
 
 
 @router.get("/{server_id}/updates", response_model=UpdateScanResponse)
@@ -52,8 +43,9 @@ async def scan_updates(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Scan a server for available updates."""
-    server, credential = await _get_server_and_cred(server_id, db)
+    """Scan a server for available updates (default account)."""
+    server, _ = await require_server(db, user, server_id)
+    credential = _password_account(default_account(server))
 
     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
 
@@ -61,14 +53,14 @@ async def scan_updates(
         result = await update_service.scan_linux_updates(
             server_id=str(server.id), host=server.ip_address, port=port,
             username=credential.username,
-            password=credential.encrypted_password,
-            ssh_key=credential.encrypted_ssh_key,
+            password=credential.password,
+            ssh_key=credential.ssh_key,
         )
     else:
         result = await update_service.scan_windows_updates(
             server_id=str(server.id), host=server.ip_address, port=port,
             username=credential.username,
-            password=credential.encrypted_password,
+            password=credential.password,
         )
 
     db.add(AuditLog(
@@ -88,8 +80,11 @@ async def apply_updates(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
-    """Apply updates on a server."""
-    server, credential = await _get_server_and_cred(server_id, db)
+    """Apply updates on a server (requires 'execute' and the default account granted)."""
+    server, grant = await require_server(db, user, server_id, PolicyAction.EXECUTE.value)
+    credential = _password_account(default_account(server))
+    if not grant.allows_account(credential.username):
+        raise HTTPException(status_code=403, detail=f"Account '{credential.username}' not granted")
     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
 
     # Create job record
@@ -110,15 +105,15 @@ async def apply_updates(
         result = await update_service.apply_linux_updates(
             host=server.ip_address, port=port,
             username=credential.username,
-            password=credential.encrypted_password,
-            ssh_key=credential.encrypted_ssh_key,
+            password=credential.password,
+            ssh_key=credential.ssh_key,
             packages=body.packages,
         )
     else:
         result = await update_service.apply_windows_updates(
             host=server.ip_address, port=port,
             username=credential.username,
-            password=credential.encrypted_password,
+            password=credential.password,
             packages=body.packages,
         )
 
@@ -149,10 +144,12 @@ async def list_update_jobs(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List all update jobs."""
-    result = await db.execute(
-        select(UpdateJob).order_by(UpdateJob.created_at.desc()).limit(50)
-    )
+    """List update jobs on servers visible to the user."""
+    query = select(UpdateJob).order_by(UpdateJob.created_at.desc()).limit(50)
+    visible = await visible_server_ids(db, user)
+    if visible is not None:
+        query = query.where(UpdateJob.server_id.in_(list(visible) or [uuid.uuid4()]))
+    result = await db.execute(query)
     return result.scalars().all()
 
 
@@ -161,8 +158,12 @@ async def get_compliance_report(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get a compliance overview of all servers."""
-    result = await db.execute(select(Server).order_by(Server.name))
+    """Get a compliance overview of servers visible to the user."""
+    query = select(Server).order_by(Server.name)
+    visible = await visible_server_ids(db, user)
+    if visible is not None:
+        query = query.where(Server.id.in_(list(visible) or [uuid.uuid4()]))
+    result = await db.execute(query)
     servers = result.scalars().all()
 
     entries = []
