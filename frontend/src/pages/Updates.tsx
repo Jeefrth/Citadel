@@ -1,17 +1,24 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { motion } from "motion/react";
 import { api } from "@/services/api";
 import { hasAction, type ServerData } from "@/services/types";
+import { Chip, ConfirmModal, EmptyState, PageHeader, type ChipTone } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
-  RefreshCw,
-  Shield,
-  ShieldAlert,
-  ShieldCheck,
+  AlertTriangle,
+  ChevronRight,
   Download,
   Loader2,
+  RefreshCw,
   Server,
-  ChevronDown,
-  ChevronUp,
-  AlertTriangle,
+  ShieldAlert,
+  ShieldCheck,
+  type LucideIcon,
 } from "lucide-react";
 
 interface PackageUpdate {
@@ -51,6 +58,8 @@ export default function Updates() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<UpdateJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmApply, setConfirmApply] = useState<ServerData | null>(null);
+  const serverNames = useMemo(() => new Map(servers.map((s) => [s.id, s.name])), [servers]);
 
   useEffect(() => {
     Promise.all([
@@ -92,7 +101,6 @@ export default function Updates() {
   };
 
   const handleApply = async (srv: ServerData) => {
-    if (!confirm(`Appliquer toutes les mises à jour sur ${srv.name} ?`)) return;
     setApplyingId(srv.id);
     try {
       await api.post(`/api/servers/${srv.id}/updates/apply`, { packages: null });
@@ -105,260 +113,316 @@ export default function Updates() {
     }
   };
 
-  const severityColor: Record<string, string> = {
-    critical: "text-red-600 bg-red-50",
-    important: "text-orange-600 bg-orange-50",
-    moderate: "text-amber-600 bg-amber-50",
-    low: "text-blue-600 bg-blue-50",
-    unknown: "text-gray-600 bg-gray-50",
-  };
-
   const totalUpdates = Object.values(scans).reduce((sum, s) => sum + s.total_updates, 0);
   const totalSecurity = Object.values(scans).reduce((sum, s) => sum + s.security_updates, 0);
   const scannedCount = Object.keys(scans).length;
+  const compliance =
+    scannedCount === 0
+      ? null
+      : totalUpdates === 0
+        ? "100 %"
+        : `${Math.round(((servers.length - Object.values(scans).filter((s) => s.total_updates > 0).length) / servers.length) * 100)} %`;
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Mises à jour</h2>
-        <button
-          onClick={handleScanAll}
-          disabled={scanningId !== null}
-          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-        >
-          <RefreshCw size={16} className={scanningId ? "animate-spin" : ""} />
-          Scanner tous les serveurs
-        </button>
+      <PageHeader
+        title="Mises à jour"
+        description="Scannez les paquets en attente et appliquez les correctifs avec le compte par défaut de chaque serveur."
+        actions={
+          <Button onClick={handleScanAll} disabled={scanningId !== null || servers.length === 0}>
+            <RefreshCw className={scanningId ? "animate-spin" : ""} />
+            Scanner tous les serveurs
+          </Button>
+        }
+      />
+
+      {/* Status strip */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border bg-card px-4 py-2.5 text-sm">
+        <StripItem label="Serveurs scannés" value={`${scannedCount}/${servers.length}`} />
+        <StripItem
+          label="Mises à jour disponibles"
+          value={totalUpdates}
+          tone={totalUpdates > 0 ? "text-live" : undefined}
+        />
+        <StripItem
+          label="Correctifs de sécurité"
+          value={totalSecurity}
+          tone={totalSecurity > 0 ? "text-danger" : undefined}
+          icon={totalSecurity > 0 ? ShieldAlert : undefined}
+        />
+        <StripItem
+          label="Conformité"
+          value={compliance ?? "-"}
+          tone={compliance === "100 %" ? "text-success" : undefined}
+          icon={compliance === "100 %" ? ShieldCheck : undefined}
+        />
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-card border rounded-lg p-4 flex items-center gap-3">
-          <Server size={20} className="text-blue-500" />
-          <div>
-            <p className="text-xl font-bold">{scannedCount}/{servers.length}</p>
-            <p className="text-xs text-muted-foreground">Serveurs scannés</p>
-          </div>
-        </div>
-        <div className="bg-card border rounded-lg p-4 flex items-center gap-3">
-          <Download size={20} className="text-amber-500" />
-          <div>
-            <p className="text-xl font-bold">{totalUpdates}</p>
-            <p className="text-xs text-muted-foreground">MAJ disponibles</p>
-          </div>
-        </div>
-        <div className="bg-card border rounded-lg p-4 flex items-center gap-3">
-          <ShieldAlert size={20} className="text-red-500" />
-          <div>
-            <p className="text-xl font-bold">{totalSecurity}</p>
-            <p className="text-xs text-muted-foreground">MAJ sécurité</p>
-          </div>
-        </div>
-        <div className="bg-card border rounded-lg p-4 flex items-center gap-3">
-          {totalUpdates === 0 && scannedCount > 0 ? (
-            <ShieldCheck size={20} className="text-green-500" />
-          ) : (
-            <Shield size={20} className="text-gray-400" />
-          )}
-          <div>
-            <p className="text-xl font-bold">
-              {scannedCount === 0
-                ? "-"
-                : totalUpdates === 0
-                  ? "OK"
-                  : `${Math.round(((servers.length - Object.values(scans).filter((s) => s.total_updates > 0).length) / servers.length) * 100)}%`}
-            </p>
-            <p className="text-xs text-muted-foreground">Conformité</p>
-          </div>
-        </div>
-      </div>
-
-      {loading && <p className="text-muted-foreground">Chargement...</p>}
-
-      {!loading && servers.length === 0 && (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <RefreshCw size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">
-            Aucun serveur avec un compte par défaut configuré.
-          </p>
+      {loading && (
+        <div className="space-y-2 rounded-lg border p-3">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
         </div>
       )}
 
-      {/* Server list with scan results */}
-      {servers.length > 0 && (
-        <div className="space-y-3">
-          {servers.map((srv) => {
-            const scan = scans[srv.id];
-            const isExpanded = expandedId === srv.id;
+      {!loading && servers.length === 0 && (
+        <EmptyState icon={Server} title="Aucun serveur à scanner">
+          Les scans utilisent le compte par défaut du serveur. Définissez-en un depuis la fiche du serveur.
+        </EmptyState>
+      )}
 
-            return (
-              <div key={srv.id} className="bg-card border rounded-lg overflow-hidden">
-                <div className="flex items-center gap-4 p-4">
-                  <Server
-                    size={18}
-                    className={srv.os_type === "linux" ? "text-green-500" : "text-blue-500"}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium">{srv.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {srv.ip_address} · {srv.os_type}
-                    </p>
-                  </div>
-
-                  {/* Scan result summary */}
-                  {scan && !scan.error && (
-                    <div className="flex items-center gap-3 text-sm">
-                      {scan.total_updates === 0 ? (
-                        <span className="flex items-center gap-1 text-green-600">
-                          <ShieldCheck size={16} /> À jour
-                        </span>
-                      ) : (
-                        <>
-                          <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-xs">
-                            {scan.total_updates} MAJ
-                          </span>
-                          {scan.security_updates > 0 && (
-                            <span className="px-2 py-0.5 rounded bg-red-50 text-red-700 text-xs">
-                              {scan.security_updates} sécurité
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {scan?.error && (
-                    <span className="flex items-center gap-1 text-xs text-destructive">
-                      <AlertTriangle size={14} /> Erreur
-                    </span>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleScan(srv)}
-                      disabled={scanningId === srv.id}
-                      className="p-2 rounded hover:bg-accent text-muted-foreground"
-                      title="Scanner"
-                    >
-                      {scanningId === srv.id ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <RefreshCw size={16} />
-                      )}
-                    </button>
-                    {scan && scan.total_updates > 0 && hasAction(srv, "execute") && (
-                      <button
-                        onClick={() => handleApply(srv)}
-                        disabled={applyingId === srv.id}
-                        className="p-2 rounded hover:bg-accent text-primary"
-                        title="Appliquer les MAJ"
-                      >
-                        {applyingId === srv.id ? (
-                          <Loader2 size={16} className="animate-spin" />
-                        ) : (
-                          <Download size={16} />
+      {!loading && servers.length > 0 && (
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-8" />
+                <TableHead>Serveur</TableHead>
+                <TableHead>Adresse</TableHead>
+                <TableHead>Gestionnaire</TableHead>
+                <TableHead>État</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {servers.map((srv) => {
+                const scan = scans[srv.id];
+                const isExpanded = expandedId === srv.id;
+                const canExpand = !!scan && (scan.packages.length > 0 || !!scan.error);
+                return (
+                  <Fragment key={srv.id}>
+                    <TableRow className="h-11">
+                      <TableCell className="pl-3">
+                        {canExpand && (
+                          <button
+                            onClick={() => setExpandedId(isExpanded ? null : srv.id)}
+                            className="flex text-muted-foreground hover:text-foreground"
+                            aria-label={isExpanded ? "Masquer le détail" : "Afficher le détail"}
+                          >
+                            <motion.span animate={{ rotate: isExpanded ? 90 : 0 }} transition={{ duration: 0.15 }}>
+                              <ChevronRight className="size-4" />
+                            </motion.span>
+                          </button>
                         )}
-                      </button>
+                      </TableCell>
+                      <TableCell>
+                        <Link to={`/servers/${srv.id}`} className="font-medium hover:underline">
+                          {srv.name}
+                        </Link>
+                        {srv.node_path && <p className="text-xs text-muted-foreground">{srv.node_path}</p>}
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-xs">{srv.ip_address}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{srv.os_type}</span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {scan && !scan.error ? scan.package_manager : "-"}
+                      </TableCell>
+                      <TableCell>
+                        {!scan && <span className="text-xs text-muted-foreground">Non scanné</span>}
+                        {scan && !scan.error && (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {scan.total_updates === 0 ? (
+                              <Chip tone="green">
+                                <ShieldCheck className="size-3" /> À jour
+                              </Chip>
+                            ) : (
+                              <>
+                                <Chip tone="amber">
+                                  <span className="tabular">{scan.total_updates}</span> en attente
+                                </Chip>
+                                {scan.security_updates > 0 && (
+                                  <Chip tone="red">
+                                    <ShieldAlert className="size-3" />
+                                    <span className="tabular">{scan.security_updates}</span> sécurité
+                                  </Chip>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {scan?.error && (
+                          <Chip tone="red">
+                            <AlertTriangle className="size-3" /> Échec du scan
+                          </Chip>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <IconAction
+                            label="Scanner"
+                            onClick={() => handleScan(srv)}
+                            disabled={scanningId === srv.id}
+                          >
+                            {scanningId === srv.id ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                          </IconAction>
+                          {scan && scan.total_updates > 0 && hasAction(srv, "execute") && (
+                            <IconAction
+                              label="Appliquer les mises à jour"
+                              onClick={() => setConfirmApply(srv)}
+                              disabled={applyingId === srv.id}
+                            >
+                              {applyingId === srv.id ? <Loader2 className="animate-spin" /> : <Download />}
+                            </IconAction>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && scan && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={6} className="bg-muted/30 p-0">
+                          {scan.error ? (
+                            <p className="px-4 py-3 font-mono text-xs text-danger">{scan.error}</p>
+                          ) : (
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="hover:bg-transparent">
+                                  <TableHead className="h-8 pl-12">Paquet</TableHead>
+                                  <TableHead className="h-8">Installé</TableHead>
+                                  <TableHead className="h-8">Disponible</TableHead>
+                                  <TableHead className="h-8">Sévérité</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {scan.packages.map((pkg, i) => (
+                                  <TableRow key={i} className="h-9">
+                                    <TableCell className="pl-12 font-mono text-xs">{pkg.name}</TableCell>
+                                    <TableCell className="font-mono text-xs text-muted-foreground">
+                                      {pkg.current_version}
+                                    </TableCell>
+                                    <TableCell className="font-mono text-xs">{pkg.new_version}</TableCell>
+                                    <TableCell>
+                                      <Chip tone={SEVERITY_TONE[pkg.severity] || "default"}>{pkg.severity}</Chip>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </TableCell>
+                      </TableRow>
                     )}
-                    {scan && scan.packages.length > 0 && (
-                      <button
-                        onClick={() => setExpandedId(isExpanded ? null : srv.id)}
-                        className="p-2 rounded hover:bg-accent text-muted-foreground"
-                      >
-                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Package list */}
-                {isExpanded && scan && scan.packages.length > 0 && (
-                  <div className="border-t">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-muted/50">
-                          <th className="text-left p-2 font-medium">Package</th>
-                          <th className="text-left p-2 font-medium">Installé</th>
-                          <th className="text-left p-2 font-medium">Disponible</th>
-                          <th className="text-left p-2 font-medium">Sévérité</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {scan.packages.map((pkg, i) => (
-                          <tr key={i} className="border-t">
-                            <td className="p-2 font-mono">{pkg.name}</td>
-                            <td className="p-2 text-muted-foreground font-mono">
-                              {pkg.current_version}
-                            </td>
-                            <td className="p-2 font-mono">{pkg.new_version}</td>
-                            <td className="p-2">
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-xs ${
-                                  severityColor[pkg.severity] || severityColor.unknown
-                                }`}
-                              >
-                                {pkg.severity}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {/* Error detail */}
-                {scan?.error && (
-                  <div className="border-t p-3 bg-red-50 text-xs text-red-700">
-                    {scan.error}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       )}
 
       {/* Recent jobs */}
       {jobs.length > 0 && (
-        <div className="mt-8">
-          <h3 className="font-semibold mb-3">Historique des mises à jour</h3>
-          <div className="bg-card border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium">Statut</th>
-                  <th className="text-left p-3 font-medium">Type</th>
-                </tr>
-              </thead>
-              <tbody>
+        <section className="mt-8">
+          <h2 className="mb-3 text-lg font-semibold">Historique des mises à jour</h2>
+          <div className="overflow-hidden rounded-lg border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Date</TableHead>
+                  <TableHead>Serveur</TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead>Type</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {jobs.slice(0, 10).map((job) => (
-                  <tr key={job.id} className="border-b">
-                    <td className="p-3 text-xs text-muted-foreground">
+                  <TableRow key={job.id} className="h-10">
+                    <TableCell className="tabular text-xs text-muted-foreground">
                       {new Date(job.created_at).toLocaleString("fr-FR")}
-                    </td>
-                    <td className="p-3">
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs ${
-                          job.status === "completed"
-                            ? "bg-green-50 text-green-700"
-                            : job.status === "failed"
-                              ? "bg-red-50 text-red-700"
-                              : "bg-amber-50 text-amber-700"
-                        }`}
-                      >
+                    </TableCell>
+                    <TableCell className="text-sm">{serverNames.get(job.server_id) || "-"}</TableCell>
+                    <TableCell>
+                      <Chip tone={job.status === "completed" ? "green" : job.status === "failed" ? "red" : "amber"}>
                         {job.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-xs">{job.type}</td>
-                  </tr>
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{job.type}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        </div>
+        </section>
+      )}
+
+      {confirmApply && (
+        <ConfirmModal
+          title={`Appliquer les mises à jour sur ${confirmApply.name}`}
+          confirmLabel="Appliquer"
+          onClose={() => setConfirmApply(null)}
+          onConfirm={() => {
+            const srv = confirmApply;
+            setConfirmApply(null);
+            handleApply(srv);
+          }}
+        >
+          <p>
+            Toutes les mises à jour disponibles seront installées sur <strong>{confirmApply.name}</strong>, puis le
+            serveur sera scanné à nouveau.
+          </p>
+        </ConfirmModal>
       )}
     </div>
+  );
+}
+
+const SEVERITY_TONE: Record<string, ChipTone> = {
+  critical: "red",
+  important: "orange",
+  moderate: "amber",
+  low: "blue",
+  unknown: "default",
+};
+
+function StripItem({
+  label,
+  value,
+  tone,
+  icon: Icon,
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+  icon?: LucideIcon;
+}) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className={cn("tabular flex items-center gap-1 font-semibold", tone)}>
+        {Icon && <Icon className="size-3.5 self-center" />}
+        {value}
+      </span>
+      <span className="text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function IconAction({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 text-muted-foreground"
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={label}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

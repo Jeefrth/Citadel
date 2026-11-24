@@ -3,6 +3,9 @@ import Guacamole from "guacamole-common-js";
 import { api } from "@/services/api";
 import { isReviewMessage, type ConnectionChoice, type ConnectTicketResponse } from "@/services/types";
 import { GovernanceNotice } from "@/components/governanceUi";
+import { ErrorBox } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Keyboard } from "lucide-react";
 
 interface RdpViewerProps {
   serverId: string;
@@ -193,29 +196,31 @@ export default function RdpViewer({
     client.sendKeyEvent(0, 0xFFE3);
   };
 
+  // "dark" scopes the dark tokens: the session chrome stays dark in both themes.
   return (
-    <div className="w-full h-full min-h-[500px] flex flex-col">
-      <div className="flex items-center gap-2 p-1 bg-zinc-800 rounded-t-md">
-        <button
+    <div className="dark flex h-full min-h-[500px] w-full flex-col overflow-hidden rounded-lg border bg-background text-foreground">
+      <div className="flex items-center gap-2 border-b px-2 py-1.5">
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={sendCtrlAltDel}
-          className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded"
+          className="h-7 gap-1.5 px-2 font-mono text-xs text-muted-foreground"
+          title="Envoyer Ctrl+Alt+Suppr à la session"
         >
+          <Keyboard className="size-3.5" />
           Ctrl+Alt+Del
-        </button>
+        </Button>
       </div>
       {ticketError && (
-        <div className="p-3 bg-zinc-900">
+        <div className="p-3">
           {isReviewMessage(ticketError) || /refusée par la règle/i.test(ticketError) ? (
             <GovernanceNotice message={ticketError} />
           ) : (
-            <p className="text-red-400 text-sm">Connexion RDP impossible : {ticketError}</p>
+            <ErrorBox message={`Connexion RDP impossible : ${ticketError}`} />
           )}
         </div>
       )}
-      <div
-        ref={containerRef}
-        className="flex-1 bg-black rounded-b-md overflow-hidden relative cursor-none"
-      />
+      <div ref={containerRef} className="relative flex-1 cursor-none overflow-hidden bg-background" />
     </div>
   );
 }

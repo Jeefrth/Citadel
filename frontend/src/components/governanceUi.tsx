@@ -10,6 +10,7 @@ import {
   type NotificationLevel,
 } from "@/services/types";
 import { Chip, type ChipTone } from "@/components/kit";
+import { cn } from "@/lib/utils";
 
 export const KIND_LABELS: Record<ApprovalKind, string> = {
   access: "Accès temporaire",
@@ -44,9 +45,9 @@ export function RuleActionChip({ action }: { action: string }) {
 }
 
 export const LEVEL_INFO: Record<NotificationLevel, { label: string; dot: string; tone: ChipTone }> = {
-  info: { label: "Info", dot: "bg-blue-500", tone: "blue" },
-  warning: { label: "Avertissement", dot: "bg-amber-500", tone: "amber" },
-  critical: { label: "Critique", dot: "bg-red-600", tone: "red" },
+  info: { label: "Info", dot: "bg-info", tone: "blue" },
+  warning: { label: "Avertissement", dot: "bg-live", tone: "amber" },
+  critical: { label: "Critique", dot: "bg-danger", tone: "red" },
 };
 
 /** "il y a 5 min", "il y a 2 h", "hier", then a short date. */
@@ -83,19 +84,24 @@ export function GovernanceNotice({ message, className = "" }: { message: string;
   const review = isReviewMessage(message);
   return (
     <div
-      className={`p-3 rounded-md text-sm flex items-start gap-2 border ${
-        review ? "bg-amber-50 text-amber-900 border-amber-200" : "bg-red-50 text-red-800 border-red-200"
-      } ${className}`}
+      className={cn(
+        "flex items-start gap-2 rounded-md border px-3 py-2.5 text-sm",
+        review ? "border-live/30 bg-live/10" : "border-danger/30 bg-danger/10",
+        className,
+      )}
     >
       {review ? (
-        <Hourglass size={16} className="shrink-0 mt-0.5" />
+        <Hourglass className="mt-0.5 size-4 shrink-0 text-live" />
       ) : (
-        <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
       )}
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 space-y-1 text-foreground">
         <p className="break-words">{message}</p>
         {review && (
-          <Link to="/approvals?tab=mine" className="inline-block font-medium underline hover:opacity-80">
+          <Link
+            to="/approvals?tab=mine"
+            className="inline-block font-medium text-live underline-offset-4 hover:underline"
+          >
             Voir mes demandes
           </Link>
         )}

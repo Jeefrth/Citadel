@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Loader2, Server, ShieldCheck, UserRound } from "lucide-react";
+import { KeyRound, Loader2, Monitor, ShieldAlert, ShieldCheck, TerminalSquare, UserRound } from "lucide-react";
 import { api } from "@/services/api";
 import {
   errorMessage,
@@ -7,7 +7,13 @@ import {
   type ConnectionChoice,
   type ServerData,
 } from "@/services/types";
-import { ErrorBox, inputCls } from "@/components/kit";
+import { Chip, ErrorBox, Field, Modal } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 const DURATIONS: [number, string][] = [
   [5, "5 minutes"],
@@ -97,145 +103,136 @@ export default function ConnectDialog({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-card border rounded-lg shadow-lg w-full max-w-sm mx-4 p-6">
-        <div className="space-y-4">
-          <div className="text-center">
-            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
-              <Server size={24} className="text-amber-600" />
-            </div>
-            <h3 className="font-semibold text-lg">Connexion à {server.name}</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Choisissez le compte puis confirmez votre identité (authentification renforcée).
-            </p>
-          </div>
-
-          {accounts === null && (
-            <div className="flex justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-muted-foreground" />
-            </div>
-          )}
-
-          {accounts !== null && accounts.length === 0 && !error && (
-            <p className="text-sm text-center text-muted-foreground">
-              Aucun compte ne vous est accordé sur ce serveur.
-            </p>
-          )}
-
-          {accounts !== null && accounts.length > 0 && (
-            <div>
-              <label className="block text-sm font-medium mb-1">Compte</label>
-              {accounts.length === 1 ? (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-md border text-sm">
-                  <UserRound size={14} className="text-muted-foreground" />
-                  <span className="font-mono">{accounts[0].username}</span>
-                  {accounts[0].privileged && (
-                    <span className="ml-auto text-xs text-amber-700">privilégié</span>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-1 max-h-48 overflow-auto">
-                  {accounts.map((a) => (
-                    <label
-                      key={keyOf(a)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm cursor-pointer ${
-                        selected === keyOf(a) ? "border-primary bg-primary/5" : "hover:bg-accent"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="connect-account"
-                        checked={selected === keyOf(a)}
-                        onChange={() => setSelected(keyOf(a))}
-                      />
-                      <span className="font-mono">{a.username}</span>
-                      <span className="ml-auto flex gap-1 text-xs">
-                        {a.is_default && <span className="text-muted-foreground">par défaut</span>}
-                        {a.privileged && <span className="text-amber-700">privilégié</span>}
-                        {a.virtual === "@USER" && (
-                          <span className="text-muted-foreground">votre identité</span>
-                        )}
-                        {a.virtual === "@INPUT" && (
-                          <span className="text-muted-foreground">saisie manuelle</span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {isInput && (
-            <div className="space-y-3 p-3 rounded-md border bg-muted/30">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <KeyRound size={12} /> Identifiants utilisés pour cette connexion uniquement, jamais
-                enregistrés.
-              </div>
-              <input
-                type="text"
-                value={inputUser}
-                onChange={(e) => setInputUser(e.target.value)}
-                placeholder="Utilisateur"
-                autoComplete="off"
-                className={inputCls}
-              />
-              <input
-                type="password"
-                value={inputPassword}
-                onChange={(e) => setInputPassword(e.target.value)}
-                placeholder="Mot de passe"
-                autoComplete="new-password"
-                className={inputCls}
-              />
-            </div>
-          )}
-
-          {usesCert && (
-            <div>
-              <label className="block text-sm font-medium mb-1">Durée de la session</label>
-              <select
-                value={certDuration}
-                onChange={(e) => setCertDuration(parseInt(e.target.value))}
-                className={inputCls}
-              >
-                {DURATIONS.map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground mt-1">
-                Un certificat SSH sera généré pour cette durée.
-              </p>
-            </div>
-          )}
-
-          <ErrorBox message={error} />
-
-          <div className="flex gap-2">
-            <button
-              onClick={onCancel}
-              className="flex-1 px-4 py-2 rounded-md border text-sm hover:bg-accent"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={confirm}
-              disabled={loading || !canConfirm}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-            >
-              {loading ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <>
-                  <ShieldCheck size={16} /> Confirmer (MFA)
-                </>
-              )}
-            </button>
-          </div>
+    <Modal
+      title={
+        <span className="flex items-center gap-2">
+          {isRdp ? <Monitor className="size-4 text-muted-foreground" /> : <TerminalSquare className="size-4 text-muted-foreground" />}
+          Ouvrir une session sur {server.name}
+        </span>
+      }
+      description="Choisissez le compte, puis confirmez votre identité (authentification renforcée)."
+      onClose={loading ? () => {} : onCancel}
+      size="md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onCancel} disabled={loading}>
+            Annuler
+          </Button>
+          <Button onClick={confirm} disabled={loading || !canConfirm}>
+            {loading ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+            Confirmer avec MFA
+          </Button>
+        </>
+      }
+    >
+      {accounts === null && (
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
         </div>
-      </div>
-    </div>
+      )}
+
+      {accounts !== null && accounts.length === 0 && !error && (
+        <p className="text-sm text-muted-foreground">
+          Aucun compte ne vous est accordé sur ce serveur. Demandez un accès à un administrateur.
+        </p>
+      )}
+
+      {accounts !== null && accounts.length > 0 && (
+        <div className="space-y-1.5">
+          <Label className="text-sm font-medium">Compte</Label>
+          {accounts.length === 1 ? (
+            <div className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
+              <UserRound className="size-3.5 text-muted-foreground" />
+              <span className="font-mono">{accounts[0].username}</span>
+              {accounts[0].privileged && (
+                <Chip tone="amber">
+                  <ShieldAlert className="size-3" /> privilégié
+                </Chip>
+              )}
+            </div>
+          ) : (
+            <div role="radiogroup" aria-label="Compte" className="max-h-56 space-y-1 overflow-auto">
+              {accounts.map((a) => {
+                const on = selected === keyOf(a);
+                return (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    key={keyOf(a)}
+                    onClick={() => setSelected(keyOf(a))}
+                    className={cn(
+                      "flex h-10 w-full items-center gap-2.5 rounded-md border px-3 text-left text-sm transition-colors",
+                      on ? "border-foreground/40 bg-accent" : "hover:bg-muted/50",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                        on ? "border-foreground" : "border-input",
+                      )}
+                    >
+                      {on && <span className="size-2 rounded-full bg-foreground" />}
+                    </span>
+                    <span className="truncate font-mono">{a.username}</span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {a.is_default && <Chip>par défaut</Chip>}
+                      {a.privileged && <Chip tone="amber">privilégié</Chip>}
+                      {a.virtual === "@USER" && <span className="text-xs text-muted-foreground">votre identité</span>}
+                      {a.virtual === "@INPUT" && <span className="text-xs text-muted-foreground">saisie manuelle</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {isInput && (
+        <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <KeyRound className="size-3.5" /> Identifiants utilisés pour cette connexion uniquement, jamais
+            enregistrés.
+          </p>
+          <Input
+            type="text"
+            value={inputUser}
+            onChange={(e) => setInputUser(e.target.value)}
+            placeholder="Utilisateur"
+            autoComplete="off"
+            className="font-mono"
+          />
+          <Input
+            type="password"
+            value={inputPassword}
+            onChange={(e) => setInputPassword(e.target.value)}
+            placeholder="Mot de passe"
+            autoComplete="new-password"
+          />
+        </div>
+      )}
+
+      {usesCert && (
+        <Field label="Durée de la session" hint="Un certificat SSH est signé pour cette durée.">
+          <Select value={String(certDuration)} onValueChange={(v) => setCertDuration(parseInt(v))}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DURATIONS.map(([v, l]) => (
+                <SelectItem key={v} value={String(v)}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+
+      <ErrorBox message={error} />
+    </Modal>
   );
 }

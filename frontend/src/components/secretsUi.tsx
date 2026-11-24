@@ -63,7 +63,7 @@ export function VerifyBadge({ account }: { account: AccountData }) {
   if (account.verify_message) parts.push(account.verify_message);
   return (
     <Chip tone={v.tone} title={parts.join("\n")}>
-      <Icon size={11} /> {v.label}
+      <Icon className="size-3" /> {v.label}
     </Chip>
   );
 }

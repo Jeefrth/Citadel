@@ -11,6 +11,35 @@ function isGovernanceMessage(msg: string): boolean {
   return isReviewMessage(msg) || /refusée par la règle/i.test(msg);
 }
 
+/**
+ * Terminal palette aligned on the "Salle de contrôle" tokens. The terminal stays dark
+ * in both themes: it is a terminal.
+ */
+export const TERMINAL_BG = "#0E1525";
+export const XTERM_THEME = {
+  background: TERMINAL_BG,
+  foreground: "#E6EBF5",
+  cursor: "#F2A93B",
+  cursorAccent: TERMINAL_BG,
+  selectionBackground: "rgba(242, 169, 59, 0.3)",
+  black: "#1A2336",
+  red: "#F0526B",
+  green: "#3DD68C",
+  yellow: "#F2A93B",
+  blue: "#7AA2F7",
+  magenta: "#C49BF2",
+  cyan: "#5CCFE6",
+  white: "#C9D1E3",
+  brightBlack: "#5B6781",
+  brightRed: "#F57A8E",
+  brightGreen: "#6BE3A8",
+  brightYellow: "#F6C26F",
+  brightBlue: "#9DBBFA",
+  brightMagenta: "#D6B8F6",
+  brightCyan: "#8ADDEE",
+  brightWhite: "#F4F6FA",
+};
+
 interface TerminalProps {
   serverId: string;
   serverName: string;
@@ -42,30 +71,10 @@ export default function Terminal({
     // Create xterm instance
     const xterm = new XTerm({
       cursorBlink: true,
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      theme: {
-        background: "#1a1b26",
-        foreground: "#a9b1d6",
-        cursor: "#c0caf5",
-        selectionBackground: "#33467c",
-        black: "#15161e",
-        red: "#f7768e",
-        green: "#9ece6a",
-        yellow: "#e0af68",
-        blue: "#7aa2f7",
-        magenta: "#bb9af7",
-        cyan: "#7dcfff",
-        white: "#a9b1d6",
-        brightBlack: "#414868",
-        brightRed: "#f7768e",
-        brightGreen: "#9ece6a",
-        brightYellow: "#e0af68",
-        brightBlue: "#7aa2f7",
-        brightMagenta: "#bb9af7",
-        brightCyan: "#7dcfff",
-        brightWhite: "#c0caf5",
-      },
+      fontSize: 13,
+      lineHeight: 1.2,
+      fontFamily: "'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, Menlo, monospace",
+      theme: XTERM_THEME,
     });
 
     const fitAddon = new FitAddon();
@@ -213,13 +222,14 @@ export default function Terminal({
   }, [connect]);
 
   return (
-    <div className="w-full h-full min-h-[400px] flex flex-col gap-2">
+    <div className="flex h-full min-h-[400px] w-full flex-col gap-2">
       {govMessage && <GovernanceNotice message={govMessage} />}
       <div
-        ref={containerRef}
-        className="w-full flex-1 min-h-[400px] rounded-md overflow-hidden"
-        style={{ backgroundColor: "#1a1b26" }}
-      />
+        className="dark min-h-[400px] w-full flex-1 overflow-hidden rounded-lg border p-2"
+        style={{ backgroundColor: TERMINAL_BG }}
+      >
+        <div ref={containerRef} className="h-full w-full" />
+      </div>
     </div>
   );
 }

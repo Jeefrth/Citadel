@@ -15,37 +15,37 @@ DEFAULTS = {
     # Security
     "idle_timeout_minutes": {
         "value": "30",
-        "description": "Terminal idle timeout in minutes",
+        "description": "Une session sans activité est fermée après ce délai.",
     },
     "rate_limit_requests": {
         "value": "200",
-        "description": "Max API requests per IP per minute",
+        "description": "Nombre maximal de requêtes par adresse IP sur la fenêtre ci-dessous.",
     },
     "rate_limit_window_seconds": {
         "value": "60",
-        "description": "Rate limit window in seconds",
+        "description": "Durée de la fenêtre de comptage des requêtes.",
     },
     "mfa_required_for_terminal": {
         "value": "true",
-        "description": "Require MFA re-auth before opening a terminal",
+        "description": "Redemande l'authentification forte avant chaque ouverture de session.",
     },
     "default_cert_validity_minutes": {
         "value": "480",
-        "description": "Default certificate validity for new ephemeral credentials (minutes)",
+        "description": "Durée proposée par défaut pour un certificat éphémère.",
     },
     "max_cert_validity_minutes": {
         "value": "1440",
-        "description": "Maximum allowed certificate validity (minutes)",
+        "description": "Durée maximale qu'un utilisateur peut choisir.",
     },
     "min_cert_validity_minutes": {
         "value": "5",
-        "description": "Minimum allowed certificate validity (minutes)",
+        "description": "Durée minimale qu'un utilisateur peut choisir.",
     },
 
     # IP Allowlist (empty = allow all)
     "ip_allowlist": {
         "value": "[]",
-        "description": "JSON array of allowed IP addresses/CIDRs (empty = allow all)",
+        "description": "Adresses ou plages autorisées à joindre Citadel. Vide : toutes.",
     },
 
     # Command Filter
@@ -68,35 +68,35 @@ DEFAULTS = {
             "curl\\s+.*\\|\\s*sh",
             "curl\\s+.*\\|\\s*bash",
         ]),
-        "description": "JSON array of regex patterns to block in command execution",
+        "description": "Expressions régulières refusées partout, avant les ACL de commandes.",
     },
     "command_filter_enabled": {
         "value": "true",
-        "description": "Enable command filtering on /execute endpoint",
+        "description": "Applique la liste de blocage aux commandes et au terminal.",
     },
 
     # Session Recording
     "session_recording_enabled": {
         "value": "true",
-        "description": "Record terminal sessions for replay",
+        "description": "Enregistre les sessions SSH et RDP pour pouvoir les rejouer.",
     },
     "max_session_recordings": {
         "value": "1000",
-        "description": "Maximum number of session recordings to keep (oldest deleted first)",
+        "description": "Au-delà, les plus anciens enregistrements sont supprimés.",
     },
 
     # Audit (lot 4)
     "recording_retention_days": {
         "value": "0",
-        "description": "Delete session recordings older than N days (0 = keep forever)",
+        "description": "Les enregistrements plus anciens sont supprimés. 0 : conservation illimitée.",
     },
     "command_log_retention_days": {
         "value": "0",
-        "description": "Delete command journal entries older than N days (0 = keep forever)",
+        "description": "Les entrées plus anciennes du journal sont supprimées. 0 : conservation illimitée.",
     },
     "notify_user_on_monitor": {
         "value": "true",
-        "description": "Tell the user in their terminal when an admin starts watching the session",
+        "description": "Prévient l'utilisateur quand un administrateur observe sa session.",
     },
 }
 

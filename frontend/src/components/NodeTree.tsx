@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -10,6 +10,9 @@ import {
   Trash2,
 } from "lucide-react";
 import type { NodeData } from "@/services/types";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 interface TreeItem {
   node: NodeData;
@@ -65,6 +68,12 @@ export default function NodeTree({
       return next;
     });
 
+  const rowCls = (active: boolean) =>
+    cn(
+      "group flex h-8 cursor-pointer items-center gap-1.5 rounded-md pr-1 text-sm transition-colors",
+      active ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+    );
+
   const renderItem = (it: TreeItem, depth: number) => {
     const open = !collapsed.has(it.node.id);
     const active = selected === it.node.id;
@@ -72,9 +81,7 @@ export default function NodeTree({
     return (
       <div key={it.node.id}>
         <div
-          className={`group flex items-center gap-1 pr-1 py-1 rounded-md text-sm cursor-pointer ${
-            active ? "bg-primary text-primary-foreground" : "hover:bg-accent"
-          }`}
+          className={rowCls(active)}
           style={{ paddingLeft: 4 + depth * 14 }}
           onClick={() => onSelect(it.node.id)}
           title={it.node.description || it.node.path}
@@ -85,60 +92,31 @@ export default function NodeTree({
               e.stopPropagation();
               if (hasChildren) toggle(it.node.id);
             }}
-            className={`w-4 shrink-0 ${hasChildren ? "" : "invisible"}`}
+            className={cn("flex w-4 shrink-0 justify-center text-muted-foreground", !hasChildren && "invisible")}
+            aria-label={open ? "Replier" : "Déplier"}
           >
-            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </button>
           {open && hasChildren ? (
-            <FolderOpen size={14} className="shrink-0" />
+            <FolderOpen className="size-3.5 shrink-0" />
           ) : (
-            <Folder size={14} className="shrink-0" />
+            <Folder className="size-3.5 shrink-0" />
           )}
-          <span className="truncate flex-1">{it.node.name}</span>
+          <span className="flex-1 truncate">{it.node.name}</span>
           {isAdmin && (
-            <span className="hidden group-hover:flex items-center">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCreate(it.node.id);
-                }}
-                className="p-0.5 rounded hover:bg-black/10"
-                title="Nouveau sous-nœud"
-              >
-                <FolderPlus size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRename(it.node);
-                }}
-                className="p-0.5 rounded hover:bg-black/10"
-                title="Renommer"
-              >
-                <Pencil size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(it.node);
-                }}
-                className="p-0.5 rounded hover:bg-black/10"
-                title="Supprimer"
-              >
-                <Trash2 size={12} />
-              </button>
+            <span className="hidden items-center group-hover:flex">
+              <NodeAction title="Nouveau sous-nœud" onClick={() => onCreate(it.node.id)}>
+                <FolderPlus className="size-3.5" />
+              </NodeAction>
+              <NodeAction title="Renommer" onClick={() => onRename(it.node)}>
+                <Pencil className="size-3.5" />
+              </NodeAction>
+              <NodeAction title="Supprimer" danger onClick={() => onDelete(it.node)}>
+                <Trash2 className="size-3.5" />
+              </NodeAction>
             </span>
           )}
-          <span
-            className={`text-xs tabular-nums ${
-              active ? "text-primary-foreground/80" : "text-muted-foreground"
-            } group-hover:hidden`}
-          >
-            {it.total}
-          </span>
+          <span className={cn("tabular text-xs text-muted-foreground", isAdmin && "group-hover:hidden")}>{it.total}</span>
         </div>
         {open && it.children.map((c) => renderItem(c, depth + 1))}
       </div>
@@ -146,35 +124,67 @@ export default function NodeTree({
   };
 
   return (
-    <div className="bg-card border rounded-lg p-2">
-      <div className="flex items-center justify-between px-2 py-1 mb-1">
-        <span className="text-xs font-medium text-muted-foreground uppercase">Arborescence</span>
+    <div className="rounded-lg border bg-card p-2">
+      <div className="mb-1 flex h-8 items-center justify-between px-2">
+        <span className="text-xs font-medium text-muted-foreground">Arborescence</span>
         {isAdmin && (
-          <button
-            type="button"
-            onClick={() => onCreate(null)}
-            className="p-1 rounded hover:bg-accent text-muted-foreground"
-            title="Nouveau nœud racine"
-          >
-            <FolderPlus size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => onCreate(null)}
+                className="size-7 text-muted-foreground"
+                aria-label="Nouveau nœud racine"
+              >
+                <FolderPlus className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Nouveau nœud racine</TooltipContent>
+          </Tooltip>
         )}
       </div>
-      <div
-        className={`flex items-center gap-2 px-2 py-1 rounded-md text-sm cursor-pointer ${
-          selected === null ? "bg-primary text-primary-foreground" : "hover:bg-accent"
-        }`}
-        onClick={() => onSelect(null)}
-      >
-        <Layers size={14} />
+      <div className={cn(rowCls(selected === null), "px-2")} onClick={() => onSelect(null)}>
+        <Layers className="size-3.5" />
         <span className="flex-1">Tous les serveurs</span>
       </div>
       {tree.map((it) => renderItem(it, 0))}
       {tree.length === 0 && (
-        <p className="text-xs text-muted-foreground px-2 py-2">
+        <p className="px-2 py-2 text-xs text-muted-foreground">
           Aucun nœud.{isAdmin && " Créez-en un pour organiser vos serveurs."}
         </p>
       )}
     </div>
+  );
+}
+
+function NodeAction({
+  title,
+  onClick,
+  danger,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        "rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
+        danger && "hover:text-danger",
+      )}
+      title={title}
+      aria-label={title}
+    >
+      {children}
+    </button>
   );
 }

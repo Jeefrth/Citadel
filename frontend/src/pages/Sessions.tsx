@@ -2,19 +2,7 @@
 // Deep links from the command journal: ?recording=<id>&t=<ms> or ?session=<session_id>&t=<ms>.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  Clock,
-  Film,
-  Globe,
-  Loader2,
-  Play,
-  Power,
-  Server,
-  ShieldAlert,
-  ShieldCheck,
-  Trash2,
-  User,
-} from "lucide-react";
+import { Film, Loader2, Play, Power, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { ApiError, api, fetchBlob } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
@@ -24,8 +12,21 @@ import {
   type SessionRecordingData,
   type SessionRecordingDetail,
 } from "@/services/types";
-import { Chip, ConfirmModal, Notice, iconBtnDanger, type NoticeData } from "@/components/kit";
-import { ProtocolBadge, StorageChip, formatBytes, formatDuration } from "@/components/auditUi";
+import { Chip, ConfirmModal, EmptyState, Notice, PageHeader, iconBtnDanger, type NoticeData } from "@/components/kit";
+import {
+  ProtocolBadge,
+  StatusDot,
+  StorageChip,
+  TableSkeleton,
+  Tip,
+  formatBytes,
+  formatDuration,
+} from "@/components/auditUi";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { RdpReplayPlayer, SshReplayPlayer } from "@/components/RecordingPlayers";
 
 const LIST_LIMIT = 200;
@@ -40,7 +41,7 @@ type Confirm = { kind: "one"; rec: SessionRecordingData } | { kind: "selected" }
 /** Clear message for a replay failure (409 = SHA-256 mismatch). */
 function replayError(e: unknown): string {
   if (e instanceof ApiError && e.status === 409)
-    return `Intégrité compromise : l'empreinte SHA-256 de l'enregistrement ne correspond plus. Lecture bloquée. (${e.message})`;
+    return `Intégrité compromise : l'empreinte SHA-256 de l'enregistrement ne correspond plus, la lecture est bloquée. (${e.message})`;
   if (e instanceof ApiError && e.status === 404)
     return `Contenu indisponible : session encore en cours ou jamais stockée. (${e.message})`;
   return `Lecture impossible : ${errorMessage(e)}`;
@@ -179,185 +180,206 @@ export default function Sessions() {
     }
   };
 
+  const allSelected = selected.size === sessions.length && sessions.length > 0;
+  const cols = isAdmin ? 9 : 8;
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-bold">Sessions enregistrées</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={protocol}
-            onChange={(e) => setProtocol(e.target.value as "" | SessionProtocol)}
-            className="px-2 py-1.5 rounded-md border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            <option value="">Tous protocoles</option>
-            <option value="ssh">SSH</option>
-            <option value="rdp">RDP</option>
-          </select>
-          {isAdmin && selected.size > 0 && (
-            <button
-              onClick={() => setConfirm({ kind: "selected" })}
-              disabled={deleting}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-xs font-medium hover:bg-red-100 disabled:opacity-50"
-            >
-              <Trash2 size={14} />
-              Supprimer la sélection ({selected.size})
-            </button>
-          )}
-          {isAdmin && sessions.length > 0 && (
-            <button
-              onClick={() => setConfirm({ kind: "all" })}
-              disabled={deleting}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-red-50 hover:text-red-700 hover:border-red-200 disabled:opacity-50 text-muted-foreground"
-            >
-              <Trash2 size={14} />
-              Tout supprimer
-            </button>
-          )}
-          <span className="text-sm text-muted-foreground ml-2">
-            {sessions.length} enregistrement{sessions.length !== 1 ? "s" : ""}
-            {sessions.length >= LIST_LIMIT && " (les plus récents)"}
-          </span>
-        </div>
-      </div>
+      <PageHeader
+        title="Sessions enregistrées"
+        description="Relisez les sessions SSH et RDP terminées et contrôlez l'empreinte de chaque enregistrement."
+        actions={
+          <>
+            <Select value={protocol || "all"} onValueChange={(v) => setProtocol(v === "all" ? "" : (v as SessionProtocol))}>
+              <SelectTrigger className="h-8 w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les protocoles</SelectItem>
+                <SelectItem value="ssh">SSH</SelectItem>
+                <SelectItem value="rdp">RDP</SelectItem>
+              </SelectContent>
+            </Select>
+            {isAdmin && selected.size > 0 && (
+              <Button variant="destructive" size="sm" onClick={() => setConfirm({ kind: "selected" })} disabled={deleting}>
+                <Trash2 />
+                Supprimer la sélection (<span className="tabular">{selected.size}</span>)
+              </Button>
+            )}
+            {isAdmin && sessions.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirm({ kind: "all" })}
+                disabled={deleting}
+                className="text-muted-foreground hover:bg-danger/10 hover:text-danger"
+              >
+                <Trash2 />
+                Tout supprimer
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <Notice notice={notice} onClose={() => setNotice(null)} />
 
-      {loading && (
-        <div className="flex items-center justify-center h-32">
-          <Loader2 size={24} className="animate-spin text-muted-foreground" />
-        </div>
-      )}
-
-      {!loading && sessions.length === 0 && (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <Film size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">
-            Aucune session enregistrée. Ouvrez un terminal ou un bureau à distance vers un serveur pour commencer.
-          </p>
-        </div>
-      )}
-
-      {!loading && sessions.length > 0 && (
-        <div className="space-y-2">
-          {isAdmin && (
-            <label className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground">
-              <input
-                type="checkbox"
-                checked={selected.size === sessions.length && sessions.length > 0}
-                onChange={toggleSelectAll}
-                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-              />
-              {selected.size === sessions.length ? "Tout désélectionner" : "Tout sélectionner"}
-            </label>
-          )}
-          {sessions.map((s) => {
-            const v = verify[s.id];
-            return (
-              <div
-                key={s.id}
-                className={`bg-card border rounded-lg p-4 flex items-center gap-4 transition-colors ${
-                  selected.has(s.id) ? "border-primary/50 bg-primary/5" : "hover:border-primary/30"
-                }`}
-              >
+      {!loading && sessions.length === 0 ? (
+        <EmptyState icon={Film} title="Aucune session enregistrée">
+          Ouvrez un terminal ou un bureau à distance vers un serveur : la session apparaîtra ici une fois terminée.
+        </EmptyState>
+      ) : (
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
                 {isAdmin && (
-                  <input
-                    type="checkbox"
-                    checked={selected.has(s.id)}
-                    onChange={() => toggleSelect(s.id)}
-                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
-                  />
+                  <TableHead className="w-10 pl-4">
+                    <Checkbox
+                      checked={allSelected ? true : selected.size > 0 ? "indeterminate" : false}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label={allSelected ? "Tout désélectionner" : "Tout sélectionner"}
+                    />
+                  </TableHead>
                 )}
-                <ProtocolBadge protocol={s.protocol} />
-
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="font-medium text-sm flex items-center gap-1">
-                      <Server size={14} className="text-muted-foreground" />
-                      {s.account && <span className="font-mono text-xs">{s.account}@</span>}
-                      {s.server_name}
-                      {!s.server_id && (
-                        <Chip tone="default" title="Le serveur a été supprimé depuis">
-                          supprimé
-                        </Chip>
+                <TableHead className={isAdmin ? "" : "pl-4"}>Session</TableHead>
+                <TableHead>Utilisateur</TableHead>
+                <TableHead>IP client</TableHead>
+                <TableHead>Début</TableHead>
+                <TableHead>Durée</TableHead>
+                <TableHead>Taille</TableHead>
+                <TableHead>Empreinte</TableHead>
+                <TableHead className="pr-4 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableSkeleton cols={cols} />
+              ) : (
+                sessions.map((s) => {
+                  const v = verify[s.id];
+                  const isSel = selected.has(s.id);
+                  return (
+                    <TableRow key={s.id} data-state={isSel ? "selected" : undefined}>
+                      {isAdmin && (
+                        <TableCell className="pl-4">
+                          <Checkbox checked={isSel} onCheckedChange={() => toggleSelect(s.id)} aria-label="Sélectionner" />
+                        </TableCell>
                       )}
-                    </span>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <User size={12} />
-                      {s.user_name}
-                    </span>
-                    {s.client_ip && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1 font-mono">
-                        <Globe size={12} />
-                        {s.client_ip}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    <span>{new Date(s.started_at).toLocaleString("fr-FR")}</span>
-                    {s.ended_at ? (
-                      <span className="flex items-center gap-1">
-                        <Clock size={12} />
-                        {formatDuration(s.duration_seconds)}
-                      </span>
-                    ) : (
-                      <Chip tone="green">en cours</Chip>
-                    )}
-                    {s.protocol === "ssh" && <span>{s.event_count} événements</span>}
-                    <span>{formatBytes(s.size_bytes)}</span>
-                    <StorageChip type={s.storage_type} />
-                    {s.sha256 && (
-                      <span className="font-mono" title={`SHA-256 ${s.sha256}`}>
-                        {s.sha256.slice(0, 12)}…
-                      </span>
-                    )}
-                  </div>
-                  {s.terminated_by && (
-                    <p className="text-xs text-red-700 flex items-center gap-1">
-                      <Power size={12} />
-                      Terminée par {s.terminated_by}
-                      {s.termination_reason && <> : {s.termination_reason}</>}
-                    </p>
-                  )}
-                  {v && v !== "loading" && (
-                    <p
-                      className={`text-xs flex items-center gap-1 ${v.ok ? "text-green-700" : "text-red-700 font-medium"}`}
-                    >
-                      {v.ok ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
-                      {v.message}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1">
-                  {isAdmin && (
-                    <button
-                      onClick={() => runVerify(s)}
-                      disabled={v === "loading"}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-accent disabled:opacity-50"
-                      title="Relire l'objet stocké et contrôler son empreinte SHA-256"
-                    >
-                      {v === "loading" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-                      Vérifier l'intégrité
-                    </button>
-                  )}
-                  <button
-                    onClick={() => openReplay(s)}
-                    disabled={loadingReplay === s.id || !s.ended_at}
-                    title={s.ended_at ? undefined : "Disponible à la fin de la session"}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
-                  >
-                    {loadingReplay === s.id ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                    Rejouer
-                  </button>
-                  {isAdmin && (
-                    <button onClick={() => setConfirm({ kind: "one", rec: s })} className={iconBtnDanger} title="Supprimer">
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                      <TableCell className={isAdmin ? "py-2" : "py-2 pl-4"}>
+                        <div className="flex items-center gap-2">
+                          <ProtocolBadge protocol={s.protocol} />
+                          <span className="truncate font-mono text-sm">
+                            {s.account && <span className="text-muted-foreground">{s.account}@</span>}
+                            {s.server_name}
+                          </span>
+                          {!s.server_id && (
+                            <Chip tone="default" title="Le serveur a été supprimé depuis">
+                              supprimé
+                            </Chip>
+                          )}
+                          {!s.ended_at && (
+                            <Chip tone="amber">
+                              <StatusDot tone="live" /> en cours
+                            </Chip>
+                          )}
+                        </div>
+                        {s.terminated_by && (
+                          <p className="mt-1 flex items-center gap-1 text-xs text-danger">
+                            <Power className="size-3.5" />
+                            Terminée par {s.terminated_by}
+                            {s.termination_reason && <> : {s.termination_reason}</>}
+                          </p>
+                        )}
+                        {v && v !== "loading" && (
+                          <p className={cn("mt-1 flex items-center gap-1 text-xs", v.ok ? "text-success" : "font-medium text-danger")}>
+                            {v.ok ? <ShieldCheck className="size-3.5" /> : <ShieldAlert className="size-3.5" />}
+                            {v.message}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{s.user_name}</TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{s.client_ip || "-"}</TableCell>
+                      <TableCell className="tabular whitespace-nowrap text-muted-foreground">
+                        {new Date(s.started_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+                      </TableCell>
+                      <TableCell className="tabular whitespace-nowrap">
+                        {s.ended_at ? formatDuration(s.duration_seconds) : <span className="text-muted-foreground">-</span>}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <span className="tabular">{formatBytes(s.size_bytes)}</span>
+                          <StorageChip type={s.storage_type} />
+                        </div>
+                        {s.protocol === "ssh" && (
+                          <p className="tabular text-xs text-muted-foreground">{s.event_count} événements</p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {s.sha256 ? (
+                          <Tip content={<span className="break-all font-mono">SHA-256 {s.sha256}</span>}>
+                            <span className="cursor-default font-mono text-xs text-muted-foreground">
+                              {s.sha256.slice(0, 12)}...
+                            </span>
+                          </Tip>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="pr-4">
+                        <div className="flex items-center justify-end gap-1">
+                          {isAdmin && (
+                            <Tip content="Vérifier l'intégrité : relire l'objet stocké et contrôler son empreinte SHA-256">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-8 text-muted-foreground"
+                                onClick={() => runVerify(s)}
+                                disabled={v === "loading"}
+                                aria-label="Vérifier l'intégrité"
+                              >
+                                {v === "loading" ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+                              </Button>
+                            </Tip>
+                          )}
+                          <Tip content={s.ended_at ? undefined : "Disponible à la fin de la session"}>
+                            <span>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openReplay(s)}
+                                disabled={loadingReplay === s.id || !s.ended_at}
+                              >
+                                {loadingReplay === s.id ? <Loader2 className="animate-spin" /> : <Play />}
+                                Rejouer
+                              </Button>
+                            </span>
+                          </Tip>
+                          {isAdmin && (
+                            <Tip content="Supprimer l'enregistrement">
+                              <button
+                                onClick={() => setConfirm({ kind: "one", rec: s })}
+                                className={iconBtnDanger}
+                                aria-label="Supprimer"
+                              >
+                                <Trash2 className="size-4" />
+                              </button>
+                            </Tip>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+          {!loading && (
+            <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+              <span className="tabular">{sessions.length}</span> enregistrement{sessions.length !== 1 ? "s" : ""}
+              {sessions.length >= LIST_LIMIT && " (les plus récents)"}
+            </div>
+          )}
         </div>
       )}
 

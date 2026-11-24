@@ -1,6 +1,9 @@
 // Connection ACL and command ACL tabs of the "Accès" page (admin).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
 import {
+  AlertTriangle,
   FlaskConical,
   Loader2,
   Pencil,
@@ -31,6 +34,7 @@ import {
 import {
   Chip,
   ConfirmModal,
+  EmptyState,
   ErrorBox,
   Field,
   Modal,
@@ -38,15 +42,20 @@ import {
   Notice,
   SaveButton,
   Toggle,
-  btnPrimary,
-  btnSecondary,
   iconBtn,
   iconBtnDanger,
-  inputCls,
   type NoticeData,
   type Option,
 } from "@/components/kit";
-import { RULE_ACTION_INFO, RuleActionChip } from "@/components/governanceUi";
+import { RuleActionChip } from "@/components/governanceUi";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 export interface AclRefs {
   users: UserData[];
@@ -89,7 +98,7 @@ function StringListEditor({
   };
   return (
     <div>
-      <div className="flex flex-wrap gap-1 mb-2 min-h-[1.5rem]">
+      <div className="mb-2 flex min-h-6 flex-wrap gap-1">
         {value.length === 0 && <span className="text-xs text-muted-foreground">{emptyText}</span>}
         {value.map((v) => (
           <Chip key={v} onRemove={() => onChange(value.filter((x) => x !== v))}>
@@ -98,7 +107,7 @@ function StringListEditor({
         ))}
       </div>
       <div className="flex gap-2">
-        <input
+        <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -109,11 +118,20 @@ function StringListEditor({
           }}
           list={listId}
           placeholder={placeholder}
-          className={`${inputCls} ${mono ? "font-mono" : ""}`}
+          aria-invalid={!!err}
+          className={cn(mono && "font-mono", err && "border-danger/50 focus-visible:ring-danger/40")}
         />
-        <button type="button" onClick={add} disabled={!trimmed || !!err} className={btnSecondary} title="Ajouter">
-          <Plus size={16} />
-        </button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="shrink-0"
+          onClick={add}
+          disabled={!trimmed || !!err}
+          title="Ajouter"
+        >
+          <Plus />
+        </Button>
         {listId && suggestions && (
           <datalist id={listId}>
             {suggestions.map((s) => (
@@ -122,7 +140,7 @@ function StringListEditor({
           </datalist>
         )}
       </div>
-      {err && <p className="text-xs text-red-700 mt-1">{err}</p>}
+      {err && <p className="mt-1 text-xs text-danger">{err}</p>}
     </div>
   );
 }
@@ -139,7 +157,7 @@ function TimeWindowEditor({ value, onChange }: { value: TimeWindow[]; onChange: 
         <p className="text-xs text-muted-foreground">Aucune plage : la règle s'applique à toute heure.</p>
       )}
       {value.map((w, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2 p-2 border rounded-md">
+        <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
           <div className="flex gap-1">
             {DAY_LETTERS.map((d, day) => {
               const on = w.days.includes(day);
@@ -153,47 +171,52 @@ function TimeWindowEditor({ value, onChange }: { value: TimeWindow[]; onChange: 
                       days: on ? w.days.filter((x) => x !== day) : [...w.days, day].sort((a, b) => a - b),
                     })
                   }
-                  className={`w-7 h-7 rounded text-xs font-medium border ${
-                    on ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"
-                  }`}
+                  aria-pressed={on}
+                  className={cn(
+                    "size-7 rounded-md border text-xs font-medium transition-colors",
+                    on
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
                 >
                   {d}
                 </button>
               );
             })}
           </div>
-          <input
+          <Input
             type="time"
             value={w.start}
             onChange={(e) => update(i, { start: e.target.value })}
-            className={`${inputCls} w-28`}
+            className="tabular w-28 dark:[color-scheme:dark]"
           />
           <span className="text-sm text-muted-foreground">à</span>
-          <input
+          <Input
             type="time"
             value={w.end}
             onChange={(e) => update(i, { end: e.target.value })}
-            className={`${inputCls} w-28`}
+            className="tabular w-28 dark:[color-scheme:dark]"
           />
           {w.end < w.start && <span className="text-xs text-muted-foreground">(passe minuit)</span>}
-          {w.days.length === 0 && <span className="text-xs text-red-700">choisir au moins un jour</span>}
+          {w.days.length === 0 && <span className="text-xs text-danger">choisir au moins un jour</span>}
           <button
             type="button"
             onClick={() => onChange(value.filter((_, j) => j !== i))}
             className={`${iconBtnDanger} ml-auto`}
             title="Retirer la plage"
           >
-            <X size={14} />
+            <X className="size-4" />
           </button>
         </div>
       ))}
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={() => onChange([...value, { days: [0, 1, 2, 3, 4], start: "08:00", end: "18:00" }])}
-        className={btnSecondary}
       >
-        <Plus size={15} /> Ajouter une plage
-      </button>
+        <Plus /> Ajouter une plage
+      </Button>
     </div>
   );
 }
@@ -244,22 +267,22 @@ function TargetsSummary({
   const who = rule.users.length + rule.groups.length;
   const where = rule.servers.length + rule.nodes.length + rule.labels.length;
   return (
-    <div className="space-y-1.5 max-w-sm">
-      <div className="flex flex-wrap gap-1 items-center">
-        <span className="text-[11px] text-muted-foreground w-14">Qui</span>
+    <div className="max-w-sm space-y-1">
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="w-16 shrink-0 text-xs text-muted-foreground">Qui</span>
         {who === 0 && <span className="text-xs text-muted-foreground">tout le monde</span>}
         {rule.users.map((u) => (
           <Chip key={u.id}>{u.name}</Chip>
         ))}
         {rule.groups.map((g) => (
           <Chip key={g.id} tone="primary">
-            <Users size={11} /> {g.name}
+            <Users className="size-3" /> {g.name}
           </Chip>
         ))}
       </div>
       {showServers && (
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-[11px] text-muted-foreground w-14">Où</span>
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-16 shrink-0 text-xs text-muted-foreground">Où</span>
           {where === 0 && <span className="text-xs text-muted-foreground">tous les serveurs</span>}
           {rule.servers.map((s) => (
             <Chip key={s.id}>{s.name}</Chip>
@@ -271,14 +294,14 @@ function TargetsSummary({
           ))}
           {rule.labels.map((l) => (
             <Chip key={l} tone="blue">
-              {l}
+              <span className="font-mono">{l}</span>
             </Chip>
           ))}
         </div>
       )}
       {showServers && (
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-[11px] text-muted-foreground w-14">Comptes</span>
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-16 shrink-0 text-xs text-muted-foreground">Comptes</span>
           {rule.accounts.length === 0 && <span className="text-xs text-muted-foreground">tous</span>}
           {rule.accounts.map((a) => (
             <Chip key={a}>
@@ -381,25 +404,21 @@ function useOptions(refs: AclRefs) {
 function GeneralFields({ form, set }: { form: TargetsForm; set: (p: Partial<TargetsForm>) => void }) {
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Field label="Nom *">
-          <input value={form.name} onChange={(e) => set({ name: e.target.value })} className={inputCls} autoFocus />
+          <Input value={form.name} onChange={(e) => set({ name: e.target.value })} autoFocus />
         </Field>
         <Field label="Description">
-          <input
-            value={form.description}
-            onChange={(e) => set({ description: e.target.value })}
-            className={inputCls}
-          />
+          <Input value={form.description} onChange={(e) => set({ description: e.target.value })} />
         </Field>
         <Field label="Priorité" hint="0 à 10000, la plus basse est évaluée en premier.">
-          <input
+          <Input
             type="number"
             min={0}
             max={10000}
             value={form.priority}
             onChange={(e) => set({ priority: Number(e.target.value) })}
-            className={inputCls}
+            className="font-mono tabular"
           />
         </Field>
       </div>
@@ -419,8 +438,8 @@ function WhoFields({
 }) {
   return (
     <div className="border-t pt-4">
-      <h4 className="text-xs font-medium text-muted-foreground uppercase mb-3">Utilisateurs concernés</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <h4 className="mb-3 text-sm font-medium">Utilisateurs concernés</h4>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Utilisateurs">
           <MultiSelect options={opts.users} selected={form.user_ids} onChange={(user_ids) => set({ user_ids })} />
         </Field>
@@ -429,7 +448,7 @@ function WhoFields({
         </Field>
       </div>
       {form.user_ids.length + form.group_ids.length === 0 && (
-        <p className="text-xs text-muted-foreground mt-2">Aucune sélection : la règle concerne tout le monde.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Aucune sélection : la règle concerne tout le monde.</p>
       )}
     </div>
   );
@@ -447,9 +466,9 @@ function WhereFields({
   listPrefix: string;
 }) {
   return (
-    <div className="border-t pt-4 space-y-4">
-      <h4 className="text-xs font-medium text-muted-foreground uppercase">Serveurs et comptes ciblés</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="space-y-4 border-t pt-4">
+      <h4 className="text-sm font-medium">Serveurs et comptes ciblés</h4>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Serveurs">
           <MultiSelect
             options={opts.servers}
@@ -466,6 +485,7 @@ function WhereFields({
             onChange={(labels) => set({ labels })}
             placeholder="clé=valeur"
             emptyText="Aucune étiquette"
+            mono
             validate={(v) => (v.includes("=") && !v.startsWith("=") ? null : "Format attendu : clé=valeur")}
             suggestions={opts.labels}
             listId={`${listPrefix}-labels`}
@@ -514,36 +534,71 @@ function ApproverFields({
   );
 }
 
+/** Radio card: one choice among a few, with a one-line explanation. */
+function ChoiceCard({
+  selected,
+  onSelect,
+  name,
+  children,
+  help,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  name: string;
+  children: ReactNode;
+  help: ReactNode;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-start gap-2.5 rounded-md border p-2.5 text-sm transition-colors",
+        selected ? "border-foreground/40 bg-muted" : "hover:bg-accent/60",
+      )}
+    >
+      <input type="radio" name={name} checked={selected} onChange={onSelect} className="peer sr-only" />
+      <span
+        aria-hidden
+        className={cn(
+          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-input peer-focus-visible:ring-1 peer-focus-visible:ring-ring",
+          selected && "border-foreground",
+        )}
+      >
+        {selected && (
+          <motion.span
+            layoutId={`choice-${name}`}
+            className="size-2 rounded-full bg-foreground"
+            transition={{ type: "spring", stiffness: 500, damping: 40 }}
+          />
+        )}
+      </span>
+      <span className="min-w-0 space-y-1">
+        <span className="block">{children}</span>
+        <span className="block text-xs text-muted-foreground">{help}</span>
+      </span>
+    </label>
+  );
+}
+
 function ActionPicker<T extends string>({
   actions,
   value,
   onChange,
   help,
+  name,
 }: {
   actions: T[];
   value: T;
   onChange: (v: T) => void;
   help: Record<T, string>;
+  name: string;
 }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {actions.map((a) => {
-        const info = RULE_ACTION_INFO[a as keyof typeof RULE_ACTION_INFO];
-        return (
-          <label
-            key={a}
-            className={`flex items-start gap-2 p-2 rounded-md border cursor-pointer text-sm ${
-              value === a ? "border-primary bg-primary/5" : "hover:bg-accent"
-            }`}
-          >
-            <input type="radio" checked={value === a} onChange={() => onChange(a)} className="mt-1" />
-            <span>
-              <span className="font-medium">{info?.label || a}</span>
-              <span className="block text-xs text-muted-foreground">{help[a]}</span>
-            </span>
-          </label>
-        );
-      })}
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {actions.map((a) => (
+        <ChoiceCard key={a} name={name} selected={value === a} onSelect={() => onChange(a)} help={help[a]}>
+          <RuleActionChip action={a} />
+        </ChoiceCard>
+      ))}
     </div>
   );
 }
@@ -617,11 +672,11 @@ function ConnectionRuleModal({
       size="3xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
-            {rule ? "Enregistrer" : "Créer"}
+            {rule ? "Enregistrer la règle" : "Créer la règle"}
           </SaveButton>
         </>
       }
@@ -629,7 +684,7 @@ function ConnectionRuleModal({
       <ErrorBox message={error} />
       <GeneralFields form={form} set={set} />
 
-      <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-2">
         <Field label="Portée">
           <div className="space-y-2">
             {(
@@ -638,18 +693,9 @@ function ConnectionRuleModal({
                 ["login", "Accès à Citadel", "Toute utilisation de l'application elle-même."],
               ] as [RuleScope, string, string][]
             ).map(([id, label, help]) => (
-              <label
-                key={id}
-                className={`flex items-start gap-2 p-2 rounded-md border cursor-pointer text-sm ${
-                  scope === id ? "border-primary bg-primary/5" : "hover:bg-accent"
-                }`}
-              >
-                <input type="radio" checked={scope === id} onChange={() => setScope(id)} className="mt-1" />
-                <span>
-                  <span className="font-medium">{label}</span>
-                  <span className="block text-xs text-muted-foreground">{help}</span>
-                </span>
-              </label>
+              <ChoiceCard key={id} name="conn-scope" selected={scope === id} onSelect={() => setScope(id)} help={help}>
+                <span className="font-medium">{label}</span>
+              </ChoiceCard>
             ))}
           </div>
         </Field>
@@ -658,6 +704,7 @@ function ConnectionRuleModal({
             actions={scope === "login" ? ["allow", "deny"] : ["allow", "deny", "review"]}
             value={action}
             onChange={setAction}
+            name="conn-action"
             help={{
               allow: "Autorise et arrête l'évaluation.",
               deny: "Refuse la connexion.",
@@ -667,17 +714,20 @@ function ConnectionRuleModal({
         </Field>
       </div>
       {scope === "login" && (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
-          Une règle d'accès à Citadel peut vous bloquer : l'enregistrement est refusé si elle vous empêche de vous
-          connecter depuis votre adresse actuelle. Ajoutez d'abord une règle « Autoriser » pour vos adresses
-          d'administration.
-        </p>
+        <div className="flex items-start gap-2 rounded-md border border-live/30 bg-live/10 px-3 py-2 text-xs">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-live" />
+          <p>
+            Une règle d'accès à Citadel peut vous bloquer : l'enregistrement est refusé si elle vous empêche de vous
+            connecter depuis votre adresse actuelle. Ajoutez d'abord une règle « Autoriser » pour vos adresses
+            d'administration.
+          </p>
+        </div>
       )}
 
       <WhoFields form={form} set={set} opts={opts} />
       {scope === "connect" && <WhereFields form={form} set={set} opts={opts} listPrefix="conn" />}
 
-      <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-2">
         <Field label="Adresses source" hint="IP ou CIDR. Vide = toutes les adresses.">
           <StringListEditor
             value={sourceIps}
@@ -748,11 +798,11 @@ function CommandRuleModal({
       size="3xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
-            {rule ? "Enregistrer" : "Créer"}
+            {rule ? "Enregistrer la règle" : "Créer la règle"}
           </SaveButton>
         </>
       }
@@ -760,12 +810,13 @@ function CommandRuleModal({
       <ErrorBox message={error} />
       <GeneralFields form={form} set={set} />
 
-      <div className="border-t pt-4 space-y-4">
+      <div className="space-y-4 border-t pt-4">
         <Field label="Action">
           <ActionPicker<CommandRuleAction>
             actions={["allow", "deny", "alert", "review"]}
             value={action}
             onChange={setAction}
+            name="cmd-action"
             help={{
               allow: "Autorise explicitement et arrête l'évaluation.",
               deny: "Bloque la commande.",
@@ -824,11 +875,13 @@ function sortRules<T extends { priority: number; name: string }>(rows: T[]): T[]
 }
 
 function RuleRowActions({
+  name,
   active,
   onToggle,
   onEdit,
   onDelete,
 }: {
+  name: string;
   active: boolean;
   onToggle: () => void;
   onEdit: () => void;
@@ -836,16 +889,76 @@ function RuleRowActions({
 }) {
   return (
     <div className="flex items-center justify-end gap-1">
-      <Toggle checked={active} onChange={onToggle} label="" title={active ? "Désactiver" : "Activer"} />
-      <button onClick={onEdit} className={iconBtn} title="Modifier">
-        <Pencil size={15} />
-      </button>
-      <button onClick={onDelete} className={iconBtnDanger} title="Supprimer">
-        <Trash2 size={15} />
-      </button>
+      <Toggle checked={active} onChange={onToggle} label="" title={active ? `Désactiver ${name}` : `Activer ${name}`} />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button onClick={onEdit} className={iconBtn} aria-label={`Modifier ${name}`}>
+            <Pencil className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Modifier</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button onClick={onDelete} className={iconBtnDanger} aria-label={`Supprimer ${name}`}>
+            <Trash2 className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Supprimer</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
+
+/** Explanation block above a rules table, with the "new rule" button. */
+function PanelIntro({ children, onNew }: { children: ReactNode; onNew: () => void }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-[18rem] flex-1 space-y-1 rounded-md border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground [&_strong]:font-medium [&_strong]:text-foreground">
+        {children}
+      </div>
+      <Button onClick={onNew}>
+        <Plus /> Nouvelle règle
+      </Button>
+    </div>
+  );
+}
+
+function RulesSkeleton({ cols }: { cols: number }) {
+  return (
+    <Card className="overflow-hidden">
+      {[0, 1, 2, 3].map((r) => (
+        <div key={r} className="flex items-center gap-4 border-b px-3 py-3.5 last:border-0">
+          <Skeleton className="h-4 w-8" />
+          {Array.from({ length: cols - 1 }).map((_, i) => (
+            <Skeleton key={i} className="h-4 flex-1" />
+          ))}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/** Priority cell: mono, tabular, right-aligned so numbers line up. */
+function PriorityCell({ value }: { value: number }) {
+  return <TableCell className="tabular px-3 py-2.5 text-right font-mono text-xs text-muted-foreground">{value}</TableCell>;
+}
+
+function ApproversNote({ groups }: { groups: { name: string }[] }) {
+  return (
+    <p className="mt-1 text-xs text-muted-foreground">
+      par {groups.length ? groups.map((g) => g.name).join(", ") : "les administrateurs"}
+    </p>
+  );
+}
+
+const rowMotion = {
+  layout: true,
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.18 },
+} as const;
 
 // ── Connection rules tab ─────────────────────────────────────
 
@@ -880,7 +993,7 @@ export function ConnectionRulesPanel({ refs }: { refs: AclRefs }) {
     try {
       await api.delete(`/api/acl/connection-rules/${del.id}`);
       setRules((prev) => prev.filter((x) => x.id !== del.id));
-      setNotice({ ok: true, text: `Règle ${del.name} supprimée.` });
+      toast.success(`Règle ${del.name} supprimée`);
     } catch (e) {
       setNotice({ ok: false, text: errorMessage(e) });
     } finally {
@@ -891,109 +1004,115 @@ export function ConnectionRulesPanel({ refs }: { refs: AclRefs }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="p-3 rounded-md border bg-muted/30 text-xs text-muted-foreground space-y-1 flex-1 min-w-[18rem]">
-          <p>
-            Les règles sont évaluées par <strong>priorité croissante</strong> ; la première qui correspond décide.
-            Si aucune ne correspond, la connexion est autorisée (les règles d'accès restent nécessaires pour voir
-            un serveur).
-          </p>
-          <p>
-            Portée <strong>Accès à Citadel</strong> : utilisation de l'application elle-même. Portée{" "}
-            <strong>Connexion</strong> : terminal, RDP et exécution sur les serveurs, avec possibilité de
-            validation préalable par un tiers.
-          </p>
-        </div>
-        <button onClick={() => setEdit(null)} className={btnPrimary}>
-          <Plus size={16} /> Nouvelle règle
-        </button>
-      </div>
+      <PanelIntro onNew={() => setEdit(null)}>
+        <p>
+          Les règles sont évaluées par <strong>priorité croissante</strong> ; la première qui correspond décide.
+          Si aucune ne correspond, la connexion est autorisée (les règles d'accès restent nécessaires pour voir
+          un serveur).
+        </p>
+        <p>
+          Portée <strong>Accès à Citadel</strong> : utilisation de l'application elle-même. Portée{" "}
+          <strong>Connexion</strong> : terminal, RDP et exécution sur les serveurs, avec possibilité de
+          validation préalable par un tiers.
+        </p>
+      </PanelIntro>
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <ErrorBox message={error} />
       {loading ? (
-        <p className="text-muted-foreground">Chargement...</p>
+        <RulesSkeleton cols={6} />
       ) : sorted.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <ShieldBan size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">Aucune règle de connexion : tout est autorisé.</p>
-        </div>
+        <EmptyState
+          icon={ShieldBan}
+          title="Aucune règle de connexion"
+          action={
+            <Button variant="outline" onClick={() => setEdit(null)}>
+              <Plus /> Nouvelle règle
+            </Button>
+          }
+        >
+          Tout est autorisé pour l'instant. Ajoutez une règle pour filtrer par adresse, horaire ou exiger une
+          validation.
+        </EmptyState>
       ) : (
-        <div className="bg-card border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium w-16">Prio.</th>
-                <th className="text-left p-3 font-medium">Règle</th>
-                <th className="text-left p-3 font-medium">Portée</th>
-                <th className="text-left p-3 font-medium">Action</th>
-                <th className="text-left p-3 font-medium">Cibles</th>
-                <th className="text-left p-3 font-medium">Conditions</th>
-                <th className="text-right p-3 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((r) => (
-                <tr
-                  key={r.id}
-                  className={`border-b last:border-0 align-top hover:bg-muted/30 ${r.is_active ? "" : "opacity-50"}`}
-                >
-                  <td className="p-3 font-mono text-xs">{r.priority}</td>
-                  <td className="p-3">
-                    <p className="font-medium">{r.name}</p>
-                    {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
-                  </td>
-                  <td className="p-3">
-                    <Chip tone={r.scope === "login" ? "blue" : "default"}>
-                      {r.scope === "login" ? "Accès Citadel" : "Connexion"}
-                    </Chip>
-                  </td>
-                  <td className="p-3">
-                    <RuleActionChip action={r.action} />
-                    {r.action === "review" && (
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        {r.approver_groups.length
-                          ? r.approver_groups.map((g) => g.name).join(", ")
-                          : "administrateurs"}
-                      </p>
+        <Card className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-14 px-3 text-right">Prio.</TableHead>
+                <TableHead className="px-3">Règle</TableHead>
+                <TableHead className="px-3">Portée</TableHead>
+                <TableHead className="px-3">Action</TableHead>
+                <TableHead className="px-3">Cibles</TableHead>
+                <TableHead className="px-3">Conditions</TableHead>
+                <TableHead className="px-3">
+                  <span className="sr-only">Gestion</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <AnimatePresence initial={false}>
+                {sorted.map((r) => (
+                  <motion.tr
+                    key={r.id}
+                    {...rowMotion}
+                    className={cn(
+                      "border-b align-top transition-colors hover:bg-muted/50",
+                      !r.is_active && "opacity-50",
                     )}
-                  </td>
-                  <td className="p-3">
-                    <TargetsSummary rule={r} nodePaths={nodePaths} showServers={r.scope === "connect"} />
-                  </td>
-                  <td className="p-3">
-                    <div className="space-y-1 text-xs">
-                      {r.source_ips.length === 0 && r.time_windows.length === 0 && (
-                        <span className="text-muted-foreground">toujours</span>
-                      )}
-                      {r.source_ips.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {r.source_ips.map((ip) => (
-                            <Chip key={ip}>
-                              <span className="font-mono">{ip}</span>
-                            </Chip>
-                          ))}
-                        </div>
-                      )}
-                      {r.time_windows.map((w, i) => (
-                        <p key={i} className="text-muted-foreground">
-                          {formatWindow(w)}
-                        </p>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <RuleRowActions
-                      active={r.is_active}
-                      onToggle={() => toggle(r)}
-                      onEdit={() => setEdit(r)}
-                      onDelete={() => setDel(r)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  >
+                    <PriorityCell value={r.priority} />
+                    <TableCell className="px-3 py-2.5">
+                      <p className="font-medium">{r.name}</p>
+                      {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <Chip tone={r.scope === "login" ? "blue" : "default"}>
+                        {r.scope === "login" ? "Accès Citadel" : "Connexion"}
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <RuleActionChip action={r.action} />
+                      {r.action === "review" && <ApproversNote groups={r.approver_groups} />}
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <TargetsSummary rule={r} nodePaths={nodePaths} showServers={r.scope === "connect"} />
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <div className="space-y-1 text-xs">
+                        {r.source_ips.length === 0 && r.time_windows.length === 0 && (
+                          <span className="text-muted-foreground">toujours</span>
+                        )}
+                        {r.source_ips.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {r.source_ips.map((ip) => (
+                              <Chip key={ip}>
+                                <span className="font-mono">{ip}</span>
+                              </Chip>
+                            ))}
+                          </div>
+                        )}
+                        {r.time_windows.map((w, i) => (
+                          <p key={i} className="tabular text-muted-foreground">
+                            {formatWindow(w)}
+                          </p>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5">
+                      <RuleRowActions
+                        name={r.name}
+                        active={r.is_active}
+                        onToggle={() => toggle(r)}
+                        onEdit={() => setEdit(r)}
+                        onDelete={() => setDel(r)}
+                      />
+                    </TableCell>
+                  </motion.tr>
+                ))}
+              </AnimatePresence>
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
       {edit !== undefined && (
@@ -1002,6 +1121,7 @@ export function ConnectionRulesPanel({ refs }: { refs: AclRefs }) {
           refs={refs}
           onClose={() => setEdit(undefined)}
           onSaved={() => {
+            toast.success(edit ? "Règle enregistrée" : "Règle créée");
             setEdit(undefined);
             load();
           }}
@@ -1010,7 +1130,7 @@ export function ConnectionRulesPanel({ refs }: { refs: AclRefs }) {
       {del && (
         <ConfirmModal
           title={`Supprimer la règle ${del.name}`}
-          confirmLabel="Supprimer"
+          confirmLabel="Supprimer la règle"
           danger
           loading={busy}
           onConfirm={doDelete}
@@ -1018,7 +1138,7 @@ export function ConnectionRulesPanel({ refs }: { refs: AclRefs }) {
         >
           <p>La règle cessera immédiatement de s'appliquer.</p>
           {del.scope === "login" && del.action === "allow" && (
-            <p className="text-amber-800">
+            <p className="text-live">
               C'est une règle d'autorisation d'accès à Citadel : la suppression est refusée si elle vous bloquerait.
             </p>
           )}
@@ -1029,6 +1149,8 @@ export function ConnectionRulesPanel({ refs }: { refs: AclRefs }) {
 }
 
 // ── Command rules tab ────────────────────────────────────────
+
+const ME = "__me__";
 
 function CommandTester({ refs }: { refs: AclRefs }) {
   const [command, setCommand] = useState("");
@@ -1067,69 +1189,95 @@ function CommandTester({ refs }: { refs: AclRefs }) {
   };
 
   return (
-    <div className="bg-card border rounded-lg p-4 space-y-3">
-      <h3 className="font-semibold flex items-center gap-2">
-        <FlaskConical size={16} /> Tester une commande
-      </h3>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+    <Card className="space-y-3 p-4">
+      <div className="space-y-1">
+        <h3 className="flex items-center gap-2 text-base font-semibold">
+          <FlaskConical className="size-4 text-muted-foreground" /> Tester une commande
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Simule la décision des règles pour une commande, un serveur et un utilisateur, sans rien exécuter.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <div className="md:col-span-4">
-          <input
+          <Input
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && command.trim() && serverId && run()}
             placeholder="systemctl stop nginx"
-            className={`${inputCls} font-mono`}
+            className="font-mono"
           />
         </div>
-        <select value={serverId} onChange={(e) => setServerId(e.target.value)} className={inputCls}>
-          <option value="">Serveur *</option>
-          {refs.servers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <select value={userId} onChange={(e) => setUserId(e.target.value)} className={inputCls}>
-          <option value="">Moi-même</option>
-          {refs.users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.display_name}
-            </option>
-          ))}
-        </select>
-        <input
+        <Select value={serverId} onValueChange={setServerId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Serveur *" />
+          </SelectTrigger>
+          <SelectContent>
+            {refs.servers.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={userId || ME} onValueChange={(v) => setUserId(v === ME ? "" : v)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ME}>Moi-même</SelectItem>
+            {refs.users.map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.display_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
           value={account}
           onChange={(e) => setAccount(e.target.value)}
           placeholder="Compte (facultatif)"
-          className={`${inputCls} font-mono`}
+          className="font-mono"
         />
-        <button onClick={run} disabled={loading || !command.trim() || !serverId} className={btnPrimary}>
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <FlaskConical size={16} />} Tester
-        </button>
+        <Button onClick={run} disabled={loading || !command.trim() || !serverId}>
+          {loading ? <Loader2 className="animate-spin" /> : <FlaskConical />} Tester
+        </Button>
       </div>
       <ErrorBox message={error} />
-      {result && (
-        <div className="p-3 rounded-md border bg-muted/30 text-sm space-y-1">
-          <div className="flex items-center gap-2">
-            <RuleActionChip action={result.action} />
-            <span>{verdict[result.action] || result.action}</span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {result.rule
-              ? result.rule === "Liste de blocage globale"
-                ? "Correspondance avec la liste de blocage globale (Paramètres > Commandes)."
-                : `Règle : ${result.rule}`
-              : "Aucune règle ne correspond (autorisé par défaut)."}
-            {result.reason && (
-              <>
-                {" "}
-                Correspondance : <code className="bg-muted px-1 rounded">{result.reason}</code>
-              </>
-            )}
-          </p>
-        </div>
-      )}
-    </div>
+      <AnimatePresence initial={false} mode="wait">
+        {result && (
+          <motion.div
+            key={`${result.action}-${result.rule}-${result.reason}`}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-1 rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
+              <div className="flex items-center gap-2">
+                <RuleActionChip action={result.action} />
+                <span>{verdict[result.action] || result.action}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {result.rule
+                  ? result.rule === "Liste de blocage globale"
+                    ? "Correspondance avec la liste de blocage globale (Paramètres > Commandes)."
+                    : `Règle : ${result.rule}`
+                  : "Aucune règle ne correspond (autorisé par défaut)."}
+                {result.reason && (
+                  <>
+                    {" "}
+                    Correspondance :{" "}
+                    <code className="rounded bg-background px-1 font-mono text-foreground">{result.reason}</code>
+                  </>
+                )}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
   );
 }
 
@@ -1160,7 +1308,7 @@ export function CommandRulesPanel({ refs }: { refs: AclRefs }) {
     try {
       await api.delete(`/api/acl/command-rules/${del.id}`);
       setRules((prev) => prev.filter((x) => x.id !== del.id));
-      setNotice({ ok: true, text: `Règle ${del.name} supprimée.` });
+      toast.success(`Règle ${del.name} supprimée`);
     } catch (e) {
       setNotice({ ok: false, text: errorMessage(e) });
     } finally {
@@ -1171,91 +1319,100 @@ export function CommandRulesPanel({ refs }: { refs: AclRefs }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="p-3 rounded-md border bg-muted/30 text-xs text-muted-foreground space-y-1 flex-1 min-w-[18rem]">
-          <p>
-            S'applique à l'<strong>API d'exécution</strong> et au <strong>terminal interactif</strong>. Dans le
-            terminal, la ligne est reconstituée à la validation (Entrée) ; les applications plein écran (vi, top...)
-            sont ignorées. C'est un garde-fou, pas une barrière étanche : les enregistrements de session restent la
-            source d'audit.
-          </p>
-          <p>
-            Évaluation par priorité croissante, première correspondance gagnante, aucune = autorisé. La liste de
-            blocage globale (Paramètres &gt; Commandes) s'applique aussi.
-          </p>
-        </div>
-        <button onClick={() => setEdit(null)} className={btnPrimary}>
-          <Plus size={16} /> Nouvelle règle
-        </button>
-      </div>
+      <PanelIntro onNew={() => setEdit(null)}>
+        <p>
+          S'applique à l'<strong>API d'exécution</strong> et au <strong>terminal interactif</strong>. Dans le
+          terminal, la ligne est reconstituée à la validation (Entrée) ; les applications plein écran (vi, top...)
+          sont ignorées. C'est un garde-fou, pas une barrière étanche : les enregistrements de session restent la
+          source d'audit.
+        </p>
+        <p>
+          Évaluation par priorité croissante, première correspondance gagnante, aucune = autorisé. La liste de
+          blocage globale (Paramètres &gt; Commandes) s'applique aussi.
+        </p>
+      </PanelIntro>
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <ErrorBox message={error} />
       {loading ? (
-        <p className="text-muted-foreground">Chargement...</p>
+        <RulesSkeleton cols={5} />
       ) : sorted.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <TerminalSquare size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">Aucune règle de commandes.</p>
-        </div>
+        <EmptyState
+          icon={TerminalSquare}
+          title="Aucune règle de commandes"
+          action={
+            <Button variant="outline" onClick={() => setEdit(null)}>
+              <Plus /> Nouvelle règle
+            </Button>
+          }
+        >
+          Seule la liste de blocage globale s'applique. Ajoutez une règle pour bloquer, signaler ou soumettre à
+          validation certaines commandes.
+        </EmptyState>
       ) : (
-        <div className="bg-card border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium w-16">Prio.</th>
-                <th className="text-left p-3 font-medium">Règle</th>
-                <th className="text-left p-3 font-medium">Action</th>
-                <th className="text-left p-3 font-medium">Motifs</th>
-                <th className="text-left p-3 font-medium">Cibles</th>
-                <th className="text-right p-3 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((r) => (
-                <tr
-                  key={r.id}
-                  className={`border-b last:border-0 align-top hover:bg-muted/30 ${r.is_active ? "" : "opacity-50"}`}
-                >
-                  <td className="p-3 font-mono text-xs">{r.priority}</td>
-                  <td className="p-3">
-                    <p className="font-medium">{r.name}</p>
-                    {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
-                  </td>
-                  <td className="p-3">
-                    <RuleActionChip action={r.action} />
-                    {r.action === "review" && (
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        {r.approver_groups.length
-                          ? r.approver_groups.map((g) => g.name).join(", ")
-                          : "administrateurs"}
-                      </p>
+        <Card className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-14 px-3 text-right">Prio.</TableHead>
+                <TableHead className="px-3">Règle</TableHead>
+                <TableHead className="px-3">Action</TableHead>
+                <TableHead className="px-3">Motifs</TableHead>
+                <TableHead className="px-3">Cibles</TableHead>
+                <TableHead className="px-3">
+                  <span className="sr-only">Gestion</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <AnimatePresence initial={false}>
+                {sorted.map((r) => (
+                  <motion.tr
+                    key={r.id}
+                    {...rowMotion}
+                    className={cn(
+                      "border-b align-top transition-colors hover:bg-muted/50",
+                      !r.is_active && "opacity-50",
                     )}
-                  </td>
-                  <td className="p-3">
-                    <div className="space-y-1 max-w-xs">
-                      {r.patterns.map((p) => (
-                        <code key={p} className="block text-xs bg-muted px-1.5 py-0.5 rounded break-all">
-                          {p}
-                        </code>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <TargetsSummary rule={r} nodePaths={nodePaths} />
-                  </td>
-                  <td className="p-3">
-                    <RuleRowActions
-                      active={r.is_active}
-                      onToggle={() => toggle(r)}
-                      onEdit={() => setEdit(r)}
-                      onDelete={() => setDel(r)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  >
+                    <PriorityCell value={r.priority} />
+                    <TableCell className="px-3 py-2.5">
+                      <p className="font-medium">{r.name}</p>
+                      {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <RuleActionChip action={r.action} />
+                      {r.action === "review" && <ApproversNote groups={r.approver_groups} />}
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <div className="max-w-xs space-y-1">
+                        {r.patterns.map((p) => (
+                          <code
+                            key={p}
+                            className="block break-all rounded border bg-muted/60 px-1.5 py-0.5 font-mono text-xs"
+                          >
+                            {p}
+                          </code>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <TargetsSummary rule={r} nodePaths={nodePaths} />
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5">
+                      <RuleRowActions
+                        name={r.name}
+                        active={r.is_active}
+                        onToggle={() => toggle(r)}
+                        onEdit={() => setEdit(r)}
+                        onDelete={() => setDel(r)}
+                      />
+                    </TableCell>
+                  </motion.tr>
+                ))}
+              </AnimatePresence>
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
       <CommandTester refs={refs} />
@@ -1266,6 +1423,7 @@ export function CommandRulesPanel({ refs }: { refs: AclRefs }) {
           refs={refs}
           onClose={() => setEdit(undefined)}
           onSaved={() => {
+            toast.success(edit ? "Règle enregistrée" : "Règle créée");
             setEdit(undefined);
             load();
           }}
@@ -1274,7 +1432,7 @@ export function CommandRulesPanel({ refs }: { refs: AclRefs }) {
       {del && (
         <ConfirmModal
           title={`Supprimer la règle ${del.name}`}
-          confirmLabel="Supprimer"
+          confirmLabel="Supprimer la règle"
           danger
           loading={busy}
           onConfirm={doDelete}

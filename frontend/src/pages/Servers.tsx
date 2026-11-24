@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "motion/react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
@@ -13,24 +14,34 @@ import {
 } from "@/services/types";
 import NodeTree from "@/components/NodeTree";
 import { GovernanceNotice } from "@/components/governanceUi";
+import { AuthModePicker, CheckField, RowAction } from "@/components/AccountsSection";
 import {
   Chip,
+  ConfirmModal,
+  EmptyState,
   ErrorBox,
   Field,
   LabelChips,
   LabelEditor,
   Modal,
+  Notice,
+  PageHeader,
   SaveButton,
-  btnSecondary,
-  iconBtn,
-  iconBtnDanger,
-  inputCls,
+  type NoticeData,
 } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   Server,
   Plus,
   Wifi,
-  WifiOff,
   Loader2,
   Info,
   Play,
@@ -40,6 +51,7 @@ import {
   Pencil,
   Star,
   Search,
+  Monitor,
   Terminal as TerminalIcon,
   Tag,
   ShieldCheck,
@@ -109,6 +121,8 @@ const emptyForm = (nodeId: string | null): ServerFormState => ({
   acc_privileged: true,
 });
 
+const ROOT_NODE = "__root__";
+
 function NodeSelect({
   nodes,
   value,
@@ -121,16 +135,21 @@ function NodeSelect({
   exclude?: string;
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls}>
-      <option value="">Racine (aucun nœud)</option>
-      {nodes
-        .filter((n) => !exclude || (n.id !== exclude && !n.path.startsWith(pathOf(nodes, exclude) + "/")))
-        .map((n) => (
-          <option key={n.id} value={n.id}>
-            {n.path}
-          </option>
-        ))}
-    </select>
+    <Select value={value || ROOT_NODE} onValueChange={(v) => onChange(v === ROOT_NODE ? "" : v)}>
+      <SelectTrigger>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ROOT_NODE}>Racine (aucun nœud)</SelectItem>
+        {nodes
+          .filter((n) => !exclude || (n.id !== exclude && !n.path.startsWith(pathOf(nodes, exclude) + "/")))
+          .map((n) => (
+            <SelectItem key={n.id} value={n.id}>
+              {n.path}
+            </SelectItem>
+          ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -224,11 +243,11 @@ function ServerFormModal({
       size="2xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
-            {server ? "Enregistrer" : "Ajouter"}
+            {server ? "Enregistrer" : "Ajouter le serveur"}
           </SaveButton>
         </>
       }
@@ -237,76 +256,74 @@ function ServerFormModal({
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
           <Field label="Nom *">
-            <input
-              value={form.name}
-              onChange={(e) => set({ name: e.target.value })}
-              placeholder="web-prod-01"
-              className={inputCls}
-            />
+            <Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="web-prod-01" />
           </Field>
         </div>
-        <Field label="Hostname *">
-          <input
+        <Field label="Nom d'hôte *">
+          <Input
             value={form.hostname}
             onChange={(e) => set({ hostname: e.target.value })}
             placeholder="web-prod-01.local"
-            className={inputCls}
+            className="font-mono"
           />
         </Field>
         <Field label="Adresse IP *">
-          <input
+          <Input
             value={form.ip_address}
             onChange={(e) => set({ ip_address: e.target.value })}
             placeholder="192.168.1.10"
-            className={inputCls}
+            className="font-mono"
           />
         </Field>
-        <Field label="Type OS *">
-          <select
+        <Field label="Système *">
+          <Select
             value={form.os_type}
-            onChange={(e) => {
-              const os = e.target.value as OSType;
+            onValueChange={(v) => {
+              const os = v as OSType;
               set({ os_type: os, acc_mode: os === "windows" ? "credential" : form.acc_mode });
             }}
-            className={inputCls}
           >
-            <option value="linux">Linux</option>
-            <option value="windows">Windows</option>
-          </select>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="linux">Linux</SelectItem>
+              <SelectItem value="windows">Windows</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
-        <Field label="Version OS">
-          <input
+        <Field label="Version du système">
+          <Input
             value={form.os_version}
             onChange={(e) => set({ os_version: e.target.value })}
             placeholder={form.os_type === "linux" ? "Ubuntu 22.04" : "Windows Server 2022"}
-            className={inputCls}
           />
         </Field>
         {form.os_type === "linux" ? (
           <Field label="Port SSH">
-            <input
+            <Input
               type="number"
               value={form.ssh_port}
               onChange={(e) => set({ ssh_port: parseInt(e.target.value) || 22 })}
-              className={inputCls}
+              className="tabular font-mono"
             />
           </Field>
         ) : (
           <>
             <Field label="Port WinRM">
-              <input
+              <Input
                 type="number"
                 value={form.winrm_port}
                 onChange={(e) => set({ winrm_port: parseInt(e.target.value) || 5985 })}
-                className={inputCls}
+                className="tabular font-mono"
               />
             </Field>
             <Field label="Port RDP">
-              <input
+              <Input
                 type="number"
                 value={form.rdp_port}
                 onChange={(e) => set({ rdp_port: parseInt(e.target.value) || 3389 })}
-                className={inputCls}
+                className="tabular font-mono"
               />
             </Field>
           </>
@@ -321,94 +338,58 @@ function ServerFormModal({
             label="Étiquettes"
             hint="Paires clé=valeur (ex. env=prod, app=web). Utilisées pour filtrer et dans les règles d'accès."
           >
-            <LabelEditor
-              value={form.tags}
-              onChange={(tags) => set({ tags })}
-              suggestions={labelSuggestions}
-            />
+            <LabelEditor value={form.tags} onChange={(tags) => set({ tags })} suggestions={labelSuggestions} />
           </Field>
         </div>
       </div>
 
       {!server && (
-        <div className="border-t pt-4 space-y-3">
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <input
-              type="checkbox"
+        <div className="space-y-3 border-t pt-4">
+          <div className="space-y-1">
+            <CheckField
               checked={form.with_account}
-              onChange={(e) => set({ with_account: e.target.checked })}
-              className="w-4 h-4 rounded"
+              onChange={(v) => set({ with_account: v })}
+              label={<span className="font-medium">Créer un compte par défaut</span>}
             />
-            Créer un compte par défaut
-          </label>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Le compte par défaut est utilisé par l'automatisation (test de connexion, métriques,
-            mises à jour, commandes). D'autres comptes peuvent être ajoutés depuis la fiche du
-            serveur.
-          </p>
+            <p className="pl-6 text-xs text-muted-foreground">
+              Le compte par défaut sert à l'automatisation (test de connexion, métriques, mises à jour,
+              commandes). Ajoutez d'autres comptes depuis la fiche du serveur.
+            </p>
+          </div>
           {form.with_account && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Utilisateur *">
-                <input
+                <Input
                   value={form.acc_username}
                   onChange={(e) => set({ acc_username: e.target.value })}
                   placeholder={form.os_type === "linux" ? "root" : "Administrator"}
-                  className={inputCls}
+                  className="font-mono"
                 />
               </Field>
-              <div className="flex items-center gap-2 pt-6">
-                <input
-                  type="checkbox"
+              <div className="flex items-center pt-6">
+                <CheckField
                   checked={form.acc_privileged}
-                  onChange={(e) => set({ acc_privileged: e.target.checked })}
-                  className="w-4 h-4 rounded"
+                  onChange={(v) => set({ acc_privileged: v })}
+                  label="Compte privilégié"
                 />
-                <label className="text-sm">Compte privilégié</label>
               </div>
               <div className="col-span-2">
                 <Field label="Authentification">
                   <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="radio"
-                        checked={form.acc_mode === "credential"}
-                        onChange={() => set({ acc_mode: "credential" })}
-                      />
-                      Credential enregistré
-                    </label>
-                    {form.acc_mode === "credential" && (
-                      <select
-                        value={form.acc_credential_id}
-                        onChange={(e) => set({ acc_credential_id: e.target.value })}
-                        className={inputCls}
-                      >
-                        <option value="">Choisir un credential</option>
-                        {credentials.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.username}, {c.type})
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    <label
-                      className={`flex items-center gap-2 text-sm ${
-                        form.os_type !== "linux" ? "opacity-50" : ""
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        disabled={form.os_type !== "linux"}
-                        checked={form.acc_mode === "cert"}
-                        onChange={() => set({ acc_mode: "cert" })}
-                      />
-                      Certificat éphémère (CA Citadel, Linux uniquement)
-                    </label>
+                    <AuthModePicker
+                      mode={form.acc_mode}
+                      onMode={(acc_mode) => set({ acc_mode })}
+                      certAllowed={form.os_type === "linux"}
+                      credentialId={form.acc_credential_id}
+                      onCredential={(acc_credential_id) => set({ acc_credential_id })}
+                      credentials={credentials}
+                    />
                     {form.acc_mode === "cert" && (
-                      <div className="p-3 rounded bg-blue-50 border border-blue-200 text-xs text-blue-800">
-                        Aucun secret stocké : un certificat SSH de courte durée est signé à chaque
-                        connexion. Le serveur doit faire confiance à la clé CA (TrustedUserCAKeys
-                        dans sshd_config).
-                      </div>
+                      <InfoBox>
+                        Aucun secret stocké : un certificat SSH de courte durée est signé à chaque connexion. Le
+                        serveur doit faire confiance à la clé de la CA (<span className="font-mono">TrustedUserCAKeys</span>{" "}
+                        dans <span className="font-mono">sshd_config</span>).
+                      </InfoBox>
                     )}
                   </div>
                 </Field>
@@ -420,6 +401,50 @@ function ServerFormModal({
     </Modal>
   );
 }
+
+/** Neutral information block (info token). */
+function InfoBox({ title, children }: { title?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex gap-2 rounded-md border border-info/30 bg-info/10 p-3 text-xs">
+      <Info className="mt-0.5 size-3.5 shrink-0 text-info" />
+      <div className="space-y-1 text-foreground">
+        {title && <p className="text-sm font-medium">{title}</p>}
+        <div className="text-muted-foreground">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Favourite toggle: the star pops when it changes. */
+function FavoriteStar({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  const label = on ? "Retirer des favoris" : "Ajouter aux favoris";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      className="flex rounded p-0.5 text-muted-foreground/60 transition-colors hover:text-live"
+    >
+      <motion.span
+        key={on ? "on" : "off"}
+        initial={{ scale: 0.6, rotate: on ? -30 : 0 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{ type: "spring", stiffness: 500, damping: 18 }}
+        className="flex"
+      >
+        <Star className={cn("size-4", on && "fill-live text-live")} />
+      </motion.span>
+    </button>
+  );
+}
+
+const STATUS_DOT: Record<ServerData["status"], { cls: string; label: string }> = {
+  online: { cls: "bg-success", label: "En ligne" },
+  offline: { cls: "bg-danger", label: "Hors ligne" },
+  unknown: { cls: "bg-muted-foreground/40", label: "État inconnu" },
+};
 
 // ── Node create / edit ──────────────────────────────────────
 
@@ -464,30 +489,24 @@ function NodeFormModal({
       size="md"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!name.trim()}>
-            {node ? "Enregistrer" : "Créer"}
+            {node ? "Enregistrer" : "Créer le nœud"}
           </SaveButton>
         </>
       }
     >
       <ErrorBox message={error} />
       <Field label="Nom *">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Prod"
-          className={inputCls}
-          autoFocus
-        />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Prod" autoFocus />
       </Field>
       <Field label="Nœud parent">
         <NodeSelect nodes={nodes} value={parent} onChange={setParent} exclude={node?.id} />
       </Field>
       <Field label="Description">
-        <input value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} />
+        <Input value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
     </Modal>
   );
@@ -552,6 +571,13 @@ export default function Servers() {
   // 403 from the execute API (rights, command / connection ACL, review)
   const [cmdDenied, setCmdDenied] = useState<string | null>(null);
   const [cmdLoading, setCmdLoading] = useState(false);
+
+  // Confirmation of destructive actions + page-level errors
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: "server"; srv: ServerData } | { kind: "node"; node: NodeData } | { kind: "cred"; cred: CredentialData } | null
+  >(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [pageNotice, setPageNotice] = useState<NoticeData | null>(null);
 
   // System info modal
   const [infoServer, setInfoServer] = useState<ServerData | null>(null);
@@ -623,7 +649,6 @@ export default function Servers() {
   // ── Credentials ──
 
   const handleDeleteCredential = async (credId: string) => {
-    if (!confirm("Supprimer ce credential ?")) return;
     setCredError(null);
     try {
       await api.delete(`/api/servers/credentials/${credId}`);
@@ -691,14 +716,13 @@ export default function Servers() {
   // ── Servers ──
 
   const handleDeleteServer = async (srv: ServerData) => {
-    if (!confirm(`Supprimer le serveur ${srv.name} ?`)) return;
     try {
       await api.delete(`/api/servers/${srv.id}`);
       setServers((prev) => prev.filter((s) => s.id !== srv.id));
       loadNodes();
       loadLabels();
     } catch (e) {
-      alert(errorMessage(e));
+      setPageNotice({ ok: false, text: errorMessage(e) });
     }
   };
 
@@ -772,65 +796,68 @@ export default function Servers() {
   // ── Nodes ──
 
   const handleDeleteNode = async (node: NodeData) => {
-    if (
-      !confirm(
-        `Supprimer le nœud ${node.path} et tous ses sous-nœuds ? Leurs serveurs seront déplacés à la racine.`
-      )
-    )
-      return;
     try {
       await api.delete(`/api/nodes/${node.id}`);
       if (selectedNode && (selectedNode === node.id || selectedNodeData?.path.startsWith(node.path + "/")))
         setSelectedNode(null);
       refreshAll();
     } catch (e) {
-      alert(errorMessage(e));
+      setPageNotice({ ok: false, text: errorMessage(e) });
     }
   };
 
   const toggleLabelFilter = (sel: string) =>
     setLabelFilters((prev) => (prev.includes(sel) ? prev.filter((x) => x !== sel) : [...prev, sel]));
 
-  const statusColor = {
-    online: "bg-green-500",
-    offline: "bg-red-500",
-    unknown: "bg-gray-400",
-  };
-
   const hasFilters = !!selectedNode || labelFilters.length > 0 || !!debouncedSearch || favOnly;
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleteLoading(true);
+    try {
+      if (pendingDelete.kind === "server") await handleDeleteServer(pendingDelete.srv);
+      else if (pendingDelete.kind === "node") await handleDeleteNode(pendingDelete.node);
+      else await handleDeleteCredential(pendingDelete.cred.id);
+    } finally {
+      setDeleteLoading(false);
+      setPendingDelete(null);
+    }
+  };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold">Serveurs</h2>
-          {selectedNodeData && (
-            <p className="text-sm text-muted-foreground mt-0.5">{selectedNodeData.path}</p>
-          )}
-        </div>
-        {isAdmin && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowCredModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-md border text-sm font-medium hover:bg-accent"
-            >
-              <Key size={16} />
-              Credentials ({credentials.length})
-            </button>
-            <button
-              onClick={() => setFormServer(null)}
-              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
-            >
-              <Plus size={16} />
-              Ajouter un serveur
-            </button>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Serveurs"
+        description={
+          selectedNodeData ? (
+            <>
+              Serveurs du nœud <span className="font-medium text-foreground">{selectedNodeData.path}</span> et de
+              ses sous-nœuds.
+            </>
+          ) : (
+            "Les serveurs auxquels vous avez accès. Ouvrez une session, testez la connexion ou lancez une commande."
+          )
+        }
+        actions={
+          isAdmin && (
+            <>
+              <Button variant="outline" onClick={() => setShowCredModal(true)}>
+                <Key />
+                Credentials
+                <span className="tabular text-muted-foreground">{credentials.length}</span>
+              </Button>
+              <Button onClick={() => setFormServer(null)}>
+                <Plus />
+                Ajouter un serveur
+              </Button>
+            </>
+          )
+        }
+      />
 
-      <div className="flex gap-4 items-start">
+      <div className="flex items-start gap-4">
         {/* Node tree */}
-        <div className="w-60 shrink-0">
+        <aside className="hidden w-60 shrink-0 md:block">
           <NodeTree
             nodes={nodes}
             selected={selectedNode}
@@ -838,289 +865,297 @@ export default function Servers() {
             isAdmin={isAdmin}
             onCreate={(parentId) => setNodeForm({ node: null, parentId })}
             onRename={(node) => setNodeForm({ node, parentId: null })}
-            onDelete={handleDeleteNode}
+            onDelete={(node) => setPendingDelete({ kind: "node", node })}
           />
-        </div>
+        </aside>
 
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1 space-y-3">
           {/* Search + filters */}
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <div className="relative flex-1 min-w-[220px] max-w-sm">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] max-w-sm flex-1">
+              <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Rechercher (nom, hostname, IP)"
-                className="w-full pl-9 pr-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Rechercher (nom, hôte, IP)"
+                className="pl-9"
               />
             </div>
-            <button
+            <Button
+              variant="outline"
               onClick={() => setFavOnly((v) => !v)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${
-                favOnly ? "bg-amber-50 border-amber-300 text-amber-800" : "hover:bg-accent"
-              }`}
+              aria-pressed={favOnly}
+              className={cn(favOnly && "border-live/40 bg-live/10 text-live hover:bg-live/15 hover:text-live")}
             >
-              <Star size={14} className={favOnly ? "fill-amber-400 text-amber-500" : ""} />
+              <Star className={cn(favOnly && "fill-live")} />
               Favoris
-            </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowLabelPicker((v) => !v)}
-                className="flex items-center gap-2 px-3 py-2 rounded-md border text-sm hover:bg-accent"
-                disabled={Object.keys(labels).length === 0}
-                title={Object.keys(labels).length === 0 ? "Aucune étiquette définie" : undefined}
-              >
-                <Tag size={14} />
-                Étiquettes
-                {labelFilters.length > 0 && (
-                  <span className="px-1.5 rounded-full bg-primary text-primary-foreground text-xs">
-                    {labelFilters.length}
-                  </span>
-                )}
-              </button>
-              {showLabelPicker && (
-                <div className="absolute z-20 mt-1 w-72 max-h-80 overflow-auto bg-card border rounded-md shadow-lg p-3 space-y-3">
-                  {Object.entries(labels).map(([key, values]) => (
-                    <div key={key}>
-                      <p className="text-xs font-medium text-muted-foreground mb-1">{key}</p>
-                      <div className="flex flex-wrap gap-1">
-                        {values.map((v) => {
-                          const sel = `${key}=${v}`;
-                          const on = labelFilters.includes(sel);
-                          return (
-                            <button
-                              key={sel}
-                              onClick={() => toggleLabelFilter(sel)}
-                              className={`px-2 py-0.5 rounded text-xs border ${
-                                on
-                                  ? "bg-primary text-primary-foreground border-primary"
-                                  : "hover:bg-accent"
-                              }`}
-                            >
-                              {v === "" ? "(vide)" : v}
-                            </button>
-                          );
-                        })}
-                      </div>
+            </Button>
+            <Popover open={showLabelPicker} onOpenChange={setShowLabelPicker}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  disabled={Object.keys(labels).length === 0}
+                  title={Object.keys(labels).length === 0 ? "Aucune étiquette définie" : undefined}
+                >
+                  <Tag />
+                  Étiquettes
+                  {labelFilters.length > 0 && (
+                    <span className="tabular rounded bg-foreground/10 px-1.5 text-xs">{labelFilters.length}</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="max-h-80 w-72 space-y-3 overflow-auto p-3">
+                {Object.entries(labels).map(([key, values]) => (
+                  <div key={key}>
+                    <p className="mb-1 font-mono text-xs text-muted-foreground">{key}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {values.map((v) => {
+                        const sel = `${key}=${v}`;
+                        const on = labelFilters.includes(sel);
+                        return (
+                          <button
+                            key={sel}
+                            onClick={() => toggleLabelFilter(sel)}
+                            aria-pressed={on}
+                            className={cn(
+                              "h-6 rounded-md border px-2 font-mono text-xs transition-colors",
+                              on ? "border-foreground bg-foreground text-background" : "hover:bg-accent",
+                            )}
+                          >
+                            {v === "" ? "(vide)" : v}
+                          </button>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                  </div>
+                ))}
+              </PopoverContent>
+            </Popover>
             {labelFilters.map((l) => (
               <Chip key={l} tone="primary" onRemove={() => toggleLabelFilter(l)}>
-                {l}
+                <span className="font-mono">{l}</span>
               </Chip>
             ))}
             {hasFilters && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setSelectedNode(null);
                   setLabelFilters([]);
                   setSearch("");
                   setFavOnly(false);
                 }}
-                className="text-xs text-muted-foreground hover:text-foreground underline"
+                className="text-muted-foreground"
               >
+                <X />
                 Réinitialiser
-              </button>
+              </Button>
+            )}
+            {servers.length > 0 && (
+              <span className="tabular ml-auto text-xs text-muted-foreground">
+                {servers.length} serveur{servers.length > 1 ? "s" : ""}
+              </span>
             )}
           </div>
 
+          <Notice notice={pageNotice} onClose={() => setPageNotice(null)} />
+
           {/* Test result banner */}
-          {testResult && (
-            <div
-              className={`mb-4 p-3 rounded-md text-sm flex items-center justify-between ${
-                testResult.success
-                  ? "bg-green-50 text-green-800 border border-green-200"
-                  : "bg-red-50 text-red-800 border border-red-200"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {testResult.success ? <Wifi size={16} /> : <WifiOff size={16} />}
-                <span>
-                  <strong>{testResult.server_name}</strong> : {testResult.message}
-                  {testResult.latency_ms && ` (${testResult.latency_ms}ms)`}
-                </span>
-              </div>
-              <button onClick={() => setTestResult(null)}>
-                <X size={14} />
-              </button>
+          <Notice
+            notice={
+              testResult && {
+                ok: testResult.success,
+                text: (
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    <strong>{testResult.server_name}</strong>
+                    <span>{testResult.message}</span>
+                    {testResult.latency_ms && (
+                      <span className="tabular font-mono text-xs text-muted-foreground">{testResult.latency_ms} ms</span>
+                    )}
+                  </span>
+                ),
+              }
+            }
+            onClose={() => setTestResult(null)}
+          />
+
+          <ErrorBox message={error} />
+
+          {loading && (
+            <div className="space-y-2 rounded-lg border bg-card p-3">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-9 w-full" />
+              ))}
             </div>
           )}
 
-          {loading && <p className="text-muted-foreground">Chargement...</p>}
-          {error && <p className="text-destructive">Erreur : {error}</p>}
-
           {!loading && servers.length === 0 && !error && (
-            <div className="bg-card border rounded-lg p-12 text-center">
-              <Server size={48} className="mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                {hasFilters
-                  ? "Aucun serveur ne correspond aux filtres."
-                  : isAdmin
-                    ? 'Aucun serveur configuré. Cliquez sur "Ajouter un serveur" pour commencer.'
-                    : "Aucun serveur ne vous est accessible. Demandez un accès à un administrateur."}
-              </p>
-            </div>
+            <EmptyState
+              icon={Server}
+              title={hasFilters ? "Aucun serveur ne correspond aux filtres" : "Aucun serveur"}
+              action={
+                hasFilters ? undefined : isAdmin ? (
+                  <Button onClick={() => setFormServer(null)}>
+                    <Plus />
+                    Ajouter un serveur
+                  </Button>
+                ) : undefined
+              }
+            >
+              {hasFilters
+                ? "Élargissez la recherche ou réinitialisez les filtres."
+                : isAdmin
+                  ? "Ajoutez un premier serveur pour commencer."
+                  : "Aucun serveur ne vous est accessible. Demandez un accès à un administrateur."}
+            </EmptyState>
           )}
 
           {servers.length > 0 && (
-            <div className="bg-card border rounded-lg overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="w-8 p-3" />
-                    <th className="text-left p-3 font-medium">Statut</th>
-                    <th className="text-left p-3 font-medium">Nom</th>
-                    <th className="text-left p-3 font-medium">Adresse</th>
-                    <th className="text-left p-3 font-medium">OS</th>
-                    <th className="text-left p-3 font-medium">Étiquettes</th>
-                    <th className="text-left p-3 font-medium">Compte par défaut</th>
-                    <th className="text-right p-3 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {servers.map((srv) => {
-                    const canConnect = hasAction(srv, "connect");
-                    const canExecute = hasAction(srv, "execute");
-                    return (
-                      <tr key={srv.id} className="border-b hover:bg-muted/30">
-                        <td className="p-3">
-                          <button
-                            onClick={() => toggleFavorite(srv)}
-                            title={srv.is_favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
-                            className="text-muted-foreground hover:text-amber-500"
-                          >
-                            <Star
-                              size={16}
-                              className={srv.is_favorite ? "fill-amber-400 text-amber-500" : ""}
-                            />
-                          </button>
-                        </td>
-                        <td className="p-3">
-                          <span
-                            className={`inline-block w-2.5 h-2.5 rounded-full ${statusColor[srv.status]}`}
-                            title={srv.status}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => navigate(`/servers/${srv.id}`)}
-                            className="font-medium hover:underline text-left"
-                          >
-                            {srv.name}
-                          </button>
-                          {srv.node_path && (
-                            <p className="text-xs text-muted-foreground">{srv.node_path}</p>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <p className="font-mono text-xs">{srv.ip_address}</p>
-                          <p className="text-xs text-muted-foreground">{srv.hostname}</p>
-                        </td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded text-xs bg-secondary">{srv.os_type}</span>
-                        </td>
-                        <td className="p-3">
-                          <LabelChips tags={srv.tags} />
-                        </td>
-                        <td className="p-3">
-                          {srv.default_account ? (
-                            <span className="flex items-center gap-1.5 text-xs">
-                              <span className="font-mono">{srv.default_account.username}</span>
-                              {srv.default_account.auth === "cert" && (
-                                <span title="Certificat éphémère">
-                                  <ShieldCheck size={12} className="text-blue-500" />
-                                </span>
-                              )}
-                              {srv.accounts_count > 1 && (
-                                <span className="text-muted-foreground">
-                                  +{srv.accounts_count - 1}
-                                </span>
-                              )}
+            <div className="overflow-hidden rounded-lg border bg-card">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-9 pl-3" />
+                    <TableHead>Serveur</TableHead>
+                    <TableHead>Adresse</TableHead>
+                    <TableHead>Système</TableHead>
+                    <TableHead>Étiquettes</TableHead>
+                    <TableHead>Compte par défaut</TableHead>
+                    <TableHead className="pr-3 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <AnimatePresence initial={false}>
+                    {servers.map((srv) => {
+                      const canConnect = hasAction(srv, "connect");
+                      const canExecute = hasAction(srv, "execute");
+                      const dot = STATUS_DOT[srv.status] || STATUS_DOT.unknown;
+                      return (
+                        <motion.tr
+                          key={srv.id}
+                          layout="position"
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.18 }}
+                          className="h-11 border-b transition-colors hover:bg-muted/50"
+                        >
+                          <TableCell className="pl-3">
+                            <FavoriteStar on={srv.is_favorite} onToggle={() => toggleFavorite(srv)} />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2.5">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span
+                                    className={cn("size-2 shrink-0 rounded-full", dot.cls)}
+                                    aria-label={dot.label}
+                                    role="img"
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent>{dot.label}</TooltipContent>
+                              </Tooltip>
+                              <div className="min-w-0">
+                                <button
+                                  onClick={() => navigate(`/servers/${srv.id}`)}
+                                  className="text-left font-medium hover:underline"
+                                >
+                                  {srv.name}
+                                </button>
+                                {srv.node_path && (
+                                  <p className="truncate text-xs text-muted-foreground">{srv.node_path}</p>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <p className="tabular font-mono text-xs">{srv.ip_address}</p>
+                            <p className="font-mono text-xs text-muted-foreground">{srv.hostname}</p>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground">
+                              {srv.os_type === "windows" ? "Windows" : "Linux"}
                             </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">aucun</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => navigate(`/terminal?server=${srv.id}`)}
-                              disabled={!canConnect}
-                              className={iconBtn}
-                              title={
-                                canConnect
-                                  ? srv.os_type === "windows"
-                                    ? "Ouvrir une session RDP"
-                                    : "Ouvrir un terminal"
-                                  : "Connexion non autorisée"
-                              }
-                            >
-                              <TerminalIcon size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleTestConnection(srv)}
-                              disabled={testingId === srv.id}
-                              className={iconBtn}
-                              title="Tester la connexion"
-                            >
-                              {testingId === srv.id ? (
-                                <Loader2 size={16} className="animate-spin" />
-                              ) : (
-                                <Wifi size={16} />
-                              )}
-                            </button>
-                            <button
-                              onClick={() => handleShowInfo(srv)}
-                              className={iconBtn}
-                              title="Infos système"
-                            >
-                              <Info size={16} />
-                            </button>
-                            {canExecute && (
-                              <button
-                                onClick={() => {
-                                  setCmdServer(srv);
-                                  setCmdInput("");
-                                  setCmdResult(null);
-                                  setCmdDenied(null);
-                                }}
-                                className={iconBtn}
-                                title="Exécuter une commande"
+                          </TableCell>
+                          <TableCell>
+                            <LabelChips tags={srv.tags} />
+                          </TableCell>
+                          <TableCell>
+                            {srv.default_account ? (
+                              <span className="flex items-center gap-1.5 text-xs">
+                                <span className="font-mono">{srv.default_account.username}</span>
+                                {srv.default_account.auth === "cert" && (
+                                  <span title="Certificat éphémère">
+                                    <ShieldCheck className="size-3.5 text-info" />
+                                  </span>
+                                )}
+                                {srv.accounts_count > 1 && (
+                                  <span className="tabular text-muted-foreground">+{srv.accounts_count - 1}</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">aucun</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="pr-3 text-right">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <RowAction
+                                label={
+                                  canConnect
+                                    ? srv.os_type === "windows"
+                                      ? "Ouvrir une session RDP"
+                                      : "Ouvrir un terminal"
+                                    : "Connexion non autorisée"
+                                }
+                                onClick={() => navigate(`/terminal?server=${srv.id}`)}
+                                disabled={!canConnect}
                               >
-                                <Play size={16} />
-                              </button>
-                            )}
-                            {isAdmin && (
-                              <>
-                                <button
-                                  onClick={() => setFormServer(srv)}
-                                  className={iconBtn}
-                                  title="Modifier"
+                                {srv.os_type === "windows" ? <Monitor /> : <TerminalIcon />}
+                              </RowAction>
+                              <RowAction
+                                label="Tester la connexion"
+                                onClick={() => handleTestConnection(srv)}
+                                disabled={testingId === srv.id}
+                              >
+                                {testingId === srv.id ? <Loader2 className="animate-spin" /> : <Wifi />}
+                              </RowAction>
+                              <RowAction label="Infos système" onClick={() => handleShowInfo(srv)}>
+                                <Info />
+                              </RowAction>
+                              {canExecute && (
+                                <RowAction
+                                  label="Exécuter une commande"
+                                  onClick={() => {
+                                    setCmdServer(srv);
+                                    setCmdInput("");
+                                    setCmdResult(null);
+                                    setCmdDenied(null);
+                                  }}
                                 >
-                                  <Pencil size={16} />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteServer(srv)}
-                                  className={iconBtnDanger}
-                                  title="Supprimer"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                                  <Play />
+                                </RowAction>
+                              )}
+                              {isAdmin && (
+                                <>
+                                  <RowAction label="Modifier" onClick={() => setFormServer(srv)}>
+                                    <Pencil />
+                                  </RowAction>
+                                  <RowAction
+                                    label="Supprimer"
+                                    danger
+                                    onClick={() => setPendingDelete({ kind: "server", srv })}
+                                  >
+                                    <Trash2 />
+                                  </RowAction>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                        </motion.tr>
+                      );
+                    })}
+                  </AnimatePresence>
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>
@@ -1132,9 +1167,14 @@ export default function Servers() {
           title={
             <>
               Exécuter sur {cmdServer.name}{" "}
-              <span className="text-xs text-muted-foreground">
-                ({cmdServer.os_type === "linux" ? "SSH / Bash" : "PowerShell"}
-                {cmdServer.default_account && `, compte ${cmdServer.default_account.username}`})
+              <span className="text-xs font-normal text-muted-foreground">
+                ({cmdServer.os_type === "linux" ? "SSH, Bash" : "PowerShell"}
+                {cmdServer.default_account && (
+                  <>
+                    , compte <span className="font-mono">{cmdServer.default_account.username}</span>
+                  </>
+                )}
+                )
               </span>
             </>
           }
@@ -1142,44 +1182,33 @@ export default function Servers() {
           size="2xl"
         >
           <div className="flex gap-2">
-            <input
+            <Input
               type="text"
               value={cmdInput}
               onChange={(e) => setCmdInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleExecute()}
-              placeholder={
-                cmdServer.os_type === "linux" ? "ls -la /var/log" : "Get-Service | Select-Object -First 5"
-              }
-              className="flex-1 px-3 py-2 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder={cmdServer.os_type === "linux" ? "ls -la /var/log" : "Get-Service | Select-Object -First 5"}
+              className="flex-1 font-mono"
               autoFocus
             />
-            <button
-              onClick={handleExecute}
-              disabled={cmdLoading || !cmdInput.trim()}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-            >
-              {cmdLoading ? <Loader2 size={16} className="animate-spin" /> : "Exécuter"}
-            </button>
+            <Button onClick={handleExecute} disabled={cmdLoading || !cmdInput.trim()}>
+              {cmdLoading ? <Loader2 className="animate-spin" /> : <Play />}
+              Exécuter
+            </Button>
           </div>
           {cmdDenied && <GovernanceNotice message={cmdDenied} />}
           {cmdResult && (
             <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs">
-                <span
-                  className={`px-2 py-0.5 rounded ${
-                    cmdResult.exit_code === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                  }`}
-                >
-                  Exit: {cmdResult.exit_code}
-                </span>
-              </div>
+              <Chip tone={cmdResult.exit_code === 0 ? "green" : "red"}>
+                <span className="font-mono">exit {cmdResult.exit_code}</span>
+              </Chip>
               {cmdResult.stdout && (
-                <pre className="p-3 rounded-md bg-muted text-xs font-mono whitespace-pre-wrap max-h-64 overflow-auto">
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-3 font-mono text-xs">
                   {cmdResult.stdout}
                 </pre>
               )}
               {cmdResult.stderr && (
-                <pre className="p-3 rounded-md bg-red-50 text-red-800 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-auto">
+                <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md border border-danger/30 bg-danger/10 p-3 font-mono text-xs text-danger">
                   {cmdResult.stderr}
                 </pre>
               )}
@@ -1190,35 +1219,34 @@ export default function Servers() {
 
       {/* System info modal */}
       {infoServer && (
-        <Modal title={`Infos ${infoServer.name}`} onClose={() => setInfoServer(null)} size="md">
+        <Modal title={`Infos système de ${infoServer.name}`} onClose={() => setInfoServer(null)} size="md">
           {infoLoading && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 size={24} className="animate-spin text-muted-foreground" />
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                <Skeleton key={i} className="h-5 w-full" />
+              ))}
             </div>
           )}
           {sysInfo && (
-            <dl className="space-y-3 text-sm">
+            <dl className="divide-y text-sm">
               {[
-                ["Hostname", sysInfo.hostname],
-                ["OS", sysInfo.os],
-                ["Kernel", sysInfo.kernel],
+                ["Nom d'hôte", sysInfo.hostname],
+                ["Système", sysInfo.os],
+                ["Noyau", sysInfo.kernel],
                 ["Uptime", sysInfo.uptime],
-                ["CPU", sysInfo.cpu_count + " cores"],
+                ["CPU", sysInfo.cpu_count + " cœurs"],
                 ["Mémoire", `${sysInfo.memory_used} / ${sysInfo.memory_total}`],
                 ["Disque", sysInfo.disk_usage],
               ].map(([label, value]) => (
-                <div key={label} className="flex justify-between">
+                <div key={label} className="flex justify-between gap-4 py-1.5">
                   <dt className="text-muted-foreground">{label}</dt>
-                  <dd className="font-mono text-xs">{value}</dd>
+                  <dd className="text-right font-mono text-xs">{value}</dd>
                 </div>
               ))}
             </dl>
           )}
           {!infoLoading && !sysInfo && (
-            <p className="text-sm text-destructive text-center py-4">
-              Impossible de récupérer les infos. Vérifiez la connexion et le compte par défaut du
-              serveur.
-            </p>
+            <ErrorBox message="Impossible de récupérer les infos. Vérifiez la connexion et le compte par défaut du serveur." />
           )}
         </Modal>
       )}
@@ -1255,148 +1283,141 @@ export default function Servers() {
 
       {/* Credentials modal */}
       {showCredModal && (
-        <Modal title="Credentials" onClose={() => setShowCredModal(false)}>
-          <p className="text-xs text-muted-foreground">
-            Secrets chiffrés, référencés par les comptes des serveurs. Un credential utilisé par un
-            compte ne peut pas être supprimé.
-          </p>
+        <Modal
+          title="Credentials"
+          description="Secrets chiffrés, référencés par les comptes des serveurs. Un credential utilisé par un compte ne peut pas être supprimé."
+          onClose={() => setShowCredModal(false)}
+        >
           {credentials.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-xs font-medium text-muted-foreground uppercase">Existants</h4>
-              {credentials.map((c) => (
-                <div key={c.id} className="flex items-center justify-between p-2 rounded border text-sm">
-                  <div className="flex items-center gap-2">
-                    <Key size={14} className="text-muted-foreground" />
-                    <span className="font-medium">{c.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {c.username} · {c.type}
-                    </span>
+              <h3 className="text-sm font-medium">Enregistrés</h3>
+              <div className="divide-y rounded-md border">
+                {credentials.map((c) => (
+                  <div key={c.id} className="flex h-10 items-center justify-between gap-2 px-3 text-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Key className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate font-medium">{c.name}</span>
+                      <span className="truncate font-mono text-xs text-muted-foreground">
+                        {c.username} · {c.type}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <RowAction label="Modifier" onClick={() => openEditCred(c)}>
+                        <Pencil />
+                      </RowAction>
+                      <RowAction label="Supprimer" danger onClick={() => setPendingDelete({ kind: "cred", cred: c })}>
+                        <Trash2 />
+                      </RowAction>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEditCred(c)} className="p-1 rounded hover:bg-accent text-muted-foreground" title="Modifier">
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCredential(c.id)}
-                      className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
-                      title="Supprimer"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
-          <div className="border-t pt-4">
-            <h4 className="text-xs font-medium text-muted-foreground uppercase mb-3">Nouveau credential</h4>
-            {credError && <div className="p-2 rounded bg-red-50 text-red-700 text-sm mb-3">{credError}</div>}
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Nom *">
-                  <input
-                    value={credForm.name}
-                    onChange={(e) => setCredForm({ ...credForm, name: e.target.value })}
-                    placeholder="ssh-admin-prod"
-                    className={inputCls}
-                  />
-                </Field>
-                <Field label="Type *">
-                  <select
-                    value={credForm.type}
-                    onChange={(e) => setCredForm({ ...credForm, type: e.target.value })}
-                    className={inputCls}
-                  >
-                    <option value="ssh_password">SSH (mot de passe)</option>
-                    <option value="ssh_key">SSH (clé privée)</option>
-                    <option value="winrm">WinRM</option>
-                    <option value="ephemeral_cert">Certificat éphémère (CA)</option>
-                  </select>
-                </Field>
-              </div>
-              <Field label="Utilisateur *">
-                <input
-                  value={credForm.username}
-                  onChange={(e) => setCredForm({ ...credForm, username: e.target.value })}
-                  placeholder="root"
-                  className={inputCls}
+          <div className="space-y-3 border-t pt-4">
+            <h3 className="text-sm font-medium">Nouveau credential</h3>
+            <ErrorBox message={credError} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Nom *">
+                <Input
+                  value={credForm.name}
+                  onChange={(e) => setCredForm({ ...credForm, name: e.target.value })}
+                  placeholder="ssh-admin-prod"
                 />
               </Field>
-              {(credForm.type === "ssh_password" || credForm.type === "winrm") && (
-                <Field label="Mot de passe">
-                  <input
-                    type="password"
-                    value={credForm.password}
-                    onChange={(e) => setCredForm({ ...credForm, password: e.target.value })}
-                    autoComplete="new-password"
-                    className={inputCls}
-                  />
-                </Field>
-              )}
-              {credForm.type === "ssh_key" && (
-                <Field label="Clé privée SSH">
-                  <textarea
-                    value={credForm.ssh_key}
-                    onChange={(e) => setCredForm({ ...credForm, ssh_key: e.target.value })}
-                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                    rows={4}
-                    className={`${inputCls} font-mono`}
-                  />
-                </Field>
-              )}
-              {credForm.type === "ephemeral_cert" && (
-                <div className="space-y-3">
-                  <div className="p-3 rounded-md bg-blue-50 border border-blue-200 text-sm text-blue-800">
-                    <p className="font-medium mb-1">Certificat SSH éphémère</p>
-                    <p className="text-xs">
-                      Citadel signera un certificat SSH de courte durée à chaque connexion. Aucun mot
-                      de passe ni clé stockée. Le serveur cible doit faire confiance à la CA.
-                    </p>
-                  </div>
-                  <Field label="Durée du certificat">
-                    <select
-                      value={credForm.cert_validity_minutes || 480}
-                      onChange={(e) =>
-                        setCredForm({ ...credForm, cert_validity_minutes: parseInt(e.target.value) })
-                      }
-                      className={inputCls}
-                    >
-                      <option value={5}>5 minutes</option>
-                      <option value={15}>15 minutes</option>
-                      <option value={30}>30 minutes</option>
-                      <option value={60}>1 heure</option>
-                      <option value={120}>2 heures</option>
-                      <option value={240}>4 heures</option>
-                      <option value={480}>8 heures (défaut)</option>
-                      <option value={720}>12 heures</option>
-                      <option value={1440}>24 heures</option>
-                    </select>
-                  </Field>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Setup serveur cible</label>
-                    <p className="text-xs text-muted-foreground mb-2">
-                      Récupérez les instructions via l'API : GET
-                      /api/ca/setup-instructions?hostname=mon-serveur
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => window.open("/api/ca/setup-instructions?hostname=my-server", "_blank")}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      Voir les instructions de setup
-                    </button>
-                  </div>
-                </div>
-              )}
-              <button
-                onClick={handleAddCredential}
-                disabled={credLoading || !credForm.name || !credForm.username}
-                className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-              >
-                {credLoading ? <Loader2 size={16} className="animate-spin mx-auto" /> : "Ajouter le credential"}
-              </button>
+              <Field label="Type *">
+                <Select value={credForm.type} onValueChange={(v) => setCredForm({ ...credForm, type: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ssh_password">SSH (mot de passe)</SelectItem>
+                    <SelectItem value="ssh_key">SSH (clé privée)</SelectItem>
+                    <SelectItem value="winrm">WinRM</SelectItem>
+                    <SelectItem value="ephemeral_cert">Certificat éphémère (CA)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
             </div>
+            <Field label="Utilisateur *">
+              <Input
+                value={credForm.username}
+                onChange={(e) => setCredForm({ ...credForm, username: e.target.value })}
+                placeholder="root"
+                className="font-mono"
+              />
+            </Field>
+            {(credForm.type === "ssh_password" || credForm.type === "winrm") && (
+              <Field label="Mot de passe">
+                <Input
+                  type="password"
+                  value={credForm.password}
+                  onChange={(e) => setCredForm({ ...credForm, password: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </Field>
+            )}
+            {credForm.type === "ssh_key" && (
+              <Field label="Clé privée SSH">
+                <Textarea
+                  value={credForm.ssh_key}
+                  onChange={(e) => setCredForm({ ...credForm, ssh_key: e.target.value })}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  rows={4}
+                  className="font-mono text-xs"
+                />
+              </Field>
+            )}
+            {credForm.type === "ephemeral_cert" && (
+              <div className="space-y-3">
+                <InfoBox title="Certificat SSH éphémère">
+                  Citadel signe un certificat SSH de courte durée à chaque connexion. Aucun mot de passe ni clé
+                  stockés. Le serveur cible doit faire confiance à la CA.
+                </InfoBox>
+                <Field label="Durée du certificat">
+                  <Select
+                    value={String(credForm.cert_validity_minutes || 480)}
+                    onValueChange={(v) => setCredForm({ ...credForm, cert_validity_minutes: parseInt(v) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CERT_DURATIONS.map(([v, l]) => (
+                        <SelectItem key={v} value={String(v)}>
+                          {l}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Préparer le serveur cible</p>
+                  <p className="text-xs text-muted-foreground">
+                    Instructions disponibles via l'API :{" "}
+                    <code className="font-mono">GET /api/ca/setup-instructions?hostname=mon-serveur</code>
+                  </p>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    onClick={() => window.open("/api/ca/setup-instructions?hostname=my-server", "_blank")}
+                    className="h-auto p-0 text-xs"
+                  >
+                    Voir les instructions
+                  </Button>
+                </div>
+              </div>
+            )}
+            <Button
+              onClick={handleAddCredential}
+              disabled={credLoading || !credForm.name || !credForm.username}
+              className="w-full"
+            >
+              {credLoading ? <Loader2 className="animate-spin" /> : <Plus />}
+              Ajouter le credential
+            </Button>
           </div>
         </Modal>
       )}
@@ -1409,64 +1430,93 @@ export default function Servers() {
           size="md"
           footer={
             <>
-              <button onClick={() => setEditCred(null)} className={btnSecondary}>
+              <Button variant="outline" onClick={() => setEditCred(null)}>
                 Annuler
-              </button>
+              </Button>
               <SaveButton onClick={handleEditCredential} loading={editCredLoading} />
             </>
           }
         >
           <Field label="Nom">
-            <input
-              value={editCredForm.name}
-              onChange={(e) => setEditCredForm({ ...editCredForm, name: e.target.value })}
-              className={inputCls}
-            />
+            <Input value={editCredForm.name} onChange={(e) => setEditCredForm({ ...editCredForm, name: e.target.value })} />
           </Field>
           <Field label="Utilisateur">
-            <input
+            <Input
               value={editCredForm.username}
               onChange={(e) => setEditCredForm({ ...editCredForm, username: e.target.value })}
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
-          <Field
-            label={
-              <>
-                Nouveau mot de passe
-                <span className="text-xs text-muted-foreground ml-1">(laisser vide pour ne pas changer)</span>
-              </>
-            }
-          >
-            <input
+          <Field label="Nouveau mot de passe" hint="Laissez vide pour ne pas le changer.">
+            <Input
               type="password"
               value={editCredForm.password}
               onChange={(e) => setEditCredForm({ ...editCredForm, password: e.target.value })}
               placeholder="••••••••"
               autoComplete="new-password"
-              className={inputCls}
             />
           </Field>
           {editCred.type === "ssh_key" && (
-            <Field
-              label={
-                <>
-                  Nouvelle clé SSH
-                  <span className="text-xs text-muted-foreground ml-1">(laisser vide pour ne pas changer)</span>
-                </>
-              }
-            >
-              <textarea
+            <Field label="Nouvelle clé SSH" hint="Laissez vide pour ne pas la changer.">
+              <Textarea
                 value={editCredForm.ssh_key}
                 onChange={(e) => setEditCredForm({ ...editCredForm, ssh_key: e.target.value })}
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                 rows={4}
-                className={`${inputCls} font-mono`}
+                className="font-mono text-xs"
               />
             </Field>
           )}
         </Modal>
       )}
+
+      {/* Destructive confirmations */}
+      {pendingDelete && (
+        <ConfirmModal
+          title={
+            pendingDelete.kind === "server"
+              ? `Supprimer le serveur ${pendingDelete.srv.name}`
+              : pendingDelete.kind === "node"
+                ? `Supprimer le nœud ${pendingDelete.node.path}`
+                : `Supprimer le credential ${pendingDelete.cred.name}`
+          }
+          confirmLabel="Supprimer"
+          danger
+          loading={deleteLoading}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        >
+          {pendingDelete.kind === "server" && (
+            <p>
+              Le serveur <strong>{pendingDelete.srv.name}</strong> et ses comptes seront retirés de Citadel.
+            </p>
+          )}
+          {pendingDelete.kind === "node" && (
+            <p>
+              Le nœud <strong>{pendingDelete.node.path}</strong> et tous ses sous-nœuds seront supprimés. Leurs
+              serveurs seront déplacés à la racine.
+            </p>
+          )}
+          {pendingDelete.kind === "cred" && (
+            <p>
+              Le credential <strong>{pendingDelete.cred.name}</strong> sera supprimé. Un credential utilisé par
+              un compte ne peut pas l'être.
+            </p>
+          )}
+        </ConfirmModal>
+      )}
     </div>
   );
 }
+
+const CERT_DURATIONS: [number, string][] = [
+  [5, "5 minutes"],
+  [15, "15 minutes"],
+  [30, "30 minutes"],
+  [60, "1 heure"],
+  [120, "2 heures"],
+  [240, "4 heures"],
+  [480, "8 heures (défaut)"],
+  [720, "12 heures"],
+  [1440, "24 heures"],
+];

@@ -1,22 +1,29 @@
+import { cn } from "@/lib/utils";
+
 interface SparklineProps {
   data: number[];
   width?: number;
   height?: number;
+  /** Stroke colour. Defaults to currentColor so callers colour it with a token class (text-info, text-live...). */
   color?: string;
+  /** Area fill. Defaults to the stroke colour at low opacity. */
   fillColor?: string;
+  className?: string;
 }
 
+/** Quiet trend line: thin stroke, faint area, a dot on the latest value. */
 export default function Sparkline({
   data,
   width = 200,
   height = 40,
-  color = "#7aa2f7",
-  fillColor = "rgba(122, 162, 247, 0.1)",
+  color = "currentColor",
+  fillColor,
+  className,
 }: SparklineProps) {
   if (data.length < 2) {
     return (
-      <div style={{ width, height }} className="flex items-center justify-center">
-        <span className="text-xs text-muted-foreground">-</span>
+      <div style={{ width, height }} className={cn("flex items-center justify-center", className)}>
+        <span className="text-xs text-muted-foreground">Pas assez de points</span>
       </div>
     );
   }
@@ -38,18 +45,22 @@ export default function Sparkline({
   const fillPath = `${linePath} L${padding + w},${padding + h} L${padding},${padding + h} Z`;
 
   return (
-    <svg width={width} height={height} className="inline-block">
-      <path d={fillPath} fill={fillColor} />
-      <path d={linePath} fill="none" stroke={color} strokeWidth="1.5" />
-      {/* Current value dot */}
-      {data.length > 0 && (
-        <circle
-          cx={padding + w}
-          cy={padding + h - ((data[data.length - 1] - min) / range) * h}
-          r="2.5"
-          fill={color}
-        />
-      )}
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className={cn("inline-block max-w-full", className)}
+      aria-hidden
+    >
+      <path d={fillPath} fill={fillColor ?? color} fillOpacity={fillColor ? 1 : 0.1} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <circle
+        cx={padding + w}
+        cy={padding + h - ((data[data.length - 1] - min) / range) * h}
+        r="2"
+        fill={color}
+      />
     </svg>
   );
 }

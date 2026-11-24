@@ -1,11 +1,16 @@
-// Notification bell (sidebar header): unread badge polled every 30 s and a panel
+// Notification bell (app header): unread badge polled every 30 s and a popover
 // with the most recent in-app notifications.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Loader2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Bell, BellOff, CheckCheck } from "lucide-react";
 import { api } from "@/services/api";
 import { errorMessage, type CountResponse, type NotificationData } from "@/services/types";
 import { LEVEL_INFO, relativeTime } from "@/components/governanceUi";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 export const POLL_MS = 30_000;
 /** Window event other screens dispatch to refresh the badges right away. */
@@ -37,13 +42,31 @@ export function usePolledCount(path: string): [number, () => void] {
 }
 
 export function CountBadge({ count, className = "" }: { count: number; className?: string }) {
-  if (count <= 0) return null;
   return (
-    <span
-      className={`min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-[11px] font-semibold flex items-center justify-center ${className}`}
-    >
-      {count > 99 ? "99+" : count}
-    </span>
+    <AnimatePresence initial={false}>
+      {count > 0 && (
+        <motion.span
+          key="badge"
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.6, opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className={cn(
+            "tabular flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-2xs font-semibold leading-none text-danger-foreground",
+            className,
+          )}
+        >
+          <motion.span
+            key={count}
+            initial={{ y: -4, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.15 }}
+          >
+            {count > 99 ? "99+" : count}
+          </motion.span>
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -54,7 +77,6 @@ export default function NotificationBell() {
   const [items, setItems] = useState<NotificationData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -71,21 +93,6 @@ export default function NotificationBell() {
   useEffect(() => {
     if (open) loadList();
   }, [open, loadList]);
-
-  // Close on outside click / Escape
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   const openItem = async (n: NotificationData) => {
     if (!n.read_at) {
@@ -114,66 +121,104 @@ export default function NotificationBell() {
     }
   };
 
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="relative p-2 rounded-md hover:bg-accent text-muted-foreground"
-        title="Notifications"
-        aria-label={`Notifications (${unread} non lue(s))`}
-      >
-        <Bell size={18} />
-        <CountBadge count={unread} className="absolute -top-1 -right-1" />
-      </button>
+  const hasUnread = unread > 0 || (items || []).some((n) => !n.read_at);
 
-      {open && (
-        <div className="absolute left-0 top-full mt-2 z-50 w-[22rem] max-w-[calc(100vw-2rem)] bg-card border rounded-lg shadow-lg flex flex-col max-h-[70vh]">
-          <div className="flex items-center justify-between px-3 py-2 border-b">
-            <h3 className="text-sm font-semibold">Notifications</h3>
-            <button
-              onClick={markAll}
-              disabled={unread === 0 && !(items || []).some((n) => !n.read_at)}
-              className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-40 disabled:no-underline"
-            >
-              <CheckCheck size={13} /> Tout marquer comme lu
-            </button>
-          </div>
-          <div className="overflow-auto">
-            {loading && items === null && (
-              <div className="flex justify-center p-6">
-                <Loader2 size={18} className="animate-spin text-muted-foreground" />
-              </div>
-            )}
-            {error && <p className="p-3 text-xs text-red-700">{error}</p>}
-            {items && items.length === 0 && (
-              <p className="p-6 text-center text-sm text-muted-foreground">Aucune notification.</p>
-            )}
-            {items?.map((n) => {
-              const lvl = LEVEL_INFO[n.level] || LEVEL_INFO.info;
-              return (
-                <button
-                  key={n.id}
-                  onClick={() => openItem(n)}
-                  className={`w-full text-left px-3 py-2.5 border-b last:border-0 flex gap-2.5 hover:bg-accent ${
-                    n.read_at ? "opacity-70" : "bg-primary/5"
-                  }`}
-                >
-                  <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${lvl.dot}`} title={lvl.label} />
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm truncate ${n.read_at ? "" : "font-semibold"}`}>{n.title}</p>
-                    {n.body && (
-                      <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-line break-words">
-                        {n.body}
-                      </p>
-                    )}
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{relativeTime(n.created_at)}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative size-8 text-muted-foreground"
+          title="Notifications"
+          aria-label={`Notifications (${unread} non lue(s))`}
+        >
+          <Bell className="size-4" />
+          <CountBadge count={unread} className="absolute -right-0.5 -top-0.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col p-0">
+        <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+          <h3 className="text-sm font-semibold">
+            Notifications
+            {unread > 0 && <span className="tabular ml-1.5 font-normal text-muted-foreground">{unread} non lue(s)</span>}
+          </h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={markAll}
+            disabled={!hasUnread}
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          >
+            <CheckCheck className="size-3.5" /> Tout marquer comme lu
+          </Button>
         </div>
-      )}
-    </div>
+        <div className="max-h-[70vh] overflow-y-auto">
+          {loading && items === null && (
+            <div className="space-y-3 p-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex gap-2.5">
+                  <Skeleton className="mt-1.5 size-2 rounded-full" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-3.5 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {error && <p className="p-3 text-xs text-danger">{error}</p>}
+          {items && items.length === 0 && (
+            <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+              <BellOff className="size-6 text-muted-foreground/60" strokeWidth={1.5} />
+              <p className="text-sm text-muted-foreground">Aucune notification pour le moment.</p>
+            </div>
+          )}
+          {items?.map((n) => {
+            const lvl = LEVEL_INFO[n.level] || LEVEL_INFO.info;
+            const isUnread = !n.read_at;
+            return (
+              <button
+                key={n.id}
+                onClick={() => openItem(n)}
+                className="relative flex w-full gap-2.5 border-b px-3 py-2.5 text-left transition-colors last:border-0 hover:bg-accent"
+              >
+                <AnimatePresence initial={false}>
+                  {isUnread && (
+                    <motion.span
+                      key="unread"
+                      aria-hidden
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute inset-0 bg-foreground/5"
+                    />
+                  )}
+                </AnimatePresence>
+                <span
+                  className={cn("relative mt-1.5 size-2 shrink-0 rounded-full", lvl.dot)}
+                  title={lvl.label}
+                  aria-label={lvl.label}
+                />
+                <motion.div
+                  className="relative min-w-0 flex-1"
+                  animate={{ opacity: isUnread ? 1 : 0.65 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <p className={cn("truncate text-sm", isUnread && "font-semibold")}>{n.title}</p>
+                  {n.body && (
+                    <p className="line-clamp-2 whitespace-pre-line break-words text-xs text-muted-foreground">
+                      {n.body}
+                    </p>
+                  )}
+                  <p className="mt-0.5 text-2xs text-muted-foreground">{relativeTime(n.created_at)}</p>
+                </motion.div>
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

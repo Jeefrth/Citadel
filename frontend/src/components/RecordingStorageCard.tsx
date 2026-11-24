@@ -1,6 +1,9 @@
 // Settings > Audit: where new session recordings are written (local disk, S3, Azure Blob).
 import { useCallback, useEffect, useState } from "react";
 import { HardDrive, Loader2, PlugZap } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/services/api";
 import {
   errorMessage,
@@ -9,8 +12,12 @@ import {
   type RecordingStorageType,
   type StorageTestResult,
 } from "@/services/types";
-import { ErrorBox, Field, Notice, SaveButton, Toggle, btnSecondary, inputCls, type NoticeData } from "@/components/kit";
-import { STORAGE_LABELS } from "@/components/auditUi";
+import { ErrorBox, Field, Notice, SaveButton, Toggle, type NoticeData } from "@/components/kit";
+import { ErrorLine, RowsSkeleton, STORAGE_LABELS, SettingsCard, StatusDot, Tip } from "@/components/auditUi";
+
+const CARD_TITLE = "Stockage des enregistrements";
+const CARD_DESCRIPTION =
+  "Destination des nouveaux enregistrements de sessions SSH et RDP, avec empreinte SHA-256. Les anciens enregistrements restent lisibles après un changement de stockage.";
 
 interface Form {
   type: RecordingStorageType;
@@ -67,9 +74,9 @@ export default function RecordingStorageCard() {
 
   if (loading || !form) {
     return (
-      <div className="bg-card border rounded-lg p-6">
-        {loading ? <Loader2 size={20} className="animate-spin text-muted-foreground" /> : <ErrorBox message={error} />}
-      </div>
+      <SettingsCard icon={HardDrive} title={CARD_TITLE} description={CARD_DESCRIPTION}>
+        {loading ? <RowsSkeleton rows={2} /> : <ErrorBox message={error} />}
+      </SettingsCard>
     );
   }
 
@@ -132,76 +139,68 @@ export default function RecordingStorageCard() {
   const secretHint = keepSecret ? "Laisser vide pour conserver la valeur enregistrée." : "Obligatoire.";
 
   return (
-    <div className="bg-card border rounded-lg p-6 space-y-4">
-      <div>
-        <h3 className="font-semibold flex items-center gap-2">
-          <HardDrive size={18} /> Stockage des enregistrements
-        </h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          Destination des nouveaux enregistrements de sessions (SSH et RDP), avec empreinte SHA-256. Les anciens
-          enregistrements restent lisibles après un changement de stockage.
-        </p>
-      </div>
-
+    <SettingsCard
+      status={<StatusDot tone={data?.last_error ? "danger" : "success"} label={data?.last_error ? "En erreur" : "Opérationnel"} />}
+      title={CARD_TITLE}
+      description={CARD_DESCRIPTION}
+    >
+    <div className="space-y-4">
       <Notice notice={notice} onClose={() => setNotice(null)} />
-      {data?.last_error && (
-        <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1 break-words">
-          Dernière erreur : {data.last_error}
-        </p>
-      )}
+      {data?.last_error && <ErrorLine>Dernière erreur : <span className="font-mono">{data.last_error}</span></ErrorLine>}
 
       <Field label="Type de stockage">
-        <select
-          value={form.type}
-          onChange={(e) => set("type", e.target.value as RecordingStorageType)}
-          className={inputCls}
-        >
-          <option value="local">Local (disque du serveur Citadel)</option>
-          <option value="s3">S3 compatible (AWS, MinIO, Ceph...)</option>
-          <option value="azure">Azure Blob Storage</option>
-        </select>
+        <Select value={form.type} onValueChange={(v) => set("type", v as RecordingStorageType)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="local">Local (disque du serveur Citadel)</SelectItem>
+            <SelectItem value="s3">Compatible S3 (AWS, MinIO, Ceph...)</SelectItem>
+            <SelectItem value="azure">Azure Blob Storage</SelectItem>
+          </SelectContent>
+        </Select>
       </Field>
 
       {form.type === "s3" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Field label="Endpoint" hint="Vide pour AWS S3. ex. minio.local:9000">
-            <input value={form.endpoint} onChange={(e) => set("endpoint", e.target.value)} className={inputCls} />
+            <Input value={form.endpoint} onChange={(e) => set("endpoint", e.target.value)} className="font-mono" />
           </Field>
           <Field label="Région">
-            <input
+            <Input
               value={form.region}
               onChange={(e) => set("region", e.target.value)}
               placeholder="eu-west-1"
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
           <Field label="Bucket">
-            <input value={form.bucket} onChange={(e) => set("bucket", e.target.value)} className={inputCls} />
+            <Input value={form.bucket} onChange={(e) => set("bucket", e.target.value)} className="font-mono" />
           </Field>
           <Field label="Préfixe" hint="Dossier dans le bucket (optionnel)">
-            <input
+            <Input
               value={form.prefix}
               onChange={(e) => set("prefix", e.target.value)}
               placeholder="citadel/recordings"
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
           <Field label="Access key">
-            <input
+            <Input
               value={form.access_key}
               onChange={(e) => set("access_key", e.target.value)}
               autoComplete="off"
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
           <Field label="Secret key" hint={secretHint}>
-            <input
+            <Input
               type="password"
               value={form.secret}
               onChange={(e) => set("secret", e.target.value)}
               placeholder={keepSecret ? "laisser vide pour conserver" : ""}
               autoComplete="new-password"
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
           <div className="md:col-span-2">
@@ -213,27 +212,27 @@ export default function RecordingStorageCard() {
       {form.type === "azure" && (
         <div className="space-y-3">
           <Field label="URL du conteneur" hint="https://<compte>.blob.core.windows.net/<conteneur>">
-            <input
+            <Input
               value={form.container_url}
               onChange={(e) => set("container_url", e.target.value)}
               placeholder="https://"
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
           <Field label="Préfixe" hint="Dossier dans le conteneur (optionnel)">
-            <input value={form.prefix} onChange={(e) => set("prefix", e.target.value)} className={inputCls} />
+            <Input value={form.prefix} onChange={(e) => set("prefix", e.target.value)} className="font-mono" />
           </Field>
           <Field
             label="Jeton SAS"
             hint={`${secretHint} Droits nécessaires : lecture, écriture, suppression, création.`}
           >
-            <input
+            <Input
               type="password"
               value={form.secret}
               onChange={(e) => set("secret", e.target.value)}
               placeholder={keepSecret ? "laisser vide pour conserver" : "sv=...&sig=..."}
               autoComplete="new-password"
-              className={inputCls}
+              className="font-mono"
             />
           </Field>
         </div>
@@ -245,17 +244,17 @@ export default function RecordingStorageCard() {
 
       <div className="flex flex-wrap items-center gap-2">
         <SaveButton onClick={save} loading={saving} disabled={!dirty || !valid} />
-        <button
-          onClick={test}
-          disabled={testing || dirty}
-          className={btnSecondary}
-          title={dirty ? "Enregistrez d'abord : le test porte sur la configuration active" : undefined}
-        >
-          {testing ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
-          Tester le stockage
-        </button>
-        {dirty && <span className="text-xs text-muted-foreground">Modifications non enregistrées</span>}
+        <Tip content={dirty ? "Enregistrez d'abord : le test porte sur la configuration active" : undefined}>
+          <span>
+            <Button variant="outline" onClick={test} disabled={testing || dirty}>
+              {testing ? <Loader2 className="animate-spin" /> : <PlugZap />}
+              Tester le stockage
+            </Button>
+          </span>
+        </Tip>
+        {dirty && <span className="text-xs text-live">Modifications non enregistrées</span>}
       </div>
     </div>
+    </SettingsCard>
   );
 }

@@ -1,6 +1,12 @@
 // "Notifications" tab of the settings page: external channels (e-mail, Teams, webhook).
 import { useCallback, useEffect, useState } from "react";
 import { Bell, Loader2, Mail, MessageSquare, Pencil, Plus, Send, Trash2, Webhook } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/services/api";
 import {
   errorMessage,
@@ -20,16 +26,15 @@ import {
   Modal,
   Notice,
   SaveButton,
+  EmptyState,
   Toggle,
-  btnPrimary,
-  btnSecondary,
   formatDate,
   iconBtn,
   iconBtnDanger,
-  inputCls,
   type NoticeData,
 } from "@/components/kit";
 import { LEVEL_INFO, relativeTime } from "@/components/governanceUi";
+import { ErrorLine, RowsSkeleton, SettingsCard, StatusDot, Tip } from "@/components/auditUi";
 
 const TYPE_INFO: Record<ChannelType, { label: string; icon: typeof Mail }> = {
   email: { label: "E-mail (SMTP)", icon: Mail },
@@ -131,14 +136,14 @@ function ChannelModal({
 
   return (
     <Modal
-      title={channel ? `Modifier le canal ${channel.name}` : "Nouveau canal de notification"}
+      title={channel ? `Modifier le canal ${channel.name}` : "Ajouter un canal de notification"}
       onClose={onClose}
       size="2xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
             {channel ? "Enregistrer" : "Créer"}
           </SaveButton>
@@ -147,22 +152,22 @@ function ChannelModal({
     >
       <ErrorBox message={error} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Field label="Nom *">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} autoFocus />
+        <Field label="Nom">
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>
         <Field label="Type" hint={channel ? "Le type ne peut plus être modifié." : undefined}>
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value as ChannelType)}
-            disabled={!!channel}
-            className={inputCls}
-          >
-            {(Object.keys(TYPE_INFO) as ChannelType[]).map((t) => (
-              <option key={t} value={t}>
-                {TYPE_INFO[t].label}
-              </option>
-            ))}
-          </select>
+          <Select value={type} onValueChange={(v) => setType(v as ChannelType)} disabled={!!channel}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(TYPE_INFO) as ChannelType[]).map((t) => (
+                <SelectItem key={t} value={t}>
+                  {TYPE_INFO[t].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
       </div>
       <Toggle checked={isActive} onChange={setIsActive} label="Canal actif" />
@@ -171,23 +176,23 @@ function ChannelModal({
         <div className="border-t pt-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
-              <Field label="Serveur SMTP *">
-                <input
+              <Field label="Serveur SMTP">
+                <Input
                   value={host}
                   onChange={(e) => setHost(e.target.value)}
                   placeholder="smtp.office365.com"
-                  className={inputCls}
+                  className="font-mono"
                 />
               </Field>
             </div>
             <Field label="Port" hint="465 = TLS implicite.">
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={65535}
                 value={port}
                 onChange={(e) => setPort(Number(e.target.value))}
-                className={inputCls}
+                className="tabular font-mono"
               />
             </Field>
           </div>
@@ -200,43 +205,43 @@ function ChannelModal({
           />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Utilisateur SMTP">
-              <input
+              <Input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="off"
-                className={inputCls}
+               
               />
             </Field>
             <Field
               label="Mot de passe SMTP"
               hint={channel?.has_secret ? "Laisser vide pour conserver le mot de passe actuel." : undefined}
             >
-              <input
+              <Input
                 type="password"
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
                 autoComplete="new-password"
                 placeholder={channel?.has_secret ? "••••••••" : ""}
-                className={inputCls}
+               
               />
             </Field>
             <Field label="Expéditeur" hint="Par défaut : l'utilisateur SMTP.">
-              <input
+              <Input
                 value={sender}
                 onChange={(e) => setSender(e.target.value)}
                 placeholder="citadel@exemple.com"
-                className={inputCls}
+               
               />
             </Field>
             <Field label="Destinataires fixes" hint="Adresses séparées par des virgules.">
-              <input
+              <Input
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
                 placeholder="soc@exemple.com, it@exemple.com"
-                className={inputCls}
+               
               />
               {badMail.length > 0 && (
-                <p className="text-xs text-red-700 mt-1">Adresse invalide : {badMail.join(", ")}</p>
+                <p className="text-xs mt-1 text-danger">Adresse invalide : {badMail.join(", ")}</p>
               )}
             </Field>
           </div>
@@ -249,7 +254,7 @@ function ChannelModal({
       ) : (
         <div className="border-t pt-4">
           <Field
-            label={type === "teams" ? "URL du workflow Teams *" : "URL du webhook *"}
+            label={type === "teams" ? "URL du workflow Teams" : "URL du webhook"}
             hint={
               <>
                 {type === "teams"
@@ -259,15 +264,15 @@ function ChannelModal({
               </>
             }
           >
-            <input
+            <Input
               type="password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
               autoComplete="off"
               placeholder={channel?.has_secret ? "URL enregistrée" : "https://..."}
-              className={`${inputCls} font-mono`}
+              className="font-mono"
             />
-            {!urlOk && <p className="text-xs text-red-700 mt-1">L'URL doit commencer par https://</p>}
+            {!urlOk && <p className="text-xs mt-1 text-danger">L'URL doit commencer par https://</p>}
           </Field>
         </div>
       )}
@@ -275,46 +280,37 @@ function ChannelModal({
       <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
           <Field label="Événements">
-            <label className="flex items-center gap-2 text-sm mb-2">
-              <input
-                type="checkbox"
-                checked={allEvents}
-                onChange={(e) => setAllEvents(e.target.checked)}
-                className="w-4 h-4 rounded"
-              />
+            <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm">
+              <Checkbox checked={allEvents} onCheckedChange={(v) => setAllEvents(v === true)} />
               Tous les événements
             </label>
             <div className={`space-y-1.5 pl-6 ${allEvents ? "opacity-40 pointer-events-none" : ""}`}>
               {events.map((ev) => (
-                <label key={ev.event} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={allEvents || selEvents.includes(ev.event)}
-                    onChange={() => toggleEvent(ev.event)}
-                    className="w-4 h-4 rounded"
-                  />
+                <label key={ev.event} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={allEvents || selEvents.includes(ev.event)} onCheckedChange={() => toggleEvent(ev.event)} />
                   {ev.label}
                   <span className="text-xs text-muted-foreground font-mono">{ev.event}</span>
                 </label>
               ))}
             </div>
             {!allEvents && selEvents.length === 0 && (
-              <p className="text-xs text-red-700 mt-1">Choisissez au moins un événement.</p>
+              <p className="text-xs mt-1 text-danger">Choisissez au moins un événement.</p>
             )}
           </Field>
         </div>
         <Field label="Niveau minimal">
-          <select
-            value={minLevel}
-            onChange={(e) => setMinLevel(e.target.value as NotificationLevel)}
-            className={inputCls}
-          >
-            {LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {LEVEL_INFO[l].label}
-              </option>
-            ))}
-          </select>
+          <Select value={minLevel} onValueChange={(v) => setMinLevel(v as NotificationLevel)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LEVELS.map((l) => (
+                <SelectItem key={l} value={l}>
+                  {LEVEL_INFO[l].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
       </div>
     </Modal>
@@ -397,104 +393,126 @@ export default function NotificationChannelsPanel() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-sm text-muted-foreground flex-1 min-w-[18rem]">
-          Les notifications apparaissent toujours dans Citadel (cloche). Les canaux ci-dessous les relaient en
-          plus par e-mail, dans Teams ou vers un webhook, selon les événements et le niveau choisis.
-        </p>
-        <button onClick={() => setEdit(null)} className={btnPrimary}>
-          <Plus size={16} /> Nouveau canal
-        </button>
-      </div>
-      <Notice notice={notice} onClose={() => setNotice(null)} />
-      <ErrorBox message={error} />
+    <SettingsCard
+      icon={Bell}
+      title="Canaux de notification"
+      description="Les notifications apparaissent toujours dans Citadel (cloche). Ces canaux les relaient aussi par e-mail, dans Teams ou vers un webhook, selon les événements et le niveau choisis."
+      actions={
+        <Button size="sm" onClick={() => setEdit(null)}>
+          <Plus /> Ajouter un canal
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <Notice notice={notice} onClose={() => setNotice(null)} />
+        <ErrorBox message={error} />
 
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <Loader2 size={24} className="animate-spin text-muted-foreground" />
-        </div>
-      ) : channels.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <Bell size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">Aucun canal externe configuré.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {channels.map((c) => {
-            const info = TYPE_INFO[c.type] || TYPE_INFO.webhook;
-            const Icon = info.icon;
-            return (
-              <div key={c.id} className={`bg-card border rounded-lg p-4 ${c.is_active ? "" : "opacity-60"}`}>
-                <div className="flex flex-wrap items-start gap-3">
-                  <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                    <Icon size={18} />
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{c.name}</span>
-                      <Chip>{info.label}</Chip>
-                      {c.is_active ? <Chip tone="green">Actif</Chip> : <Chip>Inactif</Chip>}
-                      <Chip tone={LEVEL_INFO[c.min_level]?.tone || "default"}>
-                        dès {LEVEL_INFO[c.min_level]?.label.toLowerCase() || c.min_level}
-                      </Chip>
-                    </div>
-                    {c.type === "email" && (
-                      <p className="text-xs text-muted-foreground">
-                        {c.config.host}:{c.config.port || 587}
-                        {(c.config.to || []).length > 0 && <> vers {(c.config.to || []).join(", ")}</>}
-                        {c.config.to_recipients !== false && <> + utilisateurs concernés</>}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-1">
-                      {c.events.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">Tous les événements</span>
-                      ) : (
-                        c.events.map((ev) => (
-                          <Chip key={ev} tone="blue">
-                            {eventLabel(ev)}
+        {loading ? (
+          <RowsSkeleton rows={3} />
+        ) : channels.length === 0 ? (
+          <EmptyState
+            icon={Bell}
+            title="Aucun canal externe"
+            action={
+              <Button size="sm" variant="outline" onClick={() => setEdit(null)}>
+                <Plus /> Ajouter un canal
+              </Button>
+            }
+          >
+            Ajoutez un canal e-mail, Teams ou webhook pour relayer les notifications hors de Citadel.
+          </EmptyState>
+        ) : (
+          <div className="divide-y rounded-md border">
+            <AnimatePresence initial={false}>
+              {channels.map((c) => {
+                const info = TYPE_INFO[c.type] || TYPE_INFO.webhook;
+                const Icon = info.icon;
+                return (
+                  <motion.div
+                    key={c.id}
+                    layout
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex flex-wrap items-start gap-3 px-4 py-3">
+                      <div className="pt-1.5">
+                        <StatusDot
+                          tone={!c.is_active ? "muted" : c.last_error ? "danger" : "success"}
+                          label={!c.is_active ? "Inactif" : c.last_error ? "En erreur" : "Actif"}
+                        />
+                      </div>
+                      <div className={`min-w-0 flex-1 space-y-1 ${c.is_active ? "" : "opacity-60"}`}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{c.name}</span>
+                          <Chip>
+                            <Icon className="size-3" />
+                            {info.label}
                           </Chip>
-                        ))
-                      )}
+                          <Chip tone={LEVEL_INFO[c.min_level]?.tone || "default"}>
+                            dès {LEVEL_INFO[c.min_level]?.label.toLowerCase() || c.min_level}
+                          </Chip>
+                          {!c.is_active && <Chip>Inactif</Chip>}
+                        </div>
+                        {c.type === "email" && (
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-mono">
+                              {c.config.host}:{c.config.port || 587}
+                            </span>
+                            {(c.config.to || []).length > 0 && (
+                              <>
+                                {" "}vers <span className="font-mono">{(c.config.to || []).join(", ")}</span>
+                              </>
+                            )}
+                            {c.config.to_recipients !== false && <> + utilisateurs concernés</>}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {c.events.length === 0 ? "Tous les événements" : c.events.map(eventLabel).join(", ")}
+                          {" · "}dernier envoi{" "}
+                          {c.last_sent_at ? (
+                            <Tip content={formatDate(c.last_sent_at)}>
+                              <span className="cursor-default">{relativeTime(c.last_sent_at)}</span>
+                            </Tip>
+                          ) : (
+                            "jamais"
+                          )}
+                        </p>
+                        {c.last_error && <ErrorLine>Dernière erreur : {c.last_error}</ErrorLine>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" onClick={() => test(c)} disabled={testing === c.id}>
+                          {testing === c.id ? <Loader2 className="animate-spin" /> : <Send />}
+                          Envoyer un test
+                        </Button>
+                        <Tip content={c.is_active ? "Désactiver" : "Activer"}>
+                          <span className="flex items-center px-1.5">
+                            <Switch
+                              checked={c.is_active}
+                              onCheckedChange={() => toggle(c)}
+                              aria-label={c.is_active ? "Désactiver" : "Activer"}
+                            />
+                          </span>
+                        </Tip>
+                        <Tip content="Modifier">
+                          <button onClick={() => setEdit(c)} className={iconBtn} aria-label="Modifier">
+                            <Pencil className="size-4" />
+                          </button>
+                        </Tip>
+                        <Tip content="Supprimer">
+                          <button onClick={() => setDel(c)} className={iconBtnDanger} aria-label="Supprimer">
+                            <Trash2 className="size-4" />
+                          </button>
+                        </Tip>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Dernier envoi :{" "}
-                      {c.last_sent_at ? (
-                        <span title={formatDate(c.last_sent_at)}>{relativeTime(c.last_sent_at)}</span>
-                      ) : (
-                        "jamais"
-                      )}
-                    </p>
-                    {c.last_error && (
-                      <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1 break-words">
-                        Dernière erreur : {c.last_error}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => test(c)} disabled={testing === c.id} className={btnSecondary}>
-                      {testing === c.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      Envoyer un test
-                    </button>
-                    <Toggle
-                      checked={c.is_active}
-                      onChange={() => toggle(c)}
-                      label=""
-                      title={c.is_active ? "Désactiver" : "Activer"}
-                    />
-                    <button onClick={() => setEdit(c)} className={iconBtn} title="Modifier">
-                      <Pencil size={15} />
-                    </button>
-                    <button onClick={() => setDel(c)} className={iconBtnDanger} title="Supprimer">
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
 
       {edit !== undefined && (
         <ChannelModal
@@ -519,6 +537,6 @@ export default function NotificationChannelsPanel() {
           <p>Les notifications ne seront plus relayées par ce canal.</p>
         </ConfirmModal>
       )}
-    </div>
+    </SettingsCard>
   );
 }

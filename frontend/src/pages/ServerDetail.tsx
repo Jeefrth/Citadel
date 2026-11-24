@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "motion/react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { hasAction, type ServerData } from "@/services/types";
 import Sparkline from "@/components/Sparkline";
 import AccountsSection from "@/components/AccountsSection";
 import { DiscoveredAccountsSection } from "@/components/DiscoveredAccounts";
-import { LabelChips } from "@/components/kit";
+import { Chip, EmptyState, LabelChips, PageHeader } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   Cpu,
@@ -15,10 +20,10 @@ import {
   Activity,
   Clock,
   Network,
-  Server,
   RefreshCw,
   Loader2,
   Wifi,
+  WifiOff,
   Star,
   Monitor,
   Terminal as TerminalIcon,
@@ -63,49 +68,67 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 
-function MetricCard({
+/** Usage level carried by colour: calm under 75 %, amber above, red above 90 %. */
+function levelTone(percent: number): string {
+  return percent > 90 ? "text-danger" : percent > 75 ? "text-live" : "text-info";
+}
+
+function MetricBlock({
   icon: Icon,
   label,
   value,
   subValue,
   percent,
-  color,
   history,
-  sparkColor,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   subValue?: string;
   percent: number;
-  color: string;
   history: number[];
-  sparkColor: string;
 }) {
-  const barColor =
-    percent > 90 ? "bg-red-500" :
-    percent > 75 ? "bg-amber-500" :
-    color;
-
+  const tone = levelTone(percent);
   return (
-    <div className="bg-card border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Icon size={18} className="text-muted-foreground" />
-          <span className="text-sm font-medium">{label}</span>
-        </div>
-        <span className="text-2xl font-bold">{value}</span>
+    <div className="min-w-0 space-y-2 p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Icon className="size-3.5" /> {label}
+        </span>
+        <span className={cn("tabular text-xl font-semibold", percent > 75 ? tone : "text-foreground")}>{value}</span>
       </div>
-      {subValue && (
-        <p className="text-xs text-muted-foreground mb-2">{subValue}</p>
-      )}
-      <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden mb-3">
+      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className={`h-full rounded-full transition-all ${barColor}`}
+          className={cn("h-full rounded-full bg-current transition-[width]", tone)}
           style={{ width: `${Math.min(percent, 100)}%` }}
         />
       </div>
-      <Sparkline data={history} width={260} height={45} color={sparkColor} />
+      {subValue && <p className="tabular text-xs text-muted-foreground">{subValue}</p>}
+      <Sparkline data={history} width={260} height={36} className={cn("w-full", tone, "opacity-80")} />
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ServerData["status"] }) {
+  const map = {
+    online: { label: "En ligne", tone: "green" as const, dot: "bg-success" },
+    offline: { label: "Hors ligne", tone: "red" as const, dot: "bg-danger" },
+    unknown: { label: "Inconnu", tone: "default" as const, dot: "bg-muted-foreground/50" },
+  };
+  const m = map[status] || map.unknown;
+  return (
+    <Chip tone={m.tone}>
+      <span className={cn("size-1.5 rounded-full", m.dot)} />
+      {m.label}
+    </Chip>
+  );
+}
+
+function InfoRow({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1.5">
+      <dt className="flex items-center gap-2 text-muted-foreground">{label}</dt>
+      <dd className="tabular font-mono text-xs">{children}</dd>
     </div>
   );
 }
@@ -195,8 +218,13 @@ export default function ServerDetail() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={32} className="animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-48 w-full" />
       </div>
     );
   }
@@ -207,191 +235,170 @@ export default function ServerDetail() {
   const memHistory = history.map((h) => h.memory_percent);
   const diskHistory = history.map((h) => h.disk_percent);
 
+  const canConnect = hasAction(server, "connect");
+
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-6">
-        <button
-          onClick={() => navigate("/servers")}
-          className="p-2 rounded-md hover:bg-accent"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <div className="flex items-center gap-3 flex-1">
-          <Server
-            size={24}
-            className={server.os_type === "linux" ? "text-green-500" : "text-blue-500"}
-          />
-          <div>
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              {server.name}
-              <button
-                onClick={toggleFavorite}
-                title={server.is_favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
-                className="text-muted-foreground hover:text-amber-500"
-              >
-                <Star size={18} className={server.is_favorite ? "fill-amber-400 text-amber-500" : ""} />
-              </button>
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {server.ip_address} · {server.hostname} · {server.os_type}
-              {server.os_version && ` · ${server.os_version}`}
-              {server.node_path && ` · ${server.node_path}`}
-            </p>
-            {server.tags && Object.keys(server.tags).length > 0 && (
-              <div className="mt-1">
-                <LabelChips tags={server.tags} />
-              </div>
-            )}
-          </div>
-          <span
-            className={`ml-3 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              server.status === "online"
-                ? "bg-green-100 text-green-700"
-                : server.status === "offline"
-                  ? "bg-red-100 text-red-700"
-                  : "bg-gray-100 text-gray-700"
-            }`}
-          >
-            {server.status}
+      <Button variant="ghost" size="sm" onClick={() => navigate("/servers")} className="-ml-2 mb-2 text-muted-foreground">
+        <ArrowLeft /> Serveurs
+      </Button>
+
+      <PageHeader
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            {server.name}
+            <FavoriteStar on={server.is_favorite} onToggle={toggleFavorite} />
+            <StatusBadge status={server.status} />
           </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleCollect}
-            disabled={collecting}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-          >
-            {collecting ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <RefreshCw size={16} />
+        }
+        description={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-mono text-foreground">{server.ip_address}</span>
+            <span aria-hidden>·</span>
+            <span className="font-mono">{server.hostname}</span>
+            <span aria-hidden>·</span>
+            <span>
+              {server.os_type}
+              {server.os_version && ` ${server.os_version}`}
+            </span>
+            {server.node_path && (
+              <>
+                <span aria-hidden>·</span>
+                <span>{server.node_path}</span>
+              </>
             )}
-            Collecter métriques
-          </button>
-        </div>
+          </span>
+        }
+        actions={
+          <>
+            <Button variant="outline" onClick={handleTest} disabled={testing}>
+              {testing ? <Loader2 className="animate-spin" /> : <Wifi />}
+              Tester la connexion
+            </Button>
+            <Button variant="outline" onClick={handleCollect} disabled={collecting}>
+              {collecting ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Collecter les métriques
+            </Button>
+            <Button
+              onClick={() => navigate(`/terminal?server=${server.id}`)}
+              disabled={!canConnect}
+              title={canConnect ? undefined : "Connexion non autorisée"}
+            >
+              {server.os_type === "windows" ? <Monitor /> : <TerminalIcon />}
+              {server.os_type === "windows" ? "Ouvrir une session RDP" : "Ouvrir un terminal"}
+            </Button>
+          </>
+        }
+      />
+
+      <div className="-mt-3 mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        {server.tags && Object.keys(server.tags).length > 0 && <LabelChips tags={server.tags} />}
+        <span className="text-muted-foreground">
+          Compte par défaut :{" "}
+          {server.default_account ? (
+            <span className="font-mono text-foreground">{server.default_account.username}</span>
+          ) : (
+            "aucun"
+          )}
+        </span>
+        <AnimatePresence initial={false}>
+          {testMsg && (
+            <motion.span
+              initial={{ opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className={cn("flex items-center gap-1.5 text-xs", testMsg.ok ? "text-success" : "text-danger")}
+            >
+              {testMsg.ok ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />}
+              {testMsg.text}
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Quick actions */}
-      <div className="flex flex-wrap items-center gap-2 mb-6">
-        <button
-          onClick={() => navigate(`/terminal?server=${server.id}`)}
-          disabled={!hasAction(server, "connect")}
-          title={hasAction(server, "connect") ? undefined : "Connexion non autorisée"}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
-        >
-          {server.os_type === "windows" ? <Monitor size={14} /> : <TerminalIcon size={14} />}
-          {server.os_type === "windows" ? "Session RDP" : "Terminal"}
-        </button>
-        <button
-          onClick={handleTest}
-          disabled={testing}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm hover:bg-accent disabled:opacity-50"
-        >
-          {testing ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />} Test connexion
-        </button>
-        {server.default_account && (
-          <span className="text-xs text-muted-foreground ml-2">
-            Compte par défaut : <span className="font-mono">{server.default_account.username}</span>
-          </span>
-        )}
-        {testMsg && (
-          <span className={`text-xs ml-2 ${testMsg.ok ? "text-green-700" : "text-red-700"}`}>
-            {testMsg.text}
-          </span>
-        )}
-      </div>
-
-      {/* Metrics cards */}
+      {/* Metrics */}
       {metrics ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <MetricCard
-            icon={Cpu}
-            label="CPU"
-            value={`${metrics.cpu_percent.toFixed(1)}%`}
-            subValue={`${metrics.cpu_count} cores · Load: ${metrics.load_average}`}
-            percent={metrics.cpu_percent}
-            color="bg-purple-500"
-            history={cpuHistory}
-            sparkColor="#8b5cf6"
-          />
-          <MetricCard
-            icon={MemoryStick}
-            label="Mémoire"
-            value={`${metrics.memory_percent.toFixed(1)}%`}
-            subValue={`${Math.round(metrics.memory_used_mb / 1024)} / ${Math.round(metrics.memory_total_mb / 1024)} GB`}
-            percent={metrics.memory_percent}
-            color="bg-blue-500"
-            history={memHistory}
-            sparkColor="#7aa2f7"
-          />
-          <MetricCard
-            icon={HardDrive}
-            label="Disque"
-            value={`${metrics.disk_percent.toFixed(0)}%`}
-            subValue={`${metrics.disk_used_gb} / ${metrics.disk_total_gb} GB`}
-            percent={metrics.disk_percent}
-            color="bg-amber-500"
-            history={diskHistory}
-            sparkColor="#f59e0b"
-          />
-        </div>
+        <>
+          <section className="mb-6 overflow-hidden rounded-lg border bg-card">
+            <div className="flex items-center justify-between border-b px-4 py-2.5">
+              <h2 className="text-sm font-medium">Ressources</h2>
+              <span className="text-xs text-muted-foreground">Tendance sur 24 h</span>
+            </div>
+            <div className="grid grid-cols-1 divide-y md:grid-cols-3 md:divide-x md:divide-y-0">
+              <MetricBlock
+                icon={Cpu}
+                label="CPU"
+                value={`${metrics.cpu_percent.toFixed(1)} %`}
+                subValue={`${metrics.cpu_count} cœurs, charge ${metrics.load_average}`}
+                percent={metrics.cpu_percent}
+                history={cpuHistory}
+              />
+              <MetricBlock
+                icon={MemoryStick}
+                label="Mémoire"
+                value={`${metrics.memory_percent.toFixed(1)} %`}
+                subValue={`${Math.round(metrics.memory_used_mb / 1024)} / ${Math.round(metrics.memory_total_mb / 1024)} GB`}
+                percent={metrics.memory_percent}
+                history={memHistory}
+              />
+              <MetricBlock
+                icon={HardDrive}
+                label="Disque"
+                value={`${metrics.disk_percent.toFixed(0)} %`}
+                subValue={`${metrics.disk_used_gb} / ${metrics.disk_total_gb} GB`}
+                percent={metrics.disk_percent}
+                history={diskHistory}
+              />
+            </div>
+          </section>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Card className="rounded-lg shadow-none">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                  <Activity className="size-4 text-muted-foreground" /> Système
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-3">
+                <dl className="divide-y text-sm">
+                  <InfoRow label={<><Clock className="size-3.5" /> Uptime</>}>{formatUptime(metrics.uptime_seconds)}</InfoRow>
+                  <InfoRow label="Processus">{metrics.process_count}</InfoRow>
+                  <InfoRow label="Charge moyenne">{metrics.load_average}</InfoRow>
+                </dl>
+              </CardContent>
+            </Card>
+            <Card className="rounded-lg shadow-none">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                  <Network className="size-4 text-muted-foreground" /> Réseau
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-3">
+                <dl className="divide-y text-sm">
+                  <InfoRow label="Reçu (RX)">{formatBytes(metrics.network_rx_bytes)}</InfoRow>
+                  <InfoRow label="Envoyé (TX)">{formatBytes(metrics.network_tx_bytes)}</InfoRow>
+                  <InfoRow label={server.os_type === "linux" ? "Port SSH" : "Port WinRM"}>
+                    {server.os_type === "linux" ? server.ssh_port : server.winrm_port}
+                  </InfoRow>
+                </dl>
+              </CardContent>
+            </Card>
+          </div>
+        </>
       ) : (
-        <div className="bg-card border rounded-lg p-8 text-center mb-6">
-          <Activity size={36} className="mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground text-sm">
-            Aucune métrique collectée. Cliquez sur "Collecter métriques" pour démarrer.
-          </p>
-        </div>
-      )}
-
-      {/* System info */}
-      {metrics && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-card border rounded-lg p-4">
-            <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-              <Activity size={16} /> Système
-            </h3>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground flex items-center gap-2">
-                  <Clock size={14} /> Uptime
-                </dt>
-                <dd className="font-mono">{formatUptime(metrics.uptime_seconds)}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Processus</dt>
-                <dd className="font-mono">{metrics.process_count}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Load Average</dt>
-                <dd className="font-mono">{metrics.load_average}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="bg-card border rounded-lg p-4">
-            <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-              <Network size={16} /> Réseau
-            </h3>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Reçu (RX)</dt>
-                <dd className="font-mono">{formatBytes(metrics.network_rx_bytes)}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Envoyé (TX)</dt>
-                <dd className="font-mono">{formatBytes(metrics.network_tx_bytes)}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">Port SSH/WinRM</dt>
-                <dd className="font-mono">
-                  {server.os_type === "linux" ? server.ssh_port : server.winrm_port}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </div>
+        <EmptyState
+          icon={Activity}
+          title="Aucune métrique collectée"
+          action={
+            <Button variant="outline" onClick={handleCollect} disabled={collecting}>
+              {collecting ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Collecter les métriques
+            </Button>
+          }
+        >
+          Lancez une première collecte pour suivre le CPU, la mémoire et le disque de ce serveur.
+        </EmptyState>
       )}
 
       {isAdmin && (
@@ -415,5 +422,30 @@ export default function ServerDetail() {
         </>
       )}
     </div>
+  );
+}
+
+/** Favourite toggle: the star pops when it changes. */
+function FavoriteStar({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  const label = on ? "Retirer des favoris" : "Ajouter aux favoris";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      className="flex rounded p-0.5 text-muted-foreground transition-colors hover:text-live"
+    >
+      <motion.span
+        key={on ? "on" : "off"}
+        initial={{ scale: 0.6, rotate: on ? -30 : 0 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{ type: "spring", stiffness: 500, damping: 18 }}
+        className="flex"
+      >
+        <Star className={cn("size-[18px]", on && "fill-live text-live")} />
+      </motion.span>
+    </button>
   );
 }

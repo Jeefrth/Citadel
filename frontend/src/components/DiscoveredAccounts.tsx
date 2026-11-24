@@ -1,6 +1,7 @@
 // Discovered OS accounts (collected on the targets): per-server block on the
 // server page and global table in the "Accès" page.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Radar, ShieldAlert, Undo2, UserPlus } from "lucide-react";
 import { api } from "@/services/api";
@@ -22,19 +23,25 @@ import {
   Modal,
   Notice,
   SaveButton,
+  EmptyState,
   Toggle,
-  btnSecondary,
   formatDate,
-  iconBtn,
-  inputCls,
   type NoticeData,
 } from "@/components/kit";
+import { AuthModePicker, CheckField, RowAction } from "@/components/AccountsSection";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { DISCOVERED_STATUS, formatLastLogin, formRotationBlocker } from "@/components/secretsUi";
 
 /** Unmanaged privileged accounts still in use: the risky ones. */
 export function isRisky(d: DiscoveredAccountData): boolean {
   return d.privileged && !d.managed && d.status !== "ignored";
 }
+
+const ALL_STATUSES = "__all__";
 
 // ── Manage dialog ────────────────────────────────────────────
 
@@ -93,9 +100,9 @@ function ManageModal({
       onClose={onClose}
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
             Gérer ce compte
           </SaveButton>
@@ -108,42 +115,25 @@ function ManageModal({
         connecte ; les règles d'accès décident ensuite qui peut l'utiliser.
       </p>
       <Field label="Authentification">
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="radio" checked={mode === "credential"} onChange={() => setMode("credential")} />
-            Credential enregistré
-          </label>
-          {mode === "credential" && (
-            <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)} className={inputCls}>
-              <option value="">Choisir un credential</option>
-              {credentials.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.username}, {c.type})
-                </option>
-              ))}
-            </select>
-          )}
-          <label className={`flex items-center gap-2 text-sm ${certAllowed ? "" : "opacity-50"}`}>
-            <input
-              type="radio"
-              disabled={!certAllowed}
-              checked={mode === "cert"}
-              onChange={() => setMode("cert")}
-            />
-            Certificat éphémère (CA Citadel, Linux uniquement)
-          </label>
-        </div>
-      </Field>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={privileged}
-          onChange={(e) => setPrivileged(e.target.checked)}
-          className="w-4 h-4 rounded"
+        <AuthModePicker
+          mode={mode}
+          onMode={setMode}
+          certAllowed={certAllowed}
+          credentialId={credentialId}
+          onCredential={setCredentialId}
+          credentials={credentials}
         />
-        Compte privilégié
-        {item.privileged && <span className="text-xs text-muted-foreground">(détecté comme administrateur)</span>}
-      </label>
+      </Field>
+      <CheckField
+        checked={privileged}
+        onChange={setPrivileged}
+        label={
+          <>
+            Compte privilégié
+            {item.privileged && <span className="ml-1 text-xs text-muted-foreground">(détecté comme administrateur)</span>}
+          </>
+        }
+      />
       <div>
         <Toggle
           checked={rotation && !blocker}
@@ -152,7 +142,7 @@ function ManageModal({
           title={blocker || undefined}
           label="Rotation automatique du mot de passe"
         />
-        <p className="text-xs text-muted-foreground mt-1">
+        <p className="mt-1 text-xs text-muted-foreground">
           {blocker
             ? blocker
             : "Tous les 30 jours par défaut (modifiable ensuite dans le compte). La première rotation a lieu au prochain passage du planificateur."}
@@ -178,103 +168,99 @@ function DiscoveredTable({
   onSetStatus: (d: DiscoveredAccountData, status: "new" | "ignored") => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            {showServer && <th className="text-left p-3 font-medium">Serveur</th>}
-            <th className="text-left p-3 font-medium">Compte</th>
-            <th className="text-left p-3 font-medium">Shell / SID</th>
-            <th className="text-left p-3 font-medium">Activé</th>
-            <th className="text-left p-3 font-medium">Dernière connexion</th>
-            <th className="text-left p-3 font-medium">Statut</th>
-            <th className="text-right p-3 font-medium">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          {showServer && <TableHead className="pl-4">Serveur</TableHead>}
+          <TableHead className={showServer ? undefined : "pl-4"}>Compte</TableHead>
+          <TableHead>Shell / SID</TableHead>
+          <TableHead>Activé</TableHead>
+          <TableHead>Dernière connexion</TableHead>
+          <TableHead>Statut</TableHead>
+          <TableHead className="pr-4 text-right">Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        <AnimatePresence initial={false}>
           {rows.map((d) => {
             const risky = isRisky(d);
             const st = DISCOVERED_STATUS[d.status] || DISCOVERED_STATUS.new;
             const busy = busyId === d.id;
             return (
-              <tr
+              <motion.tr
                 key={d.id}
-                className={`border-b last:border-0 ${risky ? "bg-red-50/60" : ""} ${
-                  d.status === "ignored" ? "opacity-60" : ""
-                }`}
+                layout="position"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: d.status === "ignored" ? 0.6 : 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                className={cn("h-11 border-b transition-colors hover:bg-muted/50", risky && "bg-danger/5")}
                 title={risky ? "Compte privilégié non géré par Citadel" : undefined}
               >
                 {showServer && (
-                  <td className="p-3">
-                    <Link to={`/servers/${d.server_id}`} className="text-primary hover:underline">
+                  <TableCell className="pl-4">
+                    <Link to={`/servers/${d.server_id}`} className="font-medium hover:underline">
                       {d.server_name || d.server_id.slice(0, 8)}
                     </Link>
-                  </td>
+                  </TableCell>
                 )}
-                <td className="p-3">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {risky && <ShieldAlert size={14} className="text-red-600" />}
+                <TableCell className={showServer ? undefined : "pl-4"}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {risky && <ShieldAlert className="size-3.5 text-danger" />}
                     <span className="font-mono">{d.username}</span>
                     {d.privileged && (
                       <Chip tone={risky ? "red" : "amber"}>
-                        <ShieldAlert size={11} /> privilégié
+                        <ShieldAlert className="size-3" /> privilégié
                       </Chip>
                     )}
                     {d.managed && <Chip tone="green">géré</Chip>}
                   </div>
-                </td>
-                <td className="p-3 font-mono text-xs text-muted-foreground" title={d.uid ? `uid / SID : ${d.uid}` : undefined}>
+                </TableCell>
+                <TableCell
+                  className="font-mono text-xs text-muted-foreground"
+                  title={d.uid ? `uid / SID : ${d.uid}` : undefined}
+                >
                   {d.shell || d.uid || "-"}
-                </td>
-                <td className="p-3 text-xs">
+                </TableCell>
+                <TableCell className="text-xs">
                   {d.enabled === null ? "-" : d.enabled ? "Oui" : <span className="text-muted-foreground">Non</span>}
-                </td>
-                <td className="p-3 text-xs text-muted-foreground">{formatLastLogin(d.last_login)}</td>
-                <td className="p-3">
+                </TableCell>
+                <TableCell className="tabular text-xs text-muted-foreground">{formatLastLogin(d.last_login)}</TableCell>
+                <TableCell>
                   <Chip
                     tone={st.tone}
                     title={`${st.help}\nVu pour la première fois le ${formatDate(d.first_seen)}\nVu pour la dernière fois le ${formatDate(d.last_seen)}`}
                   >
                     {st.label}
                   </Chip>
-                </td>
-                <td className="p-3 text-right whitespace-nowrap">
-                  <div className="flex items-center justify-end gap-1">
-                    {busy && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
+                </TableCell>
+                <TableCell className="whitespace-nowrap pr-4 text-right">
+                  <div className="flex items-center justify-end gap-0.5">
+                    {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
                     {!d.managed && d.status !== "gone" && (
-                      <button onClick={() => onManage(d)} disabled={busy} className={iconBtn} title="Gérer">
-                        <UserPlus size={15} />
-                      </button>
+                      <RowAction label="Gérer" onClick={() => onManage(d)} disabled={busy}>
+                        <UserPlus />
+                      </RowAction>
                     )}
                     {d.status === "ignored" ? (
-                      <button
-                        onClick={() => onSetStatus(d, "new")}
-                        disabled={busy}
-                        className={iconBtn}
-                        title="Restaurer"
-                      >
-                        <Undo2 size={15} />
-                      </button>
+                      <RowAction label="Restaurer" onClick={() => onSetStatus(d, "new")} disabled={busy}>
+                        <Undo2 />
+                      </RowAction>
                     ) : (
                       !d.managed && (
-                        <button
-                          onClick={() => onSetStatus(d, "ignored")}
-                          disabled={busy}
-                          className={iconBtn}
-                          title="Ignorer"
-                        >
-                          <EyeOff size={15} />
-                        </button>
+                        <RowAction label="Ignorer" onClick={() => onSetStatus(d, "ignored")} disabled={busy}>
+                          <EyeOff />
+                        </RowAction>
                       )
                     )}
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+              </motion.tr>
             );
           })}
-        </tbody>
-      </table>
-    </div>
+        </AnimatePresence>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -363,38 +349,42 @@ export function DiscoveredAccountsSection({
   const risky = d.rows.filter(isRisky).length;
 
   return (
-    <div className="bg-card border rounded-lg mt-6">
-      <div className="flex items-center justify-between p-4 border-b gap-4">
-        <div>
-          <h3 className="font-semibold text-sm flex items-center gap-2">
-            <Radar size={16} /> Comptes découverts
+    <section className="mt-6 overflow-hidden rounded-lg border bg-card">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b p-4">
+        <div className="min-w-0">
+          <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            <Radar className="size-4 text-muted-foreground" /> Comptes découverts
             {risky > 0 && (
               <Chip tone="red" title="Comptes privilégiés présents sur le serveur mais non gérés par Citadel">
-                <ShieldAlert size={11} /> {risky} privilégié{risky > 1 ? "s" : ""} non géré{risky > 1 ? "s" : ""}
+                <ShieldAlert className="size-3" /> {risky} privilégié{risky > 1 ? "s" : ""} non géré{risky > 1 ? "s" : ""}
               </Chip>
             )}
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Comptes interactifs relevés sur le serveur (via le compte par défaut). Les comptes privilégiés
-            non gérés sont à traiter en priorité : les gérer, ou les ignorer s'ils sont légitimes.
+          </h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+            Comptes interactifs relevés sur le serveur (via le compte par défaut). Traitez d'abord les comptes
+            privilégiés non gérés : gérez-les, ou ignorez-les s'ils sont légitimes.
           </p>
         </div>
-        <button onClick={collect} disabled={collecting} className={`${btnSecondary} shrink-0`}>
-          {collecting ? <Loader2 size={14} className="animate-spin" /> : <Radar size={14} />}
+        <Button variant="outline" size="sm" onClick={collect} disabled={collecting} className="shrink-0">
+          {collecting ? <Loader2 className="animate-spin" /> : <Radar />}
           Lancer la collecte
-        </button>
+        </Button>
       </div>
       {(notice || d.error) && (
-        <div className="p-4 pb-0 space-y-2">
+        <div className="space-y-2 p-4 pb-0">
           <Notice notice={notice} onClose={() => setNotice(null)} />
           <ErrorBox message={d.error} />
         </div>
       )}
       {d.loading ? (
-        <p className="p-4 text-sm text-muted-foreground">Chargement...</p>
+        <div className="space-y-2 p-4">
+          {[0, 1].map((i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
       ) : d.rows.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">
-          Aucun compte découvert. Lancez la collecte (elle est aussi faite périodiquement par le planificateur).
+          Aucun compte découvert. Lancez la collecte (le planificateur la refait aussi périodiquement).
         </p>
       ) : (
         <>
@@ -406,14 +396,16 @@ export function DiscoveredAccountsSection({
             onSetStatus={d.setStatus}
           />
           {ignoredCount > 0 && (
-            <div className="p-3 border-t">
-              <button
+            <div className="border-t px-4 py-2">
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowIgnored((v) => !v)}
-                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                className="-ml-2 h-7 text-xs text-muted-foreground"
               >
-                {showIgnored ? <EyeOff size={12} /> : <Eye size={12} />}
+                {showIgnored ? <EyeOff /> : <Eye />}
                 {showIgnored ? "Masquer" : "Afficher"} les comptes ignorés ({ignoredCount})
-              </button>
+              </Button>
             </div>
           )}
         </>
@@ -433,7 +425,7 @@ export function DiscoveredAccountsSection({
           }}
         />
       )}
-    </div>
+    </section>
   );
 }
 
@@ -460,44 +452,29 @@ export function DiscoveredAccountsPanel({ servers }: { servers: ServerData[] }) 
 
   return (
     <div className="space-y-4">
-      <div className="p-3 rounded-md border bg-muted/30 text-xs text-muted-foreground">
+      <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
         Comptes relevés sur les serveurs par la collecte (manuelle depuis la fiche serveur, ou périodique).
-        Un compte <strong>privilégié non géré</strong> échappe au contrôle de Citadel : gérez-le pour que
-        son secret soit dans le coffre et puisse tourner, ou ignorez-le s'il est légitime.
-      </div>
+        Un compte <strong className="text-foreground">privilégié non géré</strong> échappe au contrôle de Citadel :
+        gérez-le pour que son secret soit dans le coffre et puisse tourner, ou ignorez-le s'il est légitime.
+      </p>
       <div className="flex flex-wrap items-center gap-4">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as "" | DiscoveredStatus)}
-          className={`${inputCls} max-w-[12rem]`}
-        >
-          <option value="">Tous les statuts</option>
-          <option value="new">Nouveaux</option>
-          <option value="ignored">Ignorés</option>
-          <option value="gone">Disparus</option>
-        </select>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={unmanagedOnly}
-            onChange={(e) => setUnmanagedOnly(e.target.checked)}
-            className="w-4 h-4 rounded"
-          />
-          Non gérés seulement
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={riskyOnly}
-            onChange={(e) => setRiskyOnly(e.target.checked)}
-            className="w-4 h-4 rounded"
-          />
-          Privilégiés non gérés seulement
-        </label>
-        {d.loading && <Loader2 size={16} className="animate-spin text-muted-foreground" />}
+        <Select value={status || ALL_STATUSES} onValueChange={(v) => setStatus(v === ALL_STATUSES ? "" : (v as DiscoveredStatus))}>
+          <SelectTrigger className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_STATUSES}>Tous les statuts</SelectItem>
+            <SelectItem value="new">Nouveaux</SelectItem>
+            <SelectItem value="ignored">Ignorés</SelectItem>
+            <SelectItem value="gone">Disparus</SelectItem>
+          </SelectContent>
+        </Select>
+        <CheckField checked={unmanagedOnly} onChange={setUnmanagedOnly} label="Non gérés seulement" />
+        <CheckField checked={riskyOnly} onChange={setRiskyOnly} label="Privilégiés non gérés seulement" />
+        {d.loading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
         {riskyCount > 0 && (
           <Chip tone="red">
-            <ShieldAlert size={11} /> {riskyCount} privilégié{riskyCount > 1 ? "s" : ""} non géré
+            <ShieldAlert className="size-3" /> {riskyCount} privilégié{riskyCount > 1 ? "s" : ""} non géré
             {riskyCount > 1 ? "s" : ""}
           </Chip>
         )}
@@ -505,13 +482,12 @@ export function DiscoveredAccountsPanel({ servers }: { servers: ServerData[] }) 
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <ErrorBox message={d.error} />
       {!d.loading && rows.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <Radar size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">Aucun compte découvert pour ces filtres.</p>
-        </div>
+        <EmptyState icon={Radar} title="Aucun compte découvert pour ces filtres">
+          Élargissez les filtres, ou lancez une collecte depuis la fiche d'un serveur.
+        </EmptyState>
       ) : (
         rows.length > 0 && (
-          <div className="bg-card border rounded-lg overflow-hidden">
+          <div className="overflow-hidden rounded-lg border bg-card">
             <DiscoveredTable
               rows={rows}
               showServer

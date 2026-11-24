@@ -1,7 +1,10 @@
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "@/services/authConfig";
-import { Server } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
+// Sign-in screen. Always rendered in the dark "Salle de contrôle" palette,
+// whatever theme the browser or the stored preference asks for.
 export default function LoginPage() {
   const { instance } = useMsal();
 
@@ -10,37 +13,51 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="text-center space-y-8">
-        <div className="flex items-center justify-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Server size={28} className="text-primary" />
-          </div>
-          <div className="text-left">
-            <h1 className="text-3xl font-bold">Citadel</h1>
-            <p className="text-muted-foreground">
-              Gestion centralisée de serveurs
-            </p>
+    <div className="dark">
+      <main className="flex min-h-screen flex-col bg-background px-4 text-foreground">
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-sm space-y-8">
+            <div className="space-y-4">
+              <div className="flex size-10 items-center justify-center rounded-lg border bg-card">
+                <ShieldCheck className="size-5 text-foreground" strokeWidth={1.75} />
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-3xl font-semibold tracking-tight">Citadel</h1>
+                <p className="text-base text-muted-foreground">
+                  Le bastion d'accès de l'équipe infra : sessions SSH et RDP tracées, règles d'accès et validations
+                  au même endroit.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Button onClick={handleLogin} size="lg" className="w-full px-4">
+                <MicrosoftMark />
+                Se connecter avec Microsoft
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Authentification par Microsoft Entra ID. Chaque session ouverte est enregistrée.
+              </p>
+            </div>
           </div>
         </div>
-
-        <div className="bg-card border rounded-lg p-8 shadow-sm max-w-sm mx-auto">
-          <p className="text-sm text-muted-foreground mb-6">
-            Connectez-vous avec votre compte Microsoft pour accéder à
-            l'application.
-          </p>
-          <button
-            onClick={handleLogin}
-            className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-md font-medium hover:bg-primary/90 transition-colors"
-          >
-            Se connecter avec Microsoft
-          </button>
-        </div>
-
-        <p className="text-xs text-muted-foreground">
-          Authentification via Microsoft Entra ID
-        </p>
-      </div>
+        <footer className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-success" aria-hidden />
+          Accès réservé aux comptes autorisés
+        </footer>
+      </main>
     </div>
+  );
+}
+
+/** Microsoft four-square mark, monochrome so it follows the button colour. */
+function MicrosoftMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden className="size-4" fill="currentColor">
+      <rect x="0" y="0" width="7.5" height="7.5" />
+      <rect x="8.5" y="0" width="7.5" height="7.5" opacity="0.8" />
+      <rect x="0" y="8.5" width="7.5" height="7.5" opacity="0.8" />
+      <rect x="8.5" y="8.5" width="7.5" height="7.5" opacity="0.6" />
+    </svg>
   );
 }

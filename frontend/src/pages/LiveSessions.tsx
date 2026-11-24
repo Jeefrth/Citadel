@@ -1,12 +1,16 @@
 // "Sessions en direct" (admin): active SSH / RDP sessions, read-only monitoring and kill.
 import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { Activity, Eye, Loader2, Power, RefreshCw } from "lucide-react";
+import { Activity, Eye, Power, RefreshCw } from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { errorMessage, type KillSessionResult, type LiveSession } from "@/services/types";
-import { Chip, ConfirmModal, ErrorBox, Field, Notice, btnSecondary, inputCls, type NoticeData } from "@/components/kit";
-import { ProtocolBadge, formatDuration } from "@/components/auditUi";
+import { Chip, ConfirmModal, EmptyState, ErrorBox, Field, Notice, PageHeader, type NoticeData } from "@/components/kit";
+import { ProtocolBadge, StatusDot, TableSkeleton, Tip, formatDuration } from "@/components/auditUi";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import LiveMonitorViewer from "@/components/LiveMonitorViewer";
 
 const REFRESH_MS = 5000;
@@ -35,7 +39,7 @@ function KillDialog({
           ? { ok: true, text: `Session de ${session.user} sur ${session.server} terminée.` }
           : {
               ok: false,
-              text: `L'ordre a été émis mais aucun processus ne l'a reçu : la session est peut-être déjà fermée.`,
+              text: `Ordre émis, mais aucun processus ne l'a reçu : la session est sans doute déjà fermée.`,
             }
       );
     } catch (e) {
@@ -63,12 +67,11 @@ function KillDialog({
         sera coupée immédiatement. L'utilisateur est notifié et l'action est journalisée.
       </p>
       <Field label="Motif (optionnel)" hint="Affiché à l'utilisateur et conservé dans l'audit.">
-        <textarea
+        <Textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           maxLength={500}
           rows={3}
-          className={inputCls}
           placeholder="ex. Intervention non autorisée"
         />
       </Field>
@@ -115,101 +118,102 @@ export default function LiveSessions() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold">Sessions en direct</h2>
-          <p className="text-sm text-muted-foreground">
-            Sessions SSH et RDP ouvertes en ce moment. Actualisation toutes les 5 secondes.
-          </p>
-        </div>
-        <button onClick={load} className={btnSecondary}>
-          <RefreshCw size={14} /> Actualiser
-        </button>
-      </div>
+      <PageHeader
+        title="Sessions en direct"
+        description="Sessions SSH et RDP ouvertes en ce moment. Observez-les en lecture seule ou terminez-les. Actualisation toutes les 5 secondes."
+        actions={
+          <Button variant="outline" size="sm" onClick={load}>
+            <RefreshCw /> Actualiser
+          </Button>
+        }
+      />
 
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <ErrorBox message={error} />
 
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 size={24} className="animate-spin text-muted-foreground" />
-        </div>
-      ) : sessions.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <Activity size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">Aucune session active.</p>
-        </div>
+      {!loading && sessions.length === 0 ? (
+        <EmptyState icon={Activity} title="Aucune session en cours">
+          Les sessions SSH et RDP ouvertes apparaissent ici dès leur connexion.
+        </EmptyState>
       ) : (
-        <div className="bg-card border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left">
-                <th className="p-3 font-medium">Protocole</th>
-                <th className="p-3 font-medium">Utilisateur</th>
-                <th className="p-3 font-medium">Serveur</th>
-                <th className="p-3 font-medium">Compte</th>
-                <th className="p-3 font-medium">IP</th>
-                <th className="p-3 font-medium">Début</th>
-                <th className="p-3 font-medium">Durée</th>
-                <th className="p-3 font-medium">Dernière activité</th>
-                <th className="p-3 font-medium">Observateurs</th>
-                <th className="p-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s) => {
-                const idle = Math.max(0, now - s.last_activity);
-                return (
-                  <tr key={s.session_id} className="border-b last:border-0">
-                    <td className="p-3">
-                      <ProtocolBadge protocol={s.protocol} />
-                    </td>
-                    <td className="p-3 font-medium">{s.user}</td>
-                    <td className="p-3">{s.server}</td>
-                    <td className="p-3 font-mono text-xs">{s.account || "-"}</td>
-                    <td className="p-3 font-mono text-xs">{s.client_ip || "-"}</td>
-                    <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{fmtTime(s.started_at)}</td>
-                    <td className="p-3 whitespace-nowrap">{formatDuration(now - s.started_at)}</td>
-                    <td
-                      className={`p-3 text-xs whitespace-nowrap ${idle > 300 ? "text-amber-700" : "text-muted-foreground"}`}
-                      title={fmtTime(s.last_activity)}
-                    >
-                      {idle < 10 ? "à l'instant" : `il y a ${formatDuration(idle)}`}
-                    </td>
-                    <td className="p-3">
-                      {s.watchers.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {s.watchers.map((w) => (
-                            <Chip key={w} tone="amber">
-                              <Eye size={11} /> {w}
-                            </Chip>
-                          ))}
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-4">Session</TableHead>
+                <TableHead>Utilisateur</TableHead>
+                <TableHead>Cible</TableHead>
+                <TableHead>IP client</TableHead>
+                <TableHead>Début</TableHead>
+                <TableHead>Durée</TableHead>
+                <TableHead>Dernière activité</TableHead>
+                <TableHead>Observateurs</TableHead>
+                <TableHead className="pr-4 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableSkeleton cols={9} rows={3} />
+              ) : (
+                sessions.map((s) => {
+                  const idle = Math.max(0, now - s.last_activity);
+                  return (
+                    <TableRow key={s.session_id}>
+                      <TableCell className="pl-4">
+                        <div className="flex items-center gap-2.5">
+                          <StatusDot tone="live" pulse label="En direct" />
+                          <ProtocolBadge protocol={s.protocol} />
                         </div>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setWatching(s)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90"
-                        >
-                          <Eye size={14} /> Observer
-                        </button>
-                        <button
-                          onClick={() => setKilling(s)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-xs font-medium hover:bg-red-100"
-                        >
-                          <Power size={14} /> Terminer
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">{s.user}</TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-sm">
+                        {s.account && <span className="text-muted-foreground">{s.account}@</span>}
+                        {s.server}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{s.client_ip || "-"}</TableCell>
+                      <TableCell className="tabular whitespace-nowrap text-muted-foreground">{fmtTime(s.started_at)}</TableCell>
+                      <TableCell className="tabular whitespace-nowrap font-medium text-live">
+                        {formatDuration(now - s.started_at)}
+                      </TableCell>
+                      <TableCell className={cn("tabular whitespace-nowrap", idle > 300 ? "text-live" : "text-muted-foreground")}>
+                        <Tip content={`Dernière activité : ${fmtTime(s.last_activity)}`}>
+                          <span className="cursor-default">{idle < 10 ? "à l'instant" : `il y a ${formatDuration(idle)}`}</span>
+                        </Tip>
+                      </TableCell>
+                      <TableCell>
+                        {s.watchers.length === 0 ? (
+                          <span className="text-muted-foreground">-</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {s.watchers.map((w) => (
+                              <Chip key={w}>
+                                <Eye className="size-3" /> {w}
+                              </Chip>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="pr-4">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button size="sm" onClick={() => setWatching(s)}>
+                            <Eye /> Observer
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setKilling(s)}
+                            className="border-danger/30 text-danger hover:bg-danger/10 hover:text-danger"
+                          >
+                            <Power /> Terminer
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </div>
       )}
 

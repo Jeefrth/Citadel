@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/services/api";
 import SecretsVaultCard from "@/components/SecretsVaultCard";
 import NotificationChannelsPanel from "@/components/NotificationChannels";
@@ -11,7 +11,6 @@ import {
   Users,
   Terminal,
   Globe,
-  AlertTriangle,
   Save,
   RotateCcw,
   Loader2,
@@ -26,6 +25,37 @@ import {
   FileSearch,
   Archive,
 } from "lucide-react";
+import { ConfirmModal, PageHeader, Tabs } from "@/components/kit";
+import { FactRow, SettingsCard, Tip } from "@/components/auditUi";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+/** Readable labels for the known setting keys (fallback: the key in sentence case). */
+const SETTING_LABELS: Record<string, string> = {
+  idle_timeout_minutes: "Délai d'inactivité (minutes)",
+  rate_limit_requests: "Limite de requêtes",
+  rate_limit_window_seconds: "Fenêtre de la limite (secondes)",
+  mfa_required_for_terminal: "MFA obligatoire pour le terminal",
+  session_recording_enabled: "Enregistrement des sessions",
+  max_session_recordings: "Nombre maximal d'enregistrements",
+  command_filter_enabled: "Filtrage des commandes",
+  default_cert_validity_minutes: "Validité par défaut (minutes)",
+  min_cert_validity_minutes: "Validité minimale (minutes)",
+  max_cert_validity_minutes: "Validité maximale (minutes)",
+  recording_retention_days: "Rétention des enregistrements (jours)",
+  command_log_retention_days: "Rétention du journal des commandes (jours)",
+  notify_user_on_monitor: "Prévenir l'utilisateur observé",
+};
+
+function settingLabel(key: string): string {
+  if (SETTING_LABELS[key]) return SETTING_LABELS[key];
+  const t = key.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
 
 interface SettingMeta {
   key: string;
@@ -69,6 +99,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [deleting, setDeleting] = useState<UserData | null>(null);
 
   // Editable state
   const [editValues, setEditValues] = useState<Record<string, string>>({});
@@ -157,7 +188,6 @@ export default function Settings() {
   };
 
   const deleteUser = async (userId: string) => {
-    if (!confirm("Supprimer cet utilisateur ?")) return;
     try {
       await api.delete(`/api/admin/users/${userId}`);
       setUsers((prev) => prev.filter((u) => u.id !== userId));
@@ -249,8 +279,24 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={32} className="animate-spin text-muted-foreground" />
+      <div>
+        <PageHeader title="Paramètres" description="Sécurité, réseau, certificats, coffre, notifications, audit et utilisateurs." />
+        <div className="mb-6 flex gap-4 border-b pb-2.5">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-4 w-20" />
+          ))}
+        </div>
+        <div className="space-y-3 rounded-lg border p-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-48" />
+                <Skeleton className="h-3 w-72" />
+              </div>
+              <Skeleton className="h-8 w-24" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -258,403 +304,370 @@ export default function Settings() {
   const renderSettingRow = (key: string, type: "number" | "bool" | "text" = "text") => {
     const meta = settings[key];
     if (!meta) return null;
+    const dirty = editValues[key] !== meta.value;
 
     return (
-      <div className="flex items-center justify-between py-3 border-b last:border-0">
-        <div className="flex-1 min-w-0 mr-4">
-          <p className="text-sm font-medium">{key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</p>
+      <div key={key} className="flex items-center justify-between gap-4 border-b py-3 first:pt-0 last:border-0 last:pb-0">
+        <div className="min-w-0 flex-1">
+          <label htmlFor={`setting-${key}`} className="text-sm font-medium">
+            {settingLabel(key)}
+          </label>
           <p className="text-xs text-muted-foreground">{meta.description}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {type === "bool" ? (
-            <button
-              onClick={() => {
-                const newVal = editValues[key] === "true" ? "false" : "true";
-                setEditValues((prev) => ({ ...prev, [key]: newVal }));
-              }}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                editValues[key] === "true"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              {editValues[key] === "true" ? "Activé" : "Désactivé"}
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">{editValues[key] === "true" ? "Activé" : "Désactivé"}</span>
+              <Switch
+                id={`setting-${key}`}
+                checked={editValues[key] === "true"}
+                onCheckedChange={(v) => setEditValues((prev) => ({ ...prev, [key]: v ? "true" : "false" }))}
+              />
+            </div>
           ) : type === "number" ? (
-            <input
+            <Input
+              id={`setting-${key}`}
               type="number"
               value={editValues[key] || ""}
               onChange={(e) => setEditValues((prev) => ({ ...prev, [key]: e.target.value }))}
-              className="w-24 px-2 py-1 rounded border bg-background text-sm text-right focus:outline-none focus:ring-1 focus:ring-ring"
+              className="tabular h-8 w-24 text-right"
             />
           ) : (
-            <input
+            <Input
+              id={`setting-${key}`}
               type="text"
               value={editValues[key] || ""}
               onChange={(e) => setEditValues((prev) => ({ ...prev, [key]: e.target.value }))}
-              className="w-48 px-2 py-1 rounded border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-48"
             />
           )}
-          {editValues[key] !== meta.value && (
-            <button
-              onClick={() => saveSetting(key)}
-              disabled={saving === key}
-              className="p-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90"
-              title="Enregistrer"
-            >
-              {saving === key ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            </button>
-          )}
-          {!meta.is_default && (
-            <button
-              onClick={() => resetSetting(key)}
-              className="p-1.5 rounded hover:bg-accent text-muted-foreground"
-              title="Réinitialiser"
-            >
-              <RotateCcw size={14} />
-            </button>
-          )}
+          <div className="flex w-[4.25rem] items-center justify-end gap-1">
+            {dirty && (
+              <Tip content="Enregistrer">
+                <Button size="icon" className="size-8" onClick={() => saveSetting(key)} disabled={saving === key} aria-label="Enregistrer">
+                  {saving === key ? <Loader2 className="animate-spin" /> : <Save />}
+                </Button>
+              </Tip>
+            )}
+            {!meta.is_default && (
+              <Tip content="Revenir à la valeur par défaut">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-muted-foreground"
+                  onClick={() => resetSetting(key)}
+                  aria-label="Réinitialiser"
+                >
+                  <RotateCcw />
+                </Button>
+              </Tip>
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
+  /** Removable list row (blocked pattern, allowed IP). */
+  const listRow = (value: string, onRemove: () => void, icon?: ReactNode) => (
+    <div key={value} className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5">
+      {icon}
+      <code className="flex-1 break-all font-mono text-xs">{value}</code>
+      <Tip content="Retirer">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+          onClick={onRemove}
+          aria-label="Retirer"
+        >
+          <X />
+        </Button>
+      </Tip>
+    </div>
+  );
+
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Paramètres</h2>
+      <PageHeader title="Paramètres" description="Sécurité, réseau, certificats, coffre, notifications, audit et utilisateurs." />
 
-      <div className="flex gap-6">
-        {/* Sidebar tabs */}
-        <div className="w-48 shrink-0 space-y-1">
-          {tabs.map(({ id, icon: Icon, label }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-                activeTab === id
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              }`}
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+
+      <div className="max-w-4xl space-y-4">
+        {activeTab === "security" && (
+          <SettingsCard icon={Shield} title="Sécurité" description="Inactivité, limitation de débit, MFA et enregistrement des sessions.">
+            {renderSettingRow("idle_timeout_minutes", "number")}
+            {renderSettingRow("rate_limit_requests", "number")}
+            {renderSettingRow("rate_limit_window_seconds", "number")}
+            {renderSettingRow("mfa_required_for_terminal", "bool")}
+            {renderSettingRow("session_recording_enabled", "bool")}
+            {renderSettingRow("max_session_recordings", "number")}
+          </SettingsCard>
+        )}
+
+        {activeTab === "commands" && (
+          <>
+            <SettingsCard icon={Terminal} title="Filtrage des commandes">
+              {renderSettingRow("command_filter_enabled", "bool")}
+            </SettingsCard>
+
+            <SettingsCard
+              title="Motifs bloqués (regex)"
+              description="Les commandes qui correspondent à ces motifs sont bloquées sur l'exécution (/execute)."
             >
-              <Icon size={16} />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1">
-          {/* Security */}
-          {activeTab === "security" && (
-            <div className="bg-card border rounded-lg p-6">
-              <h3 className="font-semibold mb-4 flex items-center gap-2">
-                <Shield size={18} /> Sécurité
-              </h3>
-              {renderSettingRow("idle_timeout_minutes", "number")}
-              {renderSettingRow("rate_limit_requests", "number")}
-              {renderSettingRow("rate_limit_window_seconds", "number")}
-              {renderSettingRow("mfa_required_for_terminal", "bool")}
-              {renderSettingRow("session_recording_enabled", "bool")}
-              {renderSettingRow("max_session_recordings", "number")}
-            </div>
-          )}
-
-          {/* Commands */}
-          {activeTab === "commands" && (
-            <div className="space-y-4">
-              <div className="bg-card border rounded-lg p-6">
-                <h3 className="font-semibold mb-4 flex items-center gap-2">
-                  <Terminal size={18} /> Filtrage de commandes
-                </h3>
-                {renderSettingRow("command_filter_enabled", "bool")}
-              </div>
-
-              <div className="bg-card border rounded-lg p-6">
-                <h3 className="font-semibold mb-2">Patterns bloqués (regex)</h3>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Les commandes correspondant à ces patterns seront bloquées sur le endpoint /execute.
-                </p>
-
-                <div className="space-y-2 mb-4">
-                  {getPatterns().map((pattern, i) => (
-                    <div key={i} className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                      <code className="flex-1 text-xs font-mono break-all">{pattern}</code>
-                      <button
-                        onClick={() => removePattern(pattern)}
-                        className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 shrink-0"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
+              <div className="space-y-3">
+                {getPatterns().length === 0 && <p className="text-sm text-muted-foreground">Aucun motif bloqué.</p>}
+                <div className="space-y-1.5">{getPatterns().map((pattern) => listRow(pattern, () => removePattern(pattern)))}</div>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
+                  <Input
                     value={newPattern}
                     onChange={(e) => setNewPattern(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && addPattern()}
-                    placeholder="Nouveau pattern regex..."
-                    className="flex-1 px-3 py-2 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Nouveau motif, ex. rm\s+-rf"
+                    className="font-mono"
                   />
-                  <button
-                    onClick={addPattern}
-                    className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90"
-                  >
-                    <Plus size={16} />
-                  </button>
+                  <Button variant="outline" onClick={addPattern} disabled={!newPattern.trim()}>
+                    <Plus /> Ajouter
+                  </Button>
                 </div>
-
                 {editValues["command_blocklist"] !== settings["command_blocklist"]?.value && (
-                  <button
-                    onClick={() => saveSetting("command_blocklist")}
-                    disabled={saving === "command_blocklist"}
-                    className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
-                  >
-                    {saving === "command_blocklist" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    Enregistrer les patterns
-                  </button>
+                  <Button onClick={() => saveSetting("command_blocklist")} disabled={saving === "command_blocklist"}>
+                    {saving === "command_blocklist" ? <Loader2 className="animate-spin" /> : <Save />}
+                    Enregistrer les motifs
+                  </Button>
                 )}
               </div>
-            </div>
-          )}
+            </SettingsCard>
+          </>
+        )}
 
-          {/* Network */}
-          {activeTab === "network" && (
-            <div className="bg-card border rounded-lg p-6">
-              <h3 className="font-semibold mb-2 flex items-center gap-2">
-                <Globe size={18} /> IP Allowlist
-              </h3>
-              <p className="text-xs text-muted-foreground mb-4">
-                Si la liste est vide, toutes les IPs sont autorisées. Sinon, seules les IPs listées peuvent accéder à l'application.
-              </p>
-
-              <div className="space-y-2 mb-4">
-                {getIpList().length === 0 && (
-                  <div className="p-3 rounded bg-green-50 text-green-700 text-sm flex items-center gap-2">
-                    <Check size={16} />
-                    Toutes les IPs sont autorisées (pas de restriction)
-                  </div>
+        {activeTab === "network" && (
+          <SettingsCard
+            icon={Globe}
+            title="Adresses IP autorisées"
+            description="Liste vide : toutes les adresses sont autorisées. Sinon, seules les adresses et plages listées accèdent à l'application."
+          >
+            <div className="space-y-3">
+              {getIpList().length === 0 && (
+                <div className="flex items-center gap-2 rounded-md border border-success/25 bg-success/10 px-3 py-2 text-sm text-success">
+                  <Check className="size-4" />
+                  Aucune restriction : toutes les adresses IP sont autorisées.
+                </div>
+              )}
+              <div className="space-y-1.5">
+                {getIpList().map((ip) =>
+                  listRow(ip, () => removeIp(ip), <Globe className="size-3.5 shrink-0 text-muted-foreground" />),
                 )}
-                {getIpList().map((ip) => (
-                  <div key={ip} className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                    <Globe size={14} className="text-muted-foreground shrink-0" />
-                    <span className="flex-1 text-sm font-mono">{ip}</span>
-                    <button
-                      onClick={() => removeIp(ip)}
-                      className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
               </div>
-
               <div className="flex gap-2">
-                <input
-                  type="text"
+                <Input
                   value={newIp}
                   onChange={(e) => setNewIp(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addIp()}
                   placeholder="192.168.1.0/24 ou 10.0.0.5"
-                  className="flex-1 px-3 py-2 rounded-md border bg-background text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="font-mono"
                 />
-                <button
-                  onClick={addIp}
-                  className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90"
-                >
-                  <Plus size={16} />
-                </button>
+                <Button variant="outline" onClick={addIp} disabled={!newIp.trim()}>
+                  <Plus /> Ajouter
+                </Button>
               </div>
-
               {editValues["ip_allowlist"] !== settings["ip_allowlist"]?.value && (
-                <button
-                  onClick={() => saveSetting("ip_allowlist")}
-                  disabled={saving === "ip_allowlist"}
-                  className="mt-4 flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
-                >
-                  {saving === "ip_allowlist" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Enregistrer
-                </button>
+                <Button onClick={() => saveSetting("ip_allowlist")} disabled={saving === "ip_allowlist"}>
+                  {saving === "ip_allowlist" ? <Loader2 className="animate-spin" /> : <Save />}
+                  Enregistrer la liste
+                </Button>
               )}
             </div>
-          )}
+          </SettingsCard>
+        )}
 
-          {/* CA */}
-          {activeTab === "ca" && (
-            <div className="space-y-4">
-              <div className="bg-card border rounded-lg p-6">
-                <h3 className="font-semibold mb-4 flex items-center gap-2">
-                  <Key size={18} /> Certificats éphémères
-                </h3>
-                {renderSettingRow("default_cert_validity_minutes", "number")}
-                {renderSettingRow("min_cert_validity_minutes", "number")}
-                {renderSettingRow("max_cert_validity_minutes", "number")}
-              </div>
+        {activeTab === "ca" && (
+          <>
+            <SettingsCard icon={Key} title="Certificats éphémères" description="Durée de validité des certificats SSH signés à la demande.">
+              {renderSettingRow("default_cert_validity_minutes", "number")}
+              {renderSettingRow("min_cert_validity_minutes", "number")}
+              {renderSettingRow("max_cert_validity_minutes", "number")}
+            </SettingsCard>
 
-              {caInfo && (
-                <div className="bg-card border rounded-lg p-6">
-                  <h3 className="font-semibold mb-4">Autorité de Certification (CA)</h3>
-                  <dl className="space-y-3 text-sm">
-                    <div>
-                      <dt className="text-muted-foreground mb-1">Algorithme</dt>
-                      <dd className="font-mono">{caInfo.algorithm}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground mb-1">Chemin</dt>
-                      <dd className="font-mono text-xs">{caInfo.key_path}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground mb-1">Clé publique CA</dt>
-                      <dd className="relative">
-                        <pre className="p-3 rounded bg-muted text-xs font-mono break-all whitespace-pre-wrap">
-                          {caInfo.public_key}
-                        </pre>
-                        <button
-                          onClick={() => copyToClipboard(caInfo.public_key)}
-                          className="absolute top-2 right-2 p-1.5 rounded bg-background border hover:bg-accent"
-                          title="Copier"
-                        >
-                          {copied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-                        </button>
-                      </dd>
-                    </div>
+            {caInfo && (
+              <SettingsCard title="Autorité de certification" description="Clé publique à déclarer sur chaque serveur cible.">
+                <div className="space-y-4">
+                  <dl>
+                    <FactRow label="Algorithme">
+                      <span className="font-mono">{caInfo.algorithm}</span>
+                    </FactRow>
+                    <FactRow label="Chemin de la clé">
+                      <span className="break-all font-mono text-xs">{caInfo.key_path}</span>
+                    </FactRow>
                   </dl>
-
-                  <div className="mt-4 p-3 rounded bg-amber-50 border border-amber-200 text-sm">
-                    <p className="font-medium text-amber-800 flex items-center gap-1 mb-1">
-                      <AlertTriangle size={14} /> Setup serveur cible
+                  <div className="space-y-1.5">
+                    <p className="text-sm text-muted-foreground">Clé publique</p>
+                    <div className="relative">
+                      <pre className="whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-3 pr-12 font-mono text-xs">
+                        {caInfo.public_key}
+                      </pre>
+                      <Tip content={copied ? "Copiée" : "Copier la clé"}>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="absolute right-2 top-2 size-7"
+                          onClick={() => copyToClipboard(caInfo.public_key)}
+                          aria-label="Copier"
+                        >
+                          {copied ? <Check className="text-success" /> : <Copy />}
+                        </Button>
+                      </Tip>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <Info className="size-3.5" /> Configuration du serveur cible
                     </p>
-                    <pre className="text-xs text-amber-700 whitespace-pre-wrap">
+                    <pre className="whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-3 font-mono text-xs">
 {`echo '${caInfo.public_key}' | sudo tee /etc/ssh/Citadel_ca.pub
 echo 'TrustedUserCAKeys /etc/ssh/Citadel_ca.pub' | sudo tee -a /etc/ssh/sshd_config
 sudo systemctl restart sshd`}
                     </pre>
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+              </SettingsCard>
+            )}
+          </>
+        )}
 
-          {/* Secrets vault */}
-          {activeTab === "vault" && <SecretsVaultCard />}
+        {activeTab === "vault" && <SecretsVaultCard />}
 
-          {activeTab === "notifications" && <NotificationChannelsPanel />}
+        {activeTab === "notifications" && <NotificationChannelsPanel />}
 
-          {/* Audit: recording storage, retention, SIEM export */}
-          {activeTab === "audit" && (
-            <div className="space-y-4">
-              <RecordingStorageCard />
-              <div className="bg-card border rounded-lg p-6">
-                <h3 className="font-semibold mb-1 flex items-center gap-2">
-                  <Archive size={18} /> Rétention et surveillance
-                </h3>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Durées de conservation en jours (0 = conservation illimitée). La purge est automatique et
-                  journalisée.
-                </p>
-                {renderSettingRow("recording_retention_days", "number")}
-                {renderSettingRow("command_log_retention_days", "number")}
-                {renderSettingRow("notify_user_on_monitor", "bool")}
-              </div>
-              <SiemTargetsPanel />
-            </div>
-          )}
+        {/* Audit: recording storage, retention, SIEM export */}
+        {activeTab === "audit" && (
+          <>
+            <RecordingStorageCard />
+            <SettingsCard
+              icon={Archive}
+              title="Rétention et surveillance"
+              description="Durées de conservation en jours (0 : conservation illimitée). La purge est automatique et journalisée."
+            >
+              {renderSettingRow("recording_retention_days", "number")}
+              {renderSettingRow("command_log_retention_days", "number")}
+              {renderSettingRow("notify_user_on_monitor", "bool")}
+            </SettingsCard>
+            <SiemTargetsPanel />
+          </>
+        )}
 
-          {/* Users */}
-          {activeTab === "users" && (
-            <div className="bg-card border rounded-lg overflow-hidden">
-              <div className="p-4 border-b">
-                <h3 className="font-semibold flex items-center gap-2">
-                  <Users size={18} /> Utilisateurs ({users.length})
-                </h3>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-3 font-medium">Nom</th>
-                    <th className="text-left p-3 font-medium">Email</th>
-                    <th className="text-left p-3 font-medium">Rôle</th>
-                    <th className="text-left p-3 font-medium">Actif</th>
-                    <th className="text-left p-3 font-medium">Dernier login</th>
-                    <th className="text-right p-3 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id} className="border-b">
-                      <td className="p-3 font-medium">{u.display_name}</td>
-                      <td className="p-3 text-muted-foreground text-xs">{u.email || "-"}</td>
-                      <td className="p-3">
-                        <select
-                          value={u.role}
-                          onChange={(e) => updateUserRole(u.id, e.target.value)}
-                          className="px-2 py-1 rounded border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        {activeTab === "users" && (
+          <SettingsCard
+            icon={Users}
+            title={
+              <>
+                Utilisateurs <span className="tabular font-normal text-muted-foreground">({users.length})</span>
+              </>
+            }
+            className="[&>div:last-child]:p-0"
+          >
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-5">Nom</TableHead>
+                  <TableHead>E-mail</TableHead>
+                  <TableHead>Rôle</TableHead>
+                  <TableHead>Actif</TableHead>
+                  <TableHead>Dernière connexion</TableHead>
+                  <TableHead className="pr-5 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.length === 0 && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      Aucun utilisateur. Les comptes sont créés à la première connexion Entra ID.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {users.map((u) => (
+                  <TableRow key={u.id}>
+                    <TableCell className="pl-5 font-medium">{u.display_name}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{u.email || "-"}</TableCell>
+                    <TableCell>
+                      <Select value={u.role} onValueChange={(v) => updateUserRole(u.id, v)}>
+                        <SelectTrigger className="h-8 w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ADMIN">Admin</SelectItem>
+                          <SelectItem value="OPERATOR">Opérateur</SelectItem>
+                          <SelectItem value="VIEWER">Lecteur</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={u.is_active}
+                        onCheckedChange={(v) => toggleUserActive(u.id, v)}
+                        aria-label={u.is_active ? "Désactiver l'utilisateur" : "Activer l'utilisateur"}
+                      />
+                    </TableCell>
+                    <TableCell className="tabular whitespace-nowrap text-muted-foreground">
+                      {u.last_login ? new Date(u.last_login).toLocaleString("fr-FR") : "Jamais"}
+                    </TableCell>
+                    <TableCell className="pr-5 text-right">
+                      <Tip content="Supprimer l'utilisateur">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+                          onClick={() => setDeleting(u)}
+                          aria-label="Supprimer"
                         >
-                          <option value="ADMIN">Admin</option>
-                          <option value="OPERATOR">Operator</option>
-                          <option value="VIEWER">Viewer</option>
-                        </select>
-                      </td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => toggleUserActive(u.id, !u.is_active)}
-                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            u.is_active
-                              ? "bg-green-100 text-green-700"
-                              : "bg-red-100 text-red-700"
-                          }`}
-                        >
-                          {u.is_active ? "Oui" : "Non"}
-                        </button>
-                      </td>
-                      <td className="p-3 text-xs text-muted-foreground">
-                        {u.last_login
-                          ? new Date(u.last_login).toLocaleString("fr-FR")
-                          : "Jamais"}
-                      </td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => deleteUser(u.id)}
-                          className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
-                          title="Supprimer"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* System */}
-          {activeTab === "system" && systemInfo && (
-            <div className="bg-card border rounded-lg p-6">
-              <h3 className="font-semibold mb-4 flex items-center gap-2">
-                <Info size={18} /> Système
-              </h3>
-              <dl className="space-y-3 text-sm">
-                {[
-                  ["Version", systemInfo.version],
-                  ["Serveurs", systemInfo.servers],
-                  ["Utilisateurs", systemInfo.users],
-                  ["Sessions enregistrées", systemInfo.sessions],
-                  ["Entrées d'audit", systemInfo.audit_entries],
-                  ["Règles d'alerte", systemInfo.alert_rules],
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="flex justify-between py-2 border-b last:border-0">
-                    <dt className="text-muted-foreground">{String(label)}</dt>
-                    <dd className="font-mono font-medium">{String(value)}</dd>
-                  </div>
+                          <Trash2 />
+                        </Button>
+                      </Tip>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </dl>
-            </div>
-          )}
-        </div>
+              </TableBody>
+            </Table>
+          </SettingsCard>
+        )}
+
+        {activeTab === "system" && systemInfo && (
+          <SettingsCard icon={Info} title="Système">
+            <dl>
+              {[
+                ["Version", systemInfo.version],
+                ["Serveurs", systemInfo.servers],
+                ["Utilisateurs", systemInfo.users],
+                ["Sessions enregistrées", systemInfo.sessions],
+                ["Entrées d'audit", systemInfo.audit_entries],
+                ["Règles d'alerte", systemInfo.alert_rules],
+              ].map(([label, value]) => (
+                <FactRow key={String(label)} label={String(label)}>
+                  <span className="tabular font-mono font-medium">{String(value)}</span>
+                </FactRow>
+              ))}
+            </dl>
+          </SettingsCard>
+        )}
       </div>
+
+      {deleting && (
+        <ConfirmModal
+          title="Supprimer l'utilisateur"
+          confirmLabel="Supprimer"
+          danger
+          onConfirm={() => {
+            const id = deleting.id;
+            setDeleting(null);
+            deleteUser(id);
+          }}
+          onClose={() => setDeleting(null)}
+        >
+          <p>
+            <strong>{deleting.display_name}</strong> perdra l'accès à Citadel. La suppression est journalisée dans l'audit.
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

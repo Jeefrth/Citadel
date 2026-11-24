@@ -7,18 +7,28 @@ import { hasAction, type ConnectionChoice, type ServerData } from "@/services/ty
 import Terminal from "@/components/Terminal";
 import RdpViewer from "@/components/RdpViewer";
 import ConnectDialog from "@/components/ConnectDialog";
+import { EmptyState } from "@/components/kit";
+import { Button } from "@/components/ui/button";
 import {
-  Terminal as TerminalIcon,
-  Plus,
-  X,
-  Server,
-  Monitor,
-} from "lucide-react";
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
+import { Terminal as TerminalIcon, Plus, X, Monitor } from "lucide-react";
 
 interface Tab {
   id: string;
   serverId: string;
   serverName: string;
+  /** Display parts of the tab (serverName keeps the historical "name (account)" form). */
+  serverLabel: string;
+  accountLabel: string;
   protocol: "ssh" | "rdp";
   certDuration?: number;
   connection: ConnectionChoice;
@@ -83,6 +93,8 @@ export default function TerminalPage() {
       id,
       serverId: pendingServer.id,
       serverName: `${pendingServer.name} (${connection.label})`,
+      serverLabel: pendingServer.name,
+      accountLabel: connection.label,
       protocol: pendingServer.os_type === "windows" ? "rdp" : "ssh",
       osType: pendingServer.os_type,
       certDuration,
@@ -114,81 +126,93 @@ export default function TerminalPage() {
   const linuxServers = servers.filter((s) => s.os_type === "linux" && hasAction(s, "connect"));
   const windowsServers = servers.filter((s) => s.os_type === "windows" && hasAction(s, "connect"));
 
+  const connectable = [...linuxServers, ...windowsServers];
+
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 border-b bg-muted/30 px-2 pt-2">
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-t-md text-sm cursor-pointer border border-b-0 transition-colors ${
-              activeTab === tab.id
-                ? "bg-card border-border text-foreground"
-                : "bg-transparent border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${
-                tab.connected ? "bg-green-500" : "bg-gray-400"
-              }`}
-            />
-            <Monitor size={14} />
-            <span className="max-w-[120px] truncate">{tab.serverName}</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(tab.id);
-              }}
-              className="ml-1 hover:bg-accent rounded p-0.5"
+    <div className="flex h-[calc(100vh-4rem)] flex-col">
+      {/* Session tabs */}
+      <div className="flex items-end gap-1 overflow-x-auto border-b px-1">
+        {tabs.map((tab) => {
+          const active = activeTab === tab.id;
+          return (
+            <div
+              key={tab.id}
+              role="tab"
+              aria-selected={active}
+              tabIndex={0}
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveTab(tab.id)}
+              title={`${tab.protocol.toUpperCase()} ${tab.serverLabel}, compte ${tab.accountLabel}${tab.connected ? "" : " (déconnecté)"}`}
+              className={cn(
+                "group relative flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-t-md px-3 text-sm transition-colors",
+                active ? "bg-card text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+              )}
             >
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-        <button
-          onClick={() => setShowServerPicker(true)}
-          className="p-1.5 rounded-md hover:bg-accent text-muted-foreground"
-          title="Nouveau terminal"
-        >
-          <Plus size={16} />
-        </button>
+              <LiveDot live={tab.connected} />
+              <span className="rounded border px-1 font-mono text-2xs text-muted-foreground">
+                {tab.protocol === "rdp" ? "RDP" : "SSH"}
+              </span>
+              <span className="max-w-[160px] truncate font-medium">{tab.serverLabel}</span>
+              <span className="max-w-[120px] truncate font-mono text-xs text-muted-foreground">{tab.accountLabel}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(tab.id);
+                }}
+                className="ml-0.5 rounded p-0.5 text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                aria-label={`Fermer la session ${tab.serverLabel}`}
+              >
+                <X className="size-3.5" />
+              </button>
+              {active && (
+                <motion.span
+                  layoutId="terminal-tab-indicator"
+                  className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-live"
+                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                />
+              )}
+            </div>
+          );
+        })}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowServerPicker(true)}
+              className="mb-0.5 size-8 shrink-0 text-muted-foreground"
+              aria-label="Ouvrir une session"
+            >
+              <Plus />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Ouvrir une session</TooltipContent>
+        </Tooltip>
       </div>
 
-      {/* Terminal area */}
-      <div className="flex-1 relative">
+      {/* Session area */}
+      <div className="relative flex-1">
         {tabs.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <TerminalIcon
-              size={48}
-              className="text-muted-foreground mb-4"
-            />
-            <h3 className="text-lg font-semibold mb-2">Terminal Distant</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Ouvrez un terminal interactif SSH vers vos serveurs Linux.
-            </p>
-            <button
-              onClick={() => setShowServerPicker(true)}
-              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
+          <div className="flex h-full items-center justify-center p-6">
+            <EmptyState
+              icon={TerminalIcon}
+              title="Aucune session ouverte"
+              action={
+                <Button onClick={() => setShowServerPicker(true)}>
+                  <Plus />
+                  Ouvrir une session
+                </Button>
+              }
             >
-              <Plus size={16} />
-              Nouveau terminal
-            </button>
-            {servers.length === 0 && (
-              <p className="text-xs text-muted-foreground mt-4">
-                Aucun serveur accessible. Demandez un accès à un administrateur.
-              </p>
-            )}
+              {servers.length === 0
+                ? "Aucun serveur accessible. Demandez un accès à un administrateur."
+                : "Ouvrez un terminal SSH vers un serveur Linux ou une session RDP vers un serveur Windows."}
+            </EmptyState>
           </div>
         )}
 
         {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={`absolute inset-0 p-2 ${
-              activeTab === tab.id ? "block" : "hidden"
-            }`}
-          >
+          <div key={tab.id} className={cn("absolute inset-0 p-2", activeTab === tab.id ? "block" : "hidden")}>
             {tab.protocol === "rdp" ? (
               <RdpViewer
                 serverId={tab.serverId}
@@ -210,79 +234,31 @@ export default function TerminalPage() {
         ))}
       </div>
 
-      {/* Server picker modal */}
-      {showServerPicker && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card border rounded-lg shadow-lg w-full max-w-md mx-4">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h3 className="font-semibold">Choisir un serveur</h3>
-              <button onClick={() => setShowServerPicker(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-4 space-y-4 max-h-96 overflow-auto">
-              {linuxServers.length === 0 && windowsServers.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Aucun serveur sur lequel vous pouvez vous connecter.
-                </p>
-              )}
-
-              {linuxServers.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase mb-2">
-                    Linux (SSH)
-                  </h4>
-                  <div className="space-y-1">
-                    {linuxServers.map((srv) => (
-                      <button
-                        key={srv.id}
-                        onClick={() => requestTerminal(srv)}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent text-left text-sm"
-                      >
-                        <Server size={16} className="text-green-500" />
-                        <div>
-                          <p className="font-medium">{srv.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {srv.ip_address} · {srv.node_path || srv.hostname}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {windowsServers.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase mb-2">
-                    Windows (RDP)
-                  </h4>
-                  <div className="space-y-1">
-                    {windowsServers.map((srv) => (
-                      <button
-                        key={srv.id}
-                        onClick={() => requestTerminal(srv)}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent text-left text-sm"
-                      >
-                        <Server size={16} className="text-blue-500" />
-                        <div>
-                          <p className="font-medium">{srv.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {srv.ip_address} · {srv.node_path || srv.hostname}
-                          </p>
-                        </div>
-                        <span className="ml-auto text-xs text-blue-500 font-medium">
-                          RDP
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Server picker */}
+      <CommandDialog open={showServerPicker} onOpenChange={setShowServerPicker}>
+        <CommandInput placeholder="Rechercher un serveur (nom, IP, nœud)" />
+        <CommandList className="max-h-96">
+          <CommandEmpty>
+            {connectable.length === 0
+              ? "Aucun serveur sur lequel vous pouvez vous connecter."
+              : "Aucun serveur ne correspond."}
+          </CommandEmpty>
+          {linuxServers.length > 0 && (
+            <CommandGroup heading="Linux, SSH">
+              {linuxServers.map((srv) => (
+                <PickerItem key={srv.id} srv={srv} onSelect={() => requestTerminal(srv)} />
+              ))}
+            </CommandGroup>
+          )}
+          {windowsServers.length > 0 && (
+            <CommandGroup heading="Windows, RDP">
+              {windowsServers.map((srv) => (
+                <PickerItem key={srv.id} srv={srv} onSelect={() => requestTerminal(srv)} />
+              ))}
+            </CommandGroup>
+          )}
+        </CommandList>
+      </CommandDialog>
 
       {/* Account choice + MFA confirmation */}
       {pendingServer && (
@@ -293,5 +269,47 @@ export default function TerminalPage() {
         />
       )}
     </div>
+  );
+}
+
+/** Session state: amber pulse while the session is live, muted once it ended. */
+function LiveDot({ live }: { live: boolean }) {
+  return (
+    <span className="relative flex size-2 shrink-0 items-center justify-center" aria-label={live ? "Connectée" : "Déconnectée"}>
+      {live && (
+        <motion.span
+          className="absolute inset-0 rounded-full bg-live"
+          initial={{ scale: 1, opacity: 0.6 }}
+          animate={{ scale: 2.4, opacity: 0 }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+        />
+      )}
+      <span className={cn("relative size-2 rounded-full", live ? "bg-live" : "bg-muted-foreground/40")} />
+    </span>
+  );
+}
+
+function PickerItem({ srv, onSelect }: { srv: ServerData; onSelect: () => void }) {
+  return (
+    <CommandItem
+      value={`${srv.name} ${srv.ip_address} ${srv.hostname} ${srv.node_path || ""} ${srv.id}`}
+      onSelect={onSelect}
+      className="gap-3"
+    >
+      {srv.os_type === "windows" ? (
+        <Monitor className="text-muted-foreground" />
+      ) : (
+        <TerminalIcon className="text-muted-foreground" />
+      )}
+      <div className="min-w-0">
+        <p className="truncate font-medium">{srv.name}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          <span className="font-mono">{srv.ip_address}</span> · {srv.node_path || <span className="font-mono">{srv.hostname}</span>}
+        </p>
+      </div>
+      {srv.default_account && (
+        <span className="ml-auto font-mono text-xs text-muted-foreground">{srv.default_account.username}</span>
+      )}
+    </CommandItem>
   );
 }

@@ -6,9 +6,19 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import Guacamole from "guacamole-common-js";
-import { FastForward, Film, Loader2, Pause, Play, RotateCcw, X } from "lucide-react";
+import { Loader2, Pause, Play, RotateCcw } from "lucide-react";
 import type { SessionRecordingData, SessionRecordingDetail } from "@/services/types";
-import { ProtocolBadge, READONLY_XTERM_OPTIONS, b64ToBytes, formatClock } from "@/components/auditUi";
+import {
+  ProtocolBadge,
+  READONLY_XTERM_OPTIONS,
+  TERMINAL_BG,
+  Tip,
+  b64ToBytes,
+  formatClock,
+} from "@/components/auditUi";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 const SPEEDS = [1, 2, 5, 10];
 
@@ -26,33 +36,72 @@ function PlayerShell({
   banner?: ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-card border rounded-lg shadow-lg w-full max-w-5xl mx-4 flex flex-col h-[90vh]">
-        <div className="flex items-center justify-between p-3 border-b">
-          <div className="flex items-center gap-3 min-w-0">
-            <Film size={18} className="text-primary shrink-0" />
-            <div className="min-w-0">
-              <p className="font-semibold text-sm flex items-center gap-2">
-                <ProtocolBadge protocol={rec.protocol} />
-                <span className="truncate">
-                  {rec.account ? `${rec.account}@` : ""}
-                  {rec.server_name}
-                </span>
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {rec.user_name} · {new Date(rec.started_at).toLocaleString("fr-FR")}
-                {rec.client_ip && <> · {rec.client_ip}</>}
-              </p>
-            </div>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <div className="flex items-center gap-3 border-b py-3 pl-4 pr-12">
+          <ProtocolBadge protocol={rec.protocol} />
+          <div className="min-w-0">
+            <DialogTitle className="truncate font-mono text-sm font-medium">
+              {rec.account && <span className="text-muted-foreground">{rec.account}@</span>}
+              {rec.server_name}
+            </DialogTitle>
+            <DialogDescription className="truncate text-xs">
+              {rec.user_name}, {new Date(rec.started_at).toLocaleString("fr-FR")}
+              {rec.client_ip && (
+                <>
+                  , depuis <span className="font-mono">{rec.client_ip}</span>
+                </>
+              )}
+            </DialogDescription>
           </div>
-          <button onClick={onClose} title="Fermer">
-            <X size={18} />
-          </button>
         </div>
         {banner}
-        <div className="flex-1 p-2 min-h-0">{children}</div>
-        <div className="p-3 border-t flex items-center gap-4">{controls}</div>
+        <div className="min-h-0 flex-1 p-3" style={{ backgroundColor: TERMINAL_BG }}>
+          {children}
+        </div>
+        <div className="flex items-center gap-3 border-t px-4 py-2.5">{controls}</div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Slim seek bar: a thin track with the played part, a native range on top for input and keyboard. */
+function SeekBar({
+  position,
+  duration,
+  disabled,
+  onSeek,
+}: {
+  position: number;
+  duration: number;
+  disabled?: boolean;
+  onSeek: (ms: number) => void;
+}) {
+  const max = Math.max(1, duration);
+  const pct = Math.min(100, (Math.min(position, duration) / max) * 100);
+  return (
+    <div className={cn("group relative flex h-5 flex-1 items-center", disabled && "opacity-50")}>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-foreground/80" style={{ width: `${pct}%` }} />
       </div>
+      <div
+        className="pointer-events-none absolute size-3 -translate-x-1/2 rounded-full border-2 border-background bg-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        style={{ left: `${pct}%` }}
+      />
+      <input
+        type="range"
+        min={0}
+        max={max}
+        step={100}
+        value={Math.min(position, duration)}
+        disabled={disabled}
+        onChange={(e) => onSeek(Number(e.target.value))}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+        aria-label="Position"
+      />
     </div>
   );
 }
@@ -78,41 +127,38 @@ function Transport({
   disabled?: boolean;
   extra?: ReactNode;
 }) {
-  const playBtn = "p-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50";
   return (
     <>
       <div className="flex items-center gap-1">
         {playing ? (
-          <button onClick={onPause} className={playBtn} title="Pause">
-            <Pause size={16} />
-          </button>
+          <Tip content="Pause">
+            <Button size="icon" className="size-8" onClick={onPause} aria-label="Pause">
+              <Pause />
+            </Button>
+          </Tip>
         ) : (
-          <button onClick={onPlay} disabled={disabled} className={playBtn} title="Lecture">
-            <Play size={16} />
-          </button>
+          <Tip content="Lecture">
+            <Button size="icon" className="size-8" onClick={onPlay} disabled={disabled} aria-label="Lecture">
+              <Play />
+            </Button>
+          </Tip>
         )}
-        <button
-          onClick={onRestart}
-          disabled={disabled}
-          className="p-2 rounded-md hover:bg-accent text-muted-foreground disabled:opacity-50"
-          title="Revenir au début"
-        >
-          <RotateCcw size={16} />
-        </button>
+        <Tip content="Revenir au début">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 text-muted-foreground"
+            onClick={onRestart}
+            disabled={disabled}
+            aria-label="Revenir au début"
+          >
+            <RotateCcw />
+          </Button>
+        </Tip>
       </div>
-      <span className="text-xs font-mono text-muted-foreground tabular-nums">{formatClock(position)}</span>
-      <input
-        type="range"
-        min={0}
-        max={Math.max(1, duration)}
-        step={100}
-        value={Math.min(position, duration)}
-        disabled={disabled}
-        onChange={(e) => onSeek(Number(e.target.value))}
-        className="flex-1 accent-[hsl(var(--primary))]"
-        aria-label="Position"
-      />
-      <span className="text-xs font-mono text-muted-foreground tabular-nums">{formatClock(duration)}</span>
+      <span className="tabular w-14 text-right font-mono text-xs text-muted-foreground">{formatClock(position)}</span>
+      <SeekBar position={position} duration={duration} disabled={disabled} onSeek={onSeek} />
+      <span className="tabular w-14 font-mono text-xs text-muted-foreground">{formatClock(duration)}</span>
       {extra}
     </>
   );
@@ -120,15 +166,16 @@ function Transport({
 
 function SpeedPicker({ speed, onChange }: { speed: number; onChange: (s: number) => void }) {
   return (
-    <div className="flex items-center gap-1">
-      <FastForward size={14} className="text-muted-foreground" />
+    <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="Vitesse de lecture">
       {SPEEDS.map((s) => (
         <button
           key={s}
           onClick={() => onChange(s)}
-          className={`px-2 py-0.5 rounded text-xs ${
-            speed === s ? "bg-primary text-primary-foreground" : "hover:bg-accent text-muted-foreground"
-          }`}
+          aria-pressed={speed === s}
+          className={cn(
+            "tabular h-6 rounded-sm px-2 text-xs transition-colors",
+            speed === s ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
         >
           {s}x
         </button>
@@ -140,8 +187,9 @@ function SpeedPicker({ speed, onChange }: { speed: number; onChange: (s: number)
 function OffsetBanner({ ms }: { ms: number | null | undefined }) {
   if (ms == null) return null;
   return (
-    <div className="px-3 py-1.5 text-xs bg-blue-50 text-blue-800 border-b">
-      Lecture positionnée à {formatClock(ms)}, au moment de la commande du journal.
+    <div className="border-b border-info/25 bg-info/10 px-4 py-1.5 text-xs text-info">
+      Lecture positionnée à <span className="tabular font-mono">{formatClock(ms)}</span>, au moment de la commande du
+      journal.
     </div>
   );
 }
@@ -157,7 +205,8 @@ export function SshReplayPlayer({
   initialMs?: number | null;
   onClose: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Callback ref: the dialog portal mounts its content after this component's first effects
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idxRef = useRef(0);
@@ -229,22 +278,25 @@ export function SshReplayPlayer({
   }, [events, duration]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerEl) return;
     const x = new XTerm(READONLY_XTERM_OPTIONS);
     const fit = new FitAddon();
     x.loadAddon(fit);
-    x.open(containerRef.current);
+    x.open(containerEl);
     fit.fit();
+    const ro = new ResizeObserver(() => fit.fit());
+    ro.observe(containerEl);
     xtermRef.current = x;
     writeHeader(x);
     if (initialMs) seekTo(initialMs);
     return () => {
       stop();
+      ro.disconnect();
       x.dispose();
       xtermRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, containerEl]);
 
   const play = () => {
     if (idxRef.current >= events.length) seekTo(0);
@@ -293,7 +345,7 @@ export function SshReplayPlayer({
         />
       }
     >
-      <div ref={containerRef} className="w-full h-full rounded" style={{ backgroundColor: "#1a1b26" }} />
+      <div ref={setContainerEl} className="h-full w-full" style={{ backgroundColor: TERMINAL_BG }} />
     </PlayerShell>
   );
 }
@@ -311,7 +363,8 @@ export function RdpReplayPlayer({
   initialMs?: number | null;
   onClose: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Callback ref: the dialog portal mounts its content after this component's first effects
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const recordingRef = useRef<Guacamole.SessionRecording | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -320,7 +373,7 @@ export function RdpReplayPlayer({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const container = containerRef.current;
+    const container = containerEl;
     if (!container) return;
     // guacamole-common-js 1.5.0 bug: a Blob source is parsed through an uninitialised
     // variable and throws. Feed the Blob through a StaticHTTPTunnel on an object URL
@@ -382,7 +435,7 @@ export function RdpReplayPlayer({
       recordingRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blob]);
+  }, [blob, containerEl]);
 
   const play = () => {
     const r = recordingRef.current;
@@ -399,12 +452,12 @@ export function RdpReplayPlayer({
         <>
           <OffsetBanner ms={initialMs} />
           {!loaded && !error && (
-            <div className="px-3 py-1.5 text-xs bg-muted text-muted-foreground border-b flex items-center gap-2">
-              <Loader2 size={12} className="animate-spin" /> Chargement de l'enregistrement ({formatClock(duration)}{" "}
-              analysées)...
+            <div className="flex items-center gap-2 border-b bg-muted px-4 py-1.5 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" /> Chargement de l'enregistrement (
+              <span className="tabular font-mono">{formatClock(duration)}</span> analysées)...
             </div>
           )}
-          {error && <div className="px-3 py-2 text-sm bg-red-50 text-red-800 border-b">{error}</div>}
+          {error && <div className="border-b border-danger/25 bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
         </>
       }
       controls={
@@ -427,8 +480,9 @@ export function RdpReplayPlayer({
       }
     >
       <div
-        ref={containerRef}
-        className="w-full h-full bg-black rounded overflow-hidden relative"
+        ref={setContainerEl}
+        className="relative h-full w-full overflow-hidden"
+        style={{ backgroundColor: TERMINAL_BG }}
         onContextMenu={(e) => e.preventDefault()}
       />
     </PlayerShell>

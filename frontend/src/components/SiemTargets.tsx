@@ -1,6 +1,19 @@
 // Settings > Audit: SIEM export targets (syslog udp/tcp/tls or HTTP; JSON, CEF or HEC).
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Pencil, Plus, Radio, Rewind, Send, SkipForward, Trash2 } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Plus, Radio, Rewind, Send, SkipForward, Trash2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/services/api";
 import {
   errorMessage,
@@ -14,21 +27,18 @@ import {
 import {
   Chip,
   ConfirmModal,
+  EmptyState,
   ErrorBox,
   Field,
   Modal,
   Notice,
   SaveButton,
   Toggle,
-  btnPrimary,
-  btnSecondary,
   formatDate,
-  iconBtn,
-  iconBtnDanger,
-  inputCls,
   type NoticeData,
 } from "@/components/kit";
 import { relativeTime } from "@/components/governanceUi";
+import { ErrorLine, RowsSkeleton, SettingsCard, StatusDot, Tip } from "@/components/auditUi";
 
 const TRANSPORT_LABELS: Record<SiemTransport, string> = {
   udp: "Syslog UDP",
@@ -129,14 +139,14 @@ function TargetModal({
 
   return (
     <Modal
-      title={target ? `Modifier ${target.name}` : "Nouvelle cible SIEM"}
+      title={target ? `Modifier la cible ${target.name}` : "Ajouter une cible SIEM"}
       onClose={onClose}
       size="2xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid} />
         </>
       }
@@ -144,19 +154,24 @@ function TargetModal({
       <ErrorBox message={error} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label="Nom">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="ex. Sentinel" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Sentinel" />
         </Field>
         <div className="flex items-end pb-2">
           <Toggle checked={isActive} onChange={setIsActive} label="Cible active" />
         </div>
         <Field label="Transport">
-          <select value={transport} onChange={(e) => changeTransport(e.target.value as SiemTransport)} className={inputCls}>
-            {(Object.keys(TRANSPORT_LABELS) as SiemTransport[]).map((t) => (
-              <option key={t} value={t}>
-                {TRANSPORT_LABELS[t]}
-              </option>
-            ))}
-          </select>
+          <Select value={transport} onValueChange={(v) => changeTransport(v as SiemTransport)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(TRANSPORT_LABELS) as SiemTransport[]).map((t) => (
+                <SelectItem key={t} value={t}>
+                  {TRANSPORT_LABELS[t]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
         <Field
           label="Format"
@@ -168,13 +183,18 @@ function TargetModal({
                 : "Un objet JSON par événement."
           }
         >
-          <select value={format} onChange={(e) => setFormat(e.target.value as SiemFormat)} className={inputCls}>
-            <option value="json">JSON</option>
-            <option value="cef">CEF</option>
-            <option value="hec" disabled={!isHttp}>
-              HEC{isHttp ? "" : " (HTTP uniquement)"}
-            </option>
-          </select>
+          <Select value={format} onValueChange={(v) => setFormat(v as SiemFormat)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="json">JSON</SelectItem>
+              <SelectItem value="cef">CEF</SelectItem>
+              <SelectItem value="hec" disabled={!isHttp}>
+                HEC{isHttp ? "" : " (HTTP uniquement)"}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
       </div>
 
@@ -184,28 +204,28 @@ function TargetModal({
             label="URL"
             hint={format === "hec" ? "ex. https://splunk.example.com:8088/services/collector/event" : undefined}
           >
-            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" className={inputCls} />
+            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" className="font-mono" />
           </Field>
           <Field
             label="Jeton"
             hint={target?.has_secret ? "Laisser vide pour conserver le jeton enregistré." : "Jeton d'authentification HTTP (optionnel)."}
           >
-            <input
+            <Input
               type="password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
               placeholder={target?.has_secret ? "laisser vide pour conserver" : ""}
               autoComplete="new-password"
-              className={inputCls}
+             
             />
           </Field>
           {format === "hec" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="Sourcetype" hint="Optionnel">
-                <input value={sourcetype} onChange={(e) => setSourcetype(e.target.value)} className={inputCls} />
+                <Input value={sourcetype} onChange={(e) => setSourcetype(e.target.value)} />
               </Field>
               <Field label="Index" hint="Optionnel">
-                <input value={index} onChange={(e) => setIndex(e.target.value)} className={inputCls} />
+                <Input value={index} onChange={(e) => setIndex(e.target.value)} />
               </Field>
               <div className="md:col-span-2">
                 <Toggle
@@ -223,16 +243,16 @@ function TargetModal({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
               <Field label="Hôte">
-                <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="siem.example.com" className={inputCls} />
+                <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="siem.example.com" className="font-mono" />
               </Field>
             </div>
             <Field label="Port" hint={`Par défaut ${defaultPort}`}>
-              <input
+              <Input
                 type="number"
                 value={port}
                 onChange={(e) => setPort(e.target.value)}
                 placeholder={String(defaultPort)}
-                className={inputCls}
+               
               />
             </Field>
           </div>
@@ -251,7 +271,7 @@ function TargetModal({
         <div className="flex flex-wrap gap-4">
           {ALL_STREAMS.map((s) => (
             <label key={s} className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={streams.includes(s)} onChange={() => toggleStream(s)} className="w-4 h-4" />
+              <Checkbox checked={streams.includes(s)} onCheckedChange={() => toggleStream(s)} />
               {STREAM_LABELS[s]}
             </label>
           ))}
@@ -262,11 +282,21 @@ function TargetModal({
         <Field label="Point de départ">
           <div className="space-y-1">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="radio" checked={startFrom === "now"} onChange={() => setStartFrom("now")} />
+              <input
+                type="radio"
+                checked={startFrom === "now"}
+                onChange={() => setStartFrom("now")}
+                className="size-4 accent-[hsl(var(--primary))]"
+              />
               À partir de maintenant (seuls les nouveaux événements)
             </label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="radio" checked={startFrom === "beginning"} onChange={() => setStartFrom("beginning")} />
+              <input
+                type="radio"
+                checked={startFrom === "beginning"}
+                onChange={() => setStartFrom("beginning")}
+                className="size-4 accent-[hsl(var(--primary))]"
+              />
               Depuis le début (tout l'historique est envoyé)
             </label>
           </div>
@@ -354,106 +384,123 @@ export default function SiemTargetsPanel() {
   };
 
   return (
-    <div className="bg-card border rounded-lg p-6 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex-1 min-w-[18rem]">
-          <h3 className="font-semibold flex items-center gap-2">
-            <Radio size={18} /> Export SIEM
-          </h3>
-          <p className="text-xs text-muted-foreground mt-1">
-            Le journal d'audit et le journal des commandes sont transmis en continu (au moins une fois, reprise après
-            redémarrage). HEC fonctionne avec Splunk et l'ingestion HEC de CrowdStrike Falcon NG-SIEM / LogScale ; CEF
-            sur syslog convient à Microsoft Sentinel et QRadar.
-          </p>
-        </div>
-        <button onClick={() => setEdit(null)} className={btnPrimary}>
-          <Plus size={16} /> Nouvelle cible
-        </button>
+    <SettingsCard
+      icon={Radio}
+      title="Export SIEM"
+      description="Le journal d'audit et le journal des commandes sont transmis en continu, au moins une fois, avec reprise après redémarrage. HEC convient à Splunk et à CrowdStrike Falcon NG-SIEM / LogScale, CEF sur syslog à Microsoft Sentinel et QRadar."
+      actions={
+        <Button size="sm" onClick={() => setEdit(null)}>
+          <Plus /> Ajouter une cible
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <Notice notice={notice} onClose={() => setNotice(null)} />
+        <ErrorBox message={error} />
+
+        {loading ? (
+          <RowsSkeleton rows={2} />
+        ) : targets.length === 0 ? (
+          <EmptyState
+            icon={Radio}
+            title="Aucune cible SIEM"
+            action={
+              <Button size="sm" variant="outline" onClick={() => setEdit(null)}>
+                <Plus /> Ajouter une cible
+              </Button>
+            }
+          >
+            Ajoutez une cible syslog ou HTTP pour transmettre l'audit à votre SIEM.
+          </EmptyState>
+        ) : (
+          <div className="divide-y rounded-md border">
+            <AnimatePresence initial={false}>
+              {targets.map((t) => (
+                <motion.div
+                  key={t.id}
+                  layout
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex flex-wrap items-start gap-3 px-4 py-3">
+                    <div className="pt-1.5">
+                      <StatusDot
+                        tone={!t.is_active ? "muted" : t.last_error ? "danger" : "success"}
+                        label={!t.is_active ? "Inactive" : t.last_error ? "En erreur" : "Active"}
+                      />
+                    </div>
+                    <div className={`min-w-0 flex-1 space-y-1 ${t.is_active ? "" : "opacity-60"}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{t.name}</span>
+                        <Chip>{TRANSPORT_LABELS[t.transport] || t.transport}</Chip>
+                        <Chip>{FORMAT_LABELS[t.format] || t.format}</Chip>
+                        {!t.is_active && <Chip>Inactive</Chip>}
+                      </div>
+                      <p className="break-all font-mono text-xs text-muted-foreground">{destination(t)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {t.streams.map((st) => STREAM_LABELS[st] || st).join(", ")}
+                        {" · "}
+                        <span className="tabular">{t.sent_count.toLocaleString("fr-FR")}</span> événement
+                        {t.sent_count > 1 ? "s" : ""} envoyé{t.sent_count > 1 ? "s" : ""}
+                        {" · "}dernier envoi{" "}
+                        {t.last_sent_at ? (
+                          <Tip content={formatDate(t.last_sent_at)}>
+                            <span className="cursor-default">{relativeTime(t.last_sent_at)}</span>
+                          </Tip>
+                        ) : (
+                          "jamais"
+                        )}
+                      </p>
+                      {t.last_error && <ErrorLine>Dernière erreur : {t.last_error}</ErrorLine>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="sm" onClick={() => test(t)} disabled={testing === t.id}>
+                        {testing === t.id ? <Loader2 className="animate-spin" /> : <Send />}
+                        Envoyer un test
+                      </Button>
+                      <Tip content={t.is_active ? "Désactiver" : "Activer"}>
+                        <span className="flex items-center px-1.5">
+                          <Switch
+                            checked={t.is_active}
+                            onCheckedChange={() => toggle(t)}
+                            aria-label={t.is_active ? "Désactiver" : "Activer"}
+                          />
+                        </span>
+                      </Tip>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Plus d'actions">
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => setEdit(t)}>
+                            <Pencil /> Modifier
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setPending({ kind: "now", target: t })}>
+                            <SkipForward /> Repartir de maintenant
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setPending({ kind: "beginning", target: t })}>
+                            <Rewind /> Tout renvoyer
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() => setPending({ kind: "delete", target: t })}
+                            className="text-danger focus:bg-danger/10 focus:text-danger"
+                          >
+                            <Trash2 /> Supprimer
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
-
-      <Notice notice={notice} onClose={() => setNotice(null)} />
-      <ErrorBox message={error} />
-
-      {loading ? (
-        <div className="flex justify-center py-6">
-          <Loader2 size={20} className="animate-spin text-muted-foreground" />
-        </div>
-      ) : targets.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-6">Aucune cible SIEM configurée.</p>
-      ) : (
-        <div className="space-y-3">
-          {targets.map((t) => (
-            <div key={t.id} className={`border rounded-lg p-4 ${t.is_active ? "" : "opacity-60"}`}>
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{t.name}</span>
-                    <Chip>{TRANSPORT_LABELS[t.transport] || t.transport}</Chip>
-                    <Chip tone="primary">{FORMAT_LABELS[t.format] || t.format}</Chip>
-                    {t.is_active ? <Chip tone="green">Active</Chip> : <Chip>Inactive</Chip>}
-                  </div>
-                  <p className="text-xs text-muted-foreground font-mono break-all">{destination(t)}</p>
-                  <div className="flex flex-wrap gap-1">
-                    {t.streams.map((s) => (
-                      <Chip key={s} tone="blue">
-                        {STREAM_LABELS[s] || s}
-                      </Chip>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {t.sent_count.toLocaleString("fr-FR")} événement{t.sent_count > 1 ? "s" : ""} envoyé
-                    {t.sent_count > 1 ? "s" : ""} · dernier envoi :{" "}
-                    {t.last_sent_at ? (
-                      <span title={formatDate(t.last_sent_at)}>{relativeTime(t.last_sent_at)}</span>
-                    ) : (
-                      "jamais"
-                    )}
-                  </p>
-                  {t.last_error && (
-                    <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1 break-words">
-                      Dernière erreur : {t.last_error}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => test(t)} disabled={testing === t.id} className={btnSecondary}>
-                      {testing === t.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      Envoyer un test
-                    </button>
-                    <Toggle
-                      checked={t.is_active}
-                      onChange={() => toggle(t)}
-                      label=""
-                      title={t.is_active ? "Désactiver" : "Activer"}
-                    />
-                    <button onClick={() => setEdit(t)} className={iconBtn} title="Modifier">
-                      <Pencil size={15} />
-                    </button>
-                    <button onClick={() => setPending({ kind: "delete", target: t })} className={iconBtnDanger} title="Supprimer">
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setPending({ kind: "now", target: t })}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:bg-accent"
-                    >
-                      <SkipForward size={13} /> Repartir de maintenant
-                    </button>
-                    <button
-                      onClick={() => setPending({ kind: "beginning", target: t })}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:bg-accent"
-                    >
-                      <Rewind size={13} /> Tout renvoyer
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {edit !== undefined && (
         <TargetModal
@@ -495,6 +542,6 @@ export default function SiemTargetsPanel() {
           )}
         </ConfirmModal>
       )}
-    </div>
+    </SettingsCard>
   );
 }

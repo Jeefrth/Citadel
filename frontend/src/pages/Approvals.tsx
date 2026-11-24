@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
+import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   Ban,
@@ -32,19 +34,26 @@ import {
 import {
   Chip,
   ConfirmModal,
+  EmptyState,
   ErrorBox,
   Field,
   Modal,
   MultiSelect,
   Notice,
+  PageHeader,
   SaveButton,
   Tabs,
-  btnPrimary,
-  btnSecondary,
   formatDate,
-  inputCls,
   type NoticeData,
 } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { ApprovalStatusChip, KIND_LABELS, STATUS_INFO, formatHours, relativeTime } from "@/components/governanceUi";
 import { refreshGovernanceBadges } from "@/components/NotificationBell";
 
@@ -54,9 +63,34 @@ type NameMaps = { servers: Map<string, string>; nodes: Map<string, string> };
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[11px] uppercase text-muted-foreground">{label}</dt>
-      <dd className="text-sm break-words">{children}</dd>
+    <div className="min-w-0 space-y-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="break-words text-sm">{children}</dd>
+    </div>
+  );
+}
+
+function AccountChip({ account }: { account: string }) {
+  return (
+    <Chip
+      tone={account.startsWith("@") ? "primary" : "default"}
+      title={(VIRTUAL_ACCOUNT_HELP as Record<string, string>)[account]}
+    >
+      <span className="font-mono">{account}</span>
+    </Chip>
+  );
+}
+
+/** Four-eyes warning: nobody but the requester could approve. */
+function NoApproverWarning() {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-live/30 bg-live/10 px-3 py-2 text-xs">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-live" />
+      <p className="text-foreground">
+        <span className="font-medium text-live">Aucun valideur disponible.</span> Seul le demandeur pourrait
+        approuver cette demande, ce que la règle des 4 yeux interdit. Un administrateur doit revoir les groupes de
+        valideurs de la règle.
+      </p>
     </div>
   );
 }
@@ -66,6 +100,7 @@ function ApprovalCard({
   names,
   currentUserId,
   highlighted,
+  bare,
   onDecide,
   onCancel,
 }: {
@@ -73,30 +108,36 @@ function ApprovalCard({
   names: NameMaps;
   currentUserId: string | undefined;
   highlighted?: boolean;
+  /** Rendered inside a dialog: no border of its own. */
+  bare?: boolean;
   onDecide: (a: ApprovalData, approve: boolean) => void;
   onCancel: (a: ApprovalData) => void;
 }) {
   const p = a.payload || {};
   const mine = currentUserId !== undefined && a.requester.id === currentUserId;
   const cancellable = mine && (a.status === "pending" || a.status === "approved");
+  const pending = a.status === "pending";
 
   return (
     <div
       id={`approval-${a.id}`}
-      className={`bg-card border rounded-lg p-4 space-y-3 transition-shadow ${
-        highlighted ? "ring-2 ring-primary shadow-md" : ""
-      }`}
+      className={cn(
+        "space-y-3",
+        !bare && "rounded-lg border bg-card p-4 transition-shadow",
+        !bare && pending && "border-l-2 border-l-live",
+        highlighted && "ring-2 ring-ring",
+      )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold">Demande #{a.number}</span>
-        <Chip tone="primary">{KIND_LABELS[a.kind] || a.kind}</Chip>
+        <span className="tabular font-semibold">Demande #{a.number}</span>
+        <Chip>{KIND_LABELS[a.kind] || a.kind}</Chip>
         <ApprovalStatusChip status={a.status} />
-        <span className="text-xs text-muted-foreground ml-auto" title={formatDate(a.created_at)}>
-          {a.requester.name}, {relativeTime(a.created_at)}
+        <span className="ml-auto text-xs text-muted-foreground" title={formatDate(a.created_at)}>
+          <span className="text-foreground">{a.requester.name}</span>, {relativeTime(a.created_at)}
         </span>
       </div>
 
-      <dl className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {a.server && <Detail label="Serveur">{a.server.name}</Detail>}
         {a.account_username && (
           <Detail label="Compte">
@@ -129,29 +170,39 @@ function ApprovalCard({
             <Detail label="Comptes">
               <div className="flex flex-wrap gap-1">
                 {(p.accounts || []).map((x) => (
-                  <Chip key={x} tone={x.startsWith("@") ? "primary" : "default"}>
-                    {x}
-                  </Chip>
+                  <AccountChip key={x} account={x} />
                 ))}
               </div>
             </Detail>
-            <Detail label="Durée">{formatHours(p.duration_hours)}</Detail>
+            <Detail label="Durée">
+              <span className="tabular">{formatHours(p.duration_hours)}</span>
+            </Detail>
           </>
         )}
         {a.rule_name && <Detail label="Règle">{a.rule_name}</Detail>}
-        {a.status === "pending" && (
+        {pending && (
           <Detail label="Expire">
-            <span title={formatDate(a.expires_at)}>{relativeTime(a.expires_at)}</span>
+            <span className="tabular" title={formatDate(a.expires_at)}>
+              {relativeTime(a.expires_at)}
+            </span>
           </Detail>
         )}
         {a.grant_until && (a.status === "approved" || a.status === "used") && (
-          <Detail label="Valide jusqu'au">{formatDate(a.grant_until)}</Detail>
+          <Detail label="Valide jusqu'au">
+            <span className="tabular">{formatDate(a.grant_until)}</span>
+          </Detail>
         )}
-        {a.used_at && <Detail label="Utilisée le">{formatDate(a.used_at)}</Detail>}
+        {a.used_at && (
+          <Detail label="Utilisée le">
+            <span className="tabular">{formatDate(a.used_at)}</span>
+          </Detail>
+        )}
       </dl>
 
       {a.command && (
-        <pre className="p-2 rounded-md bg-muted text-xs font-mono whitespace-pre-wrap break-all">{a.command}</pre>
+        <pre className="whitespace-pre-wrap break-all rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+          {a.command}
+        </pre>
       )}
       {a.reason && (
         <p className="text-sm">
@@ -161,40 +212,33 @@ function ApprovalCard({
       )}
       {a.decided_by && (
         <p className="text-xs text-muted-foreground">
-          {STATUS_INFO[a.status]?.label || a.status} par {a.decided_by.name}
+          {STATUS_INFO[a.status]?.label || a.status} par <span className="text-foreground">{a.decided_by.name}</span>
           {a.decided_at && <> le {formatDate(a.decided_at)}</>}
           {a.decision_comment && <> : « {a.decision_comment} »</>}
         </p>
       )}
-      {a.status === "pending" && a.approvers_available === 0 && (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-1.5">
-          <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-          Aucun valideur disponible en dehors du demandeur : personne ne peut approuver cette demande.
-          Un administrateur doit revoir les groupes de valideurs de la règle.
-        </p>
-      )}
+      {pending && a.approvers_available === 0 && <NoApproverWarning />}
 
       {(a.can_decide || cancellable) && (
-        <div className="flex flex-wrap gap-2 justify-end pt-1">
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
           {cancellable && (
-            <button onClick={() => onCancel(a)} className={btnSecondary}>
-              <Ban size={15} /> Annuler
-            </button>
+            <Button variant="ghost" size="sm" onClick={() => onCancel(a)} className="text-muted-foreground">
+              <Ban /> Annuler la demande
+            </Button>
           )}
           {a.can_decide && (
             <>
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => onDecide(a, false)}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-md border border-red-200 text-red-700 text-sm hover:bg-red-50"
+                className="text-danger hover:bg-danger/10 hover:text-danger"
               >
-                <X size={15} /> Refuser
-              </button>
-              <button
-                onClick={() => onDecide(a, true)}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-green-600 text-white text-sm font-medium hover:bg-green-700"
-              >
-                <Check size={15} /> Approuver
-              </button>
+                <X /> Refuser
+              </Button>
+              <Button size="sm" onClick={() => onDecide(a, true)}>
+                <Check /> Approuver
+              </Button>
             </>
           )}
         </div>
@@ -242,19 +286,13 @@ function DecisionModal({
       size="md"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
-          <button
-            onClick={submit}
-            disabled={loading}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 ${
-              approve ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
-            }`}
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : approve ? <Check size={16} /> : <X size={16} />}
+          </Button>
+          <Button variant={approve ? "default" : "destructive"} onClick={submit} disabled={loading}>
+            {loading ? <Loader2 className="animate-spin" /> : approve ? <Check /> : <X />}
             {approve ? "Approuver" : "Refuser"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -276,7 +314,9 @@ function DecisionModal({
         .
       </p>
       {a.command && (
-        <pre className="p-2 rounded-md bg-muted text-xs font-mono whitespace-pre-wrap break-all">{a.command}</pre>
+        <pre className="whitespace-pre-wrap break-all rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+          {a.command}
+        </pre>
       )}
       {approve && a.kind === "access" && (
         <p className="text-xs text-muted-foreground">
@@ -290,12 +330,12 @@ function DecisionModal({
         </p>
       )}
       <Field label="Commentaire (facultatif)">
-        <textarea
+        <Textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           rows={3}
           maxLength={1000}
-          className={inputCls}
+          placeholder={approve ? "Ex. vérifié avec l'équipe applicative" : "Expliquez le refus au demandeur"}
           autoFocus
         />
       </Field>
@@ -378,11 +418,11 @@ function AccessRequestModal({
       size="3xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={submit} loading={loading} disabled={!valid}>
-            <Send size={15} /> Envoyer la demande
+            {!loading && <Send />} Envoyer la demande
           </SaveButton>
         </>
       }
@@ -392,7 +432,7 @@ function AccessRequestModal({
         Une fois approuvée par un valideur (jamais vous-même), une règle d'accès temporaire est créée pour la
         durée demandée. Vous pouvez l'annuler à tout moment depuis « Mes demandes ».
       </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Serveurs">
           <MultiSelect
             options={servers.map((s) => ({ id: s.id, label: s.name }))}
@@ -411,27 +451,22 @@ function AccessRequestModal({
         </Field>
       </div>
       {serverIds.length === 0 && nodeIds.length === 0 && (
-        <p className="text-xs text-amber-700">Choisissez au moins un serveur ou un nœud.</p>
+        <p className="text-xs text-live">Choisissez au moins un serveur ou un nœud.</p>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Actions">
           <div className="space-y-2">
             {ALL_ACTIONS.map((a) => (
-              <label key={a} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={actions.includes(a)}
-                  onChange={() => toggleAction(a)}
-                  className="w-4 h-4 rounded"
-                />
+              <label key={a} className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox checked={actions.includes(a)} onCheckedChange={() => toggleAction(a)} />
                 {ACTION_LABELS[a]}
               </label>
             ))}
           </div>
         </Field>
         <Field label="Comptes" hint="@ALL = tous les comptes du serveur.">
-          <div className="flex flex-wrap gap-1 mb-2 min-h-[1.5rem]">
+          <div className="mb-2 flex min-h-6 flex-wrap gap-1">
             {accounts.map((a) => (
               <Chip
                 key={a}
@@ -439,12 +474,12 @@ function AccessRequestModal({
                 title={(VIRTUAL_ACCOUNT_HELP as Record<string, string>)[a]}
                 onRemove={() => setAccounts(accounts.filter((x) => x !== a))}
               >
-                {a}
+                <span className="font-mono">{a}</span>
               </Chip>
             ))}
           </div>
           <div className="flex gap-2">
-            <input
+            <Input
               value={accountInput}
               onChange={(e) => setAccountInput(e.target.value)}
               onKeyDown={(e) => {
@@ -456,19 +491,22 @@ function AccessRequestModal({
               }}
               list="access-request-virtual"
               placeholder="Nom de compte (ex. root)"
-              className={inputCls}
+              className="font-mono"
             />
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="icon"
+              className="shrink-0"
               onClick={() => {
                 addAccount(accountInput);
                 setAccountInput("");
               }}
               disabled={!accountInput.trim()}
-              className={btnSecondary}
+              title="Ajouter le compte"
             >
-              <Plus size={16} />
-            </button>
+              <Plus />
+            </Button>
             <datalist id="access-request-virtual">
               {VIRTUAL_ACCOUNTS.map((v) => (
                 <option key={v} value={v} />
@@ -480,55 +518,65 @@ function AccessRequestModal({
 
       <Field label="Durée">
         <div className="flex flex-wrap items-center gap-2">
-          {DURATION_PRESETS.map((d) => (
+          <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="Durée">
+            {DURATION_PRESETS.map((d) => {
+              const on = !custom && duration === d.h;
+              return (
+                <button
+                  key={d.h}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => {
+                    setDuration(d.h);
+                    setCustom(false);
+                  }}
+                  className={cn(
+                    "tabular h-7 rounded-[5px] px-3 text-sm transition-colors",
+                    on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
             <button
-              key={d.h}
               type="button"
-              onClick={() => {
-                setDuration(d.h);
-                setCustom(false);
-              }}
-              className={`px-3 py-1.5 rounded-md border text-sm ${
-                !custom && duration === d.h ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"
-              }`}
+              role="radio"
+              aria-checked={custom}
+              onClick={() => setCustom(true)}
+              className={cn(
+                "h-7 rounded-[5px] px-3 text-sm transition-colors",
+                custom ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
             >
-              {d.label}
+              Autre
             </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setCustom(true)}
-            className={`px-3 py-1.5 rounded-md border text-sm ${
-              custom ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"
-            }`}
-          >
-            Autre
-          </button>
+          </div>
           {custom && (
-            <span className="flex items-center gap-2 text-sm">
-              <input
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Input
                 type="number"
                 min={1}
                 max={720}
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
-                className={`${inputCls} w-24`}
+                className="tabular w-24 text-foreground"
               />
               heures (720 max)
             </span>
           )}
         </div>
-        {!durationOk && <p className="text-xs text-red-700 mt-1">Durée entre 1 et 720 heures.</p>}
+        {!durationOk && <p className="mt-1 text-xs text-danger">Durée entre 1 et 720 heures.</p>}
       </Field>
 
       <Field label="Motif *" hint="Expliquez pourquoi vous avez besoin de cet accès (3 caractères minimum).">
-        <textarea
+        <Textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           rows={3}
           maxLength={2000}
           placeholder="Ticket ITS-12345 : analyse des journaux applicatifs"
-          className={inputCls}
         />
       </Field>
     </Modal>
@@ -537,7 +585,33 @@ function AccessRequestModal({
 
 // ── Page ─────────────────────────────────────────────────────
 
-const STATUS_FILTERS: (ApprovalStatus | "")[] = ["", "pending", "approved", "rejected", "cancelled", "expired", "used"];
+const ALL_STATUSES = "all";
+const STATUS_FILTERS: ApprovalStatus[] = ["pending", "approved", "rejected", "cancelled", "expired", "used"];
+
+function ListSkeleton() {
+  return (
+    <div className="space-y-3">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="space-y-3 rounded-lg border bg-card p-4">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-5 w-28" />
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-5 w-16" />
+            <Skeleton className="ml-auto h-4 w-32" />
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[0, 1, 2, 3].map((j) => (
+              <div key={j} className="space-y-1.5">
+                <Skeleton className="h-3 w-14" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Approvals() {
   const { user, isAdmin } = useCurrentUser();
@@ -549,6 +623,7 @@ export default function Approvals() {
   const [status, setStatus] = useState<ApprovalStatus | "">("");
   const [rows, setRows] = useState<ApprovalData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeData | null>(null);
   const [decision, setDecision] = useState<{ a: ApprovalData; approve: boolean } | null>(null);
@@ -575,6 +650,15 @@ export default function Approvals() {
     if (tab === "all" && user && !isAdmin) setTab("todo");
   }, [tab, user, isAdmin]);
 
+  // Deep link from the command palette: /approvals?request=1 opens the access request dialog
+  useEffect(() => {
+    if (params.get("request") !== "1") return;
+    setRequestOpen(true);
+    const next = new URLSearchParams(params);
+    next.delete("request");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+
   useEffect(() => {
     Promise.all([
       api.get<Ref[]>("/api/access-requests/servers"),
@@ -598,6 +682,7 @@ export default function Approvals() {
       setError(errorMessage(e));
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   }, [tab, status]);
 
@@ -636,13 +721,19 @@ export default function Approvals() {
 
   const changeTab = (t: ApprovalScope) => {
     setTab(t);
+    setLoaded(false);
     const next = new URLSearchParams(params);
     next.set("tab", t);
     setParams(next, { replace: true });
   };
 
   const applyUpdate = (updated: ApprovalData) => {
-    setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    // A decided request leaves the "À valider" list right away (animated), the reload confirms it.
+    setRows((prev) =>
+      tab === "todo" && updated.status !== "pending"
+        ? prev.filter((r) => r.id !== updated.id)
+        : prev.map((r) => (r.id === updated.id ? updated : r))
+    );
     if (focus?.id === updated.id) setFocus(updated);
     refreshGovernanceBadges();
     load();
@@ -654,7 +745,7 @@ export default function Approvals() {
     try {
       const updated = await api.post<ApprovalData>(`/api/approvals/${cancelling.id}/cancel`, {});
       applyUpdate(updated);
-      setNotice({ ok: true, text: `Demande #${updated.number} annulée.` });
+      toast.success(`Demande #${updated.number} annulée`);
       setCancelling(null);
     } catch (e) {
       setNotice({ ok: false, text: errorMessage(e) });
@@ -677,25 +768,29 @@ export default function Approvals() {
     onCancel: setCancelling,
   };
 
+  const showSkeleton = loading && !loaded && rows.length === 0;
+
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold">Validations</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Demandes d'accès temporaire, connexions et commandes soumises à validation (règle des 4 yeux : on ne
-            valide jamais sa propre demande).
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={load} className={btnSecondary} title="Actualiser">
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </button>
-          <button onClick={() => setRequestOpen(true)} className={btnPrimary}>
-            <KeyRound size={16} /> Demander un accès
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Validations"
+        description="Demandes d'accès temporaire, connexions et commandes soumises à validation. Règle des 4 yeux : on ne valide jamais sa propre demande."
+        actions={
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" onClick={load} aria-label="Actualiser">
+                  <RefreshCw className={cn(loading && "animate-spin")} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Actualiser</TooltipContent>
+            </Tooltip>
+            <Button onClick={() => setRequestOpen(true)}>
+              <KeyRound /> Demander un accès
+            </Button>
+          </>
+        }
+      />
 
       <Tabs<ApprovalScope> tabs={tabs} active={tab} onChange={changeTab} />
 
@@ -705,55 +800,73 @@ export default function Approvals() {
 
         {tab !== "todo" && (
           <div className="flex items-center gap-2">
-            <label className="text-sm text-muted-foreground">Statut</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as ApprovalStatus | "")}
-              className={`${inputCls} max-w-[12rem]`}
+            <span className="text-sm text-muted-foreground">Statut</span>
+            <Select
+              value={status || ALL_STATUSES}
+              onValueChange={(v) => setStatus(v === ALL_STATUSES ? "" : (v as ApprovalStatus))}
             >
-              {STATUS_FILTERS.map((s) => (
-                <option key={s} value={s}>
-                  {s ? STATUS_INFO[s].label : "Tous"}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_STATUSES}>Tous</SelectItem>
+                {STATUS_FILTERS.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_INFO[s].label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 
-        {loading && rows.length === 0 && (
-          <div className="flex justify-center py-12">
-            <Loader2 size={24} className="animate-spin text-muted-foreground" />
-          </div>
-        )}
+        {showSkeleton && <ListSkeleton />}
 
         {!loading && rows.length === 0 && (
-          <div className="bg-card border rounded-lg p-12 text-center">
-            <ClipboardCheck size={48} className="mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">
-              {tab === "todo"
-                ? "Aucune demande en attente de votre validation."
-                : tab === "mine"
-                  ? "Vous n'avez fait aucune demande."
-                  : "Aucune demande."}
-            </p>
-          </div>
+          <EmptyState
+            icon={tab === "todo" ? Inbox : ClipboardCheck}
+            title={tab === "todo" ? "Rien à valider" : "Aucune demande"}
+            action={
+              tab === "mine" ? (
+                <Button variant="outline" onClick={() => setRequestOpen(true)}>
+                  <KeyRound /> Demander un accès
+                </Button>
+              ) : undefined
+            }
+          >
+            {tab === "todo"
+              ? "Aucune demande n'attend votre validation. Les nouvelles demandes apparaissent ici et dans les notifications."
+              : tab === "mine"
+                ? "Vous n'avez fait aucune demande. Demandez un accès temporaire quand une règle ne vous couvre pas."
+                : "Aucune demande ne correspond à ce filtre."}
+          </EmptyState>
         )}
 
-        {rows.map((a) => (
-          <ApprovalCard key={a.id} a={a} highlighted={a.id === focusId} {...cardProps} />
-        ))}
+        <div className="flex flex-col">
+          <AnimatePresence initial={false}>
+            {rows.map((a) => (
+              <motion.div
+                key={a.id}
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="overflow-hidden"
+              >
+                <div className="pb-3">
+                  <ApprovalCard a={a} highlighted={a.id === focusId} {...cardProps} />
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
       </div>
 
       {focusId && (focus || focusError) && (
         <Modal title={focus ? `Demande #${focus.number}` : "Demande"} onClose={closeFocus} size="3xl">
           <ErrorBox message={focusError} />
-          {focus && (
-            <ApprovalCard
-              a={focus}
-              {...cardProps}
-              onDecide={(a, approve) => setDecision({ a, approve })}
-            />
-          )}
+          {focus && <ApprovalCard a={focus} bare {...cardProps} />}
         </Modal>
       )}
 
@@ -765,10 +878,8 @@ export default function Approvals() {
           onDone={(updated) => {
             setDecision(null);
             applyUpdate(updated);
-            setNotice({
-              ok: true,
-              text: `Demande #${updated.number} ${updated.status === "approved" ? "approuvée" : "refusée"}.`,
-            });
+            if (updated.status === "approved") toast.success(`Demande #${updated.number} approuvée`);
+            else toast(`Demande #${updated.number} refusée`);
           }}
         />
       )}
@@ -797,13 +908,14 @@ export default function Approvals() {
           onClose={() => setRequestOpen(false)}
           onCreated={(a) => {
             setRequestOpen(false);
-            setNotice({
-              ok: true,
-              text:
-                a.approvers_available === 0
-                  ? `Demande #${a.number} envoyée, mais aucun valideur n'est disponible : contactez un administrateur.`
-                  : `Demande #${a.number} envoyée aux valideurs.`,
-            });
+            if (a.approvers_available === 0) {
+              toast.warning(`Demande #${a.number} envoyée, sans valideur disponible`, {
+                description: "Personne d'autre que vous ne peut l'approuver : contactez un administrateur.",
+                duration: 10000,
+              });
+            } else {
+              toast.success(`Demande #${a.number} envoyée aux valideurs`);
+            }
             if (tab === "mine") load();
             else changeTab("mine");
             refreshGovernanceBadges();

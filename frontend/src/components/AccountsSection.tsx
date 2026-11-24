@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import {
   CalendarClock,
   CheckCircle2,
@@ -31,14 +31,19 @@ import {
   Modal,
   Notice,
   SaveButton,
+  EmptyState,
   Toggle,
-  btnSecondary,
   formatDate,
-  iconBtn,
-  iconBtnDanger,
-  inputCls,
   type NoticeData,
 } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   HISTORY_REASON,
   HISTORY_STATUS,
@@ -143,9 +148,9 @@ function AccountModal({
       onClose={onClose}
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
             {account ? "Enregistrer" : "Ajouter"}
           </SaveButton>
@@ -154,86 +159,35 @@ function AccountModal({
     >
       <ErrorBox message={error} />
       <Field label="Utilisateur *" hint="Nom du compte sur le serveur cible.">
-        <input
+        <Input
           value={form.username}
           onChange={(e) => set({ username: e.target.value })}
           placeholder={isLinux ? "root" : "Administrator"}
-          className={inputCls}
+          className="font-mono"
           autoFocus
         />
       </Field>
       <Field label="Authentification">
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="radio" checked={form.mode === "credential"} onChange={() => set({ mode: "credential" })} />
-            Credential enregistré
-          </label>
-          {form.mode === "credential" && (
-            <select
-              value={form.credential_id}
-              onChange={(e) => set({ credential_id: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">Choisir un credential</option>
-              {credentials.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.username}, {c.type})
-                </option>
-              ))}
-            </select>
-          )}
-          <label className={`flex items-center gap-2 text-sm ${isLinux ? "" : "opacity-50"}`}>
-            <input
-              type="radio"
-              disabled={!isLinux}
-              checked={form.mode === "cert"}
-              onChange={() => set({ mode: "cert" })}
-            />
-            Certificat éphémère (CA Citadel, Linux uniquement)
-          </label>
-        </div>
-      </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.is_default}
-            onChange={(e) => set({ is_default: e.target.checked })}
-            className="w-4 h-4 rounded"
-          />
-          Compte par défaut
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.privileged}
-            onChange={(e) => set({ privileged: e.target.checked })}
-            className="w-4 h-4 rounded"
-          />
-          Compte privilégié
-        </label>
-        {account && (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.is_active}
-              onChange={(e) => set({ is_active: e.target.checked })}
-              className="w-4 h-4 rounded"
-            />
-            Actif
-          </label>
-        )}
-      </div>
-      <Field label="Description">
-        <input
-          value={form.description}
-          onChange={(e) => set({ description: e.target.value })}
-          className={inputCls}
+        <AuthModePicker
+          mode={form.mode}
+          onMode={(mode) => set({ mode })}
+          certAllowed={isLinux}
+          credentialId={form.credential_id}
+          onCredential={(credential_id) => set({ credential_id })}
+          credentials={credentials}
         />
       </Field>
-      <div className="border rounded-md p-3 space-y-2">
-        <p className="text-sm font-medium flex items-center gap-2">
-          <RotateCw size={14} /> Rotation du mot de passe
+      <div className="grid grid-cols-2 gap-2">
+        <CheckField checked={form.is_default} onChange={(v) => set({ is_default: v })} label="Compte par défaut" />
+        <CheckField checked={form.privileged} onChange={(v) => set({ privileged: v })} label="Compte privilégié" />
+        {account && <CheckField checked={form.is_active} onChange={(v) => set({ is_active: v })} label="Actif" />}
+      </div>
+      <Field label="Description">
+        <Input value={form.description} onChange={(e) => set({ description: e.target.value })} />
+      </Field>
+      <div className="space-y-2 rounded-md border p-3">
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <RotateCw className="size-3.5 text-muted-foreground" /> Rotation du mot de passe
         </p>
         {blocker ? (
           <p className="text-xs text-muted-foreground">Non disponible : {blocker}.</p>
@@ -247,16 +201,16 @@ function AccountModal({
             {form.rotation_enabled && (
               <div className="flex items-center gap-2 text-sm">
                 <span>Tous les</span>
-                <input
+                <Input
                   type="number"
                   min={1}
                   max={365}
                   value={form.rotation_interval_days}
                   onChange={(e) => set({ rotation_interval_days: e.target.value })}
-                  className={`${inputCls} w-24`}
+                  className="tabular w-24"
                 />
                 <span>jours</span>
-                {!intervalOk && <span className="text-xs text-red-600">entre 1 et 365</span>}
+                {!intervalOk && <span className="text-xs text-danger">entre 1 et 365</span>}
               </div>
             )}
             <p className="text-xs text-muted-foreground">
@@ -300,51 +254,59 @@ function HistoryModal({
       onClose={onClose}
       size="2xl"
       footer={
-        <button onClick={onClose} className={btnSecondary}>
+        <Button variant="outline" onClick={onClose}>
           Fermer
-        </button>
+        </Button>
       }
     >
       <p className="text-xs text-muted-foreground">
         Métadonnées uniquement : les secrets restent chiffrés dans le coffre et ne sont jamais affichés.
       </p>
       <ErrorBox message={error} />
-      {!rows && !error && <Loader2 size={18} className="animate-spin text-muted-foreground" />}
+      {!rows && !error && (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      )}
       {rows && rows.length === 0 && (
         <p className="text-sm text-muted-foreground">
           Aucune rotation pour ce compte. Le secret actuel est celui du credential d'origine.
         </p>
       )}
       {rows && rows.length > 0 && (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="text-left p-2 font-medium">Généré le</th>
-              <th className="text-left p-2 font-medium">Statut</th>
-              <th className="text-left p-2 font-medium">Origine</th>
-              <th className="text-left p-2 font-medium">Activé le</th>
-              <th className="text-left p-2 font-medium">Erreur</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((h) => {
-              const st = HISTORY_STATUS[h.status] || { label: h.status, tone: "default" as const };
-              return (
-                <tr key={h.id} className="border-b last:border-0 align-top">
-                  <td className="p-2 text-xs whitespace-nowrap">{formatDate(h.created_at)}</td>
-                  <td className="p-2">
-                    <Chip tone={st.tone}>{st.label}</Chip>
-                  </td>
-                  <td className="p-2 text-xs" title={h.actor_id ? `Utilisateur ${h.actor_id}` : undefined}>
-                    {HISTORY_REASON[h.reason] || h.reason}
-                  </td>
-                  <td className="p-2 text-xs whitespace-nowrap">{formatDate(h.activated_at)}</td>
-                  <td className="p-2 text-xs text-red-700 break-words">{h.error}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Généré le</TableHead>
+                <TableHead>Statut</TableHead>
+                <TableHead>Origine</TableHead>
+                <TableHead>Activé le</TableHead>
+                <TableHead>Erreur</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((h) => {
+                const st = HISTORY_STATUS[h.status] || { label: h.status, tone: "default" as const };
+                return (
+                  <TableRow key={h.id} className="align-top">
+                    <TableCell className="tabular whitespace-nowrap text-xs">{formatDate(h.created_at)}</TableCell>
+                    <TableCell>
+                      <Chip tone={st.tone}>{st.label}</Chip>
+                    </TableCell>
+                    <TableCell className="text-xs" title={h.actor_id ? `Utilisateur ${h.actor_id}` : undefined}>
+                      {HISTORY_REASON[h.reason] || h.reason}
+                    </TableCell>
+                    <TableCell className="tabular whitespace-nowrap text-xs">{formatDate(h.activated_at)}</TableCell>
+                    <TableCell className="break-words text-xs text-danger">{h.error}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </Modal>
   );
@@ -363,7 +325,7 @@ function RotationInfo({ account: a }: { account: AccountData }) {
     <div className="text-xs text-muted-foreground space-y-0.5">
       {a.rotation_enabled ? (
         <p className="flex items-center gap-1">
-          <CalendarClock size={11} /> Rotation tous les {a.rotation_interval_days} j,{" "}
+          <CalendarClock className="size-3" /> Rotation tous les {a.rotation_interval_days} j,{" "}
           {a.next_rotation_at
             ? `prochaine le ${formatDate(a.next_rotation_at, false)}`
             : "prochaine au passage du planificateur"}
@@ -373,11 +335,11 @@ function RotationInfo({ account: a }: { account: AccountData }) {
       )}
       {a.last_rotated_at && (
         <p className="flex items-center gap-1">
-          <CheckCircle2 size={11} /> Dernière rotation le {formatDate(a.last_rotated_at)}
+          <CheckCircle2 className="size-3" /> Dernière rotation le {formatDate(a.last_rotated_at)}
         </p>
       )}
       {a.last_rotation_status === "failed" && (
-        <p className="text-red-600 break-words">
+        <p className="break-words text-danger">
           Échec de la dernière rotation{a.last_rotation_message ? ` : ${a.last_rotation_message}` : ""}
         </p>
       )}
@@ -405,6 +367,8 @@ export default function AccountsSection({
   const [historyOf, setHistoryOf] = useState<AccountData | null>(null);
   const [rotating, setRotating] = useState<AccountData | null>(null);
   const [busy, setBusy] = useState<{ id: string; op: "verify" | "rotate" } | null>(null);
+  const [removing, setRemoving] = useState<AccountData | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -441,12 +405,15 @@ export default function AccountsSection({
   };
 
   const remove = async (acc: AccountData) => {
-    if (!confirm(`Supprimer le compte ${acc.username} ?`)) return;
+    setDeleting(true);
     try {
       await api.delete(`/api/servers/${server.id}/accounts/${acc.id}`);
       refresh();
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setDeleting(false);
+      setRemoving(null);
     }
   };
 
@@ -486,141 +453,149 @@ export default function AccountsSection({
   };
 
   return (
-    <div className="bg-card border rounded-lg mt-6">
-      <div className="flex items-center justify-between p-4 border-b">
-        <div>
-          <h3 className="font-semibold text-sm flex items-center gap-2">
-            <UserRound size={16} /> Comptes
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
+    <section className="mt-8 overflow-hidden rounded-lg border bg-card">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b p-4">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            <UserRound className="size-4 text-muted-foreground" /> Comptes
+          </h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
             Le compte par défaut sert à l'automatisation (métriques, mises à jour, commandes, rotation des
             mots de passe). Les règles d'accès définissent qui peut utiliser quel compte.
           </p>
         </div>
-        <button
-          onClick={() => setEditing(null)}
-          className="flex items-center gap-2 bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90"
-        >
-          <Plus size={14} /> Ajouter un compte
-        </button>
+        <Button size="sm" onClick={() => setEditing(null)}>
+          <Plus /> Ajouter un compte
+        </Button>
       </div>
       {(error || notice) && (
-        <div className="p-4 pb-0 space-y-2">
+        <div className="space-y-2 p-4 pb-0">
           <Notice notice={notice} onClose={() => setNotice(null)} />
           <ErrorBox message={error} />
         </div>
       )}
       {loading ? (
-        <p className="p-4 text-sm text-muted-foreground">Chargement...</p>
-      ) : accounts.length === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">
-          Aucun compte. Sans compte par défaut, le test de connexion, les métriques et les mises à jour
-          ne fonctionnent pas.
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium">Utilisateur</th>
-                <th className="text-left p-3 font-medium">Authentification</th>
-                <th className="text-left p-3 font-medium">Attributs</th>
-                <th className="text-left p-3 font-medium">Rotation</th>
-                <th className="text-left p-3 font-medium">Description</th>
-                <th className="text-right p-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => {
-                const isBusy = busy?.id === a.id;
-                const rotateTitle = a.rotation_supported
-                  ? "Faire tourner le mot de passe"
-                  : blockerLabel(a.rotation_blocker) || "Rotation non prise en charge";
-                return (
-                  <tr
-                    key={a.id}
-                    className={`border-b last:border-0 align-top ${a.is_active ? "" : "opacity-50"}`}
-                  >
-                    <td className="p-3 font-mono">{a.username}</td>
-                    <td className="p-3">
-                      <span className="flex items-center gap-1.5 text-xs">
-                        {a.auth === "cert" ? (
-                          <ShieldCheck size={13} className="text-blue-500" />
-                        ) : (
-                          <KeyRound size={13} className="text-muted-foreground" />
-                        )}
-                        {AUTH_LABELS[a.auth]}
-                        {a.credential_name && (
-                          <span className="text-muted-foreground">({a.credential_name})</span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-1">
-                        <VerifyBadge account={a} />
-                        {a.is_default && <Chip tone="primary">par défaut</Chip>}
-                        {a.privileged && (
-                          <Chip tone="amber">
-                            <ShieldAlert size={11} /> privilégié
-                          </Chip>
-                        )}
-                        {!a.is_active && <Chip>inactif</Chip>}
-                      </div>
-                    </td>
-                    <td className="p-3 max-w-xs">
-                      <RotationInfo account={a} />
-                    </td>
-                    <td className="p-3 text-xs text-muted-foreground">{a.description}</td>
-                    <td className="p-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => runOperation(a, "verify")}
-                          disabled={isBusy}
-                          className={iconBtn}
-                          title="Vérifier (connexion au serveur avec le secret stocké)"
-                        >
-                          {isBusy && busy?.op === "verify" ? (
-                            <Loader2 size={15} className="animate-spin" />
-                          ) : (
-                            <ShieldCheck size={15} />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => setRotating(a)}
-                          disabled={isBusy || !a.rotation_supported}
-                          className={iconBtn}
-                          title={rotateTitle}
-                        >
-                          {isBusy && busy?.op === "rotate" ? (
-                            <Loader2 size={15} className="animate-spin" />
-                          ) : (
-                            <RotateCw size={15} />
-                          )}
-                        </button>
-                        <button onClick={() => setHistoryOf(a)} className={iconBtn} title="Historique">
-                          <History size={15} />
-                        </button>
-                        {!a.is_default && a.is_active && (
-                          <button onClick={() => setDefault(a)} className={iconBtn} title="Définir par défaut">
-                            <Star size={15} />
-                          </button>
-                        )}
-                        <button onClick={() => setEditing(a)} className={iconBtn} title="Modifier">
-                          <Pencil size={15} />
-                        </button>
-                        <button onClick={() => remove(a)} className={iconBtnDanger} title="Supprimer">
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-2 p-4">
+          {[0, 1].map((i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
         </div>
+      ) : accounts.length === 0 ? (
+        <div className="p-4">
+          <EmptyState
+            icon={UserRound}
+            title="Aucun compte"
+            action={
+              <Button variant="outline" size="sm" onClick={() => setEditing(null)}>
+                <Plus /> Ajouter un compte
+              </Button>
+            }
+          >
+            Sans compte par défaut, le test de connexion, les métriques et les mises à jour ne fonctionnent pas.
+          </EmptyState>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="pl-4">Utilisateur</TableHead>
+              <TableHead>Authentification</TableHead>
+              <TableHead>Attributs</TableHead>
+              <TableHead>Rotation</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead className="pr-4 text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {accounts.map((a) => {
+              const isBusy = busy?.id === a.id;
+              const rotateTitle = a.rotation_supported
+                ? "Faire tourner le mot de passe"
+                : blockerLabel(a.rotation_blocker) || "Rotation non prise en charge";
+              return (
+                <TableRow key={a.id} className={cn("align-top", !a.is_active && "opacity-50")}>
+                  <TableCell className="pl-4 font-mono">{a.username}</TableCell>
+                  <TableCell>
+                    <span className="flex items-center gap-1.5 text-xs">
+                      {a.auth === "cert" ? (
+                        <ShieldCheck className="size-3.5 text-info" />
+                      ) : (
+                        <KeyRound className="size-3.5 text-muted-foreground" />
+                      )}
+                      {AUTH_LABELS[a.auth]}
+                      {a.credential_name && <span className="text-muted-foreground">({a.credential_name})</span>}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      <VerifyBadge account={a} />
+                      {a.is_default && <Chip tone="primary">par défaut</Chip>}
+                      {a.privileged && (
+                        <Chip tone="amber">
+                          <ShieldAlert className="size-3" /> privilégié
+                        </Chip>
+                      )}
+                      {!a.is_active && <Chip>inactif</Chip>}
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-xs">
+                    <RotationInfo account={a} />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{a.description}</TableCell>
+                  <TableCell className="pr-4 text-right">
+                    <div className="flex items-center justify-end gap-0.5">
+                      <RowAction
+                        label="Vérifier (connexion au serveur avec le secret stocké)"
+                        onClick={() => runOperation(a, "verify")}
+                        disabled={isBusy}
+                      >
+                        {isBusy && busy?.op === "verify" ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+                      </RowAction>
+                      <RowAction label={rotateTitle} onClick={() => setRotating(a)} disabled={isBusy || !a.rotation_supported}>
+                        {isBusy && busy?.op === "rotate" ? <Loader2 className="animate-spin" /> : <RotateCw />}
+                      </RowAction>
+                      <RowAction label="Historique" onClick={() => setHistoryOf(a)}>
+                        <History />
+                      </RowAction>
+                      {!a.is_default && a.is_active && (
+                        <RowAction label="Définir par défaut" onClick={() => setDefault(a)}>
+                          <Star />
+                        </RowAction>
+                      )}
+                      <RowAction label="Modifier" onClick={() => setEditing(a)}>
+                        <Pencil />
+                      </RowAction>
+                      <RowAction label="Supprimer" danger onClick={() => setRemoving(a)}>
+                        <Trash2 />
+                      </RowAction>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
 
+      {removing && (
+        <ConfirmModal
+          title={
+            <>
+              Supprimer le compte <span className="font-mono">{removing.username}</span>
+            </>
+          }
+          confirmLabel="Supprimer"
+          danger
+          loading={deleting}
+          onClose={() => setRemoving(null)}
+          onConfirm={() => remove(removing)}
+        >
+          <p>
+            Le compte ne sera plus utilisable depuis Citadel sur <strong>{server.name}</strong>. Il n'est pas
+            supprimé du serveur lui-même.
+          </p>
+        </ConfirmModal>
+      )}
       {editing !== undefined && (
         <AccountModal
           server={server}
@@ -668,6 +643,148 @@ export default function AccountsSection({
           </p>
         </ConfirmModal>
       )}
+    </section>
+  );
+}
+
+// ── Shared form helpers (also used by Servers and DiscoveredAccounts) ──
+
+/** Checkbox with its label, shadcn styled. */
+export function CheckField({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: ReactNode;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <div className={cn("flex items-center gap-2 text-sm", disabled && "opacity-50")}>
+      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onChange(v === true)} disabled={disabled} />
+      <label htmlFor={id} className="cursor-pointer select-none">
+        {label}
+      </label>
     </div>
+  );
+}
+
+function RadioRow({
+  checked,
+  onSelect,
+  disabled,
+  children,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onSelect}
+      className="flex items-center gap-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <span
+        className={cn(
+          "flex size-4 shrink-0 items-center justify-center rounded-full border",
+          checked ? "border-foreground" : "border-input",
+        )}
+      >
+        {checked && <span className="size-2 rounded-full bg-foreground" />}
+      </span>
+      {children}
+    </button>
+  );
+}
+
+/** Stored credential or ephemeral certificate, with the credential picker. */
+export function AuthModePicker({
+  mode,
+  onMode,
+  certAllowed,
+  credentialId,
+  onCredential,
+  credentials,
+}: {
+  mode: "credential" | "cert";
+  onMode: (m: "credential" | "cert") => void;
+  certAllowed: boolean;
+  credentialId: string;
+  onCredential: (id: string) => void;
+  credentials: CredentialData[];
+}) {
+  return (
+    <div role="radiogroup" className="space-y-2">
+      <RadioRow checked={mode === "credential"} onSelect={() => onMode("credential")}>
+        Credential enregistré
+      </RadioRow>
+      {mode === "credential" && (
+        <Select value={credentialId} onValueChange={onCredential}>
+          <SelectTrigger>
+            <SelectValue placeholder="Choisir un credential" />
+          </SelectTrigger>
+          <SelectContent>
+            {credentials.length === 0 && (
+              <p className="px-2 py-1.5 text-sm text-muted-foreground">Aucun credential enregistré</p>
+            )}
+            {credentials.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}{" "}
+                <span className="font-mono text-xs text-muted-foreground">
+                  ({c.username}, {c.type})
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <RadioRow checked={mode === "cert"} onSelect={() => onMode("cert")} disabled={!certAllowed}>
+        Certificat éphémère (CA Citadel, Linux uniquement)
+      </RadioRow>
+    </div>
+  );
+}
+
+/** Ghost icon button with a tooltip, for table rows. */
+export function RowAction({
+  label,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* span keeps the tooltip working on a disabled button */}
+        <span className="inline-flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClick}
+            disabled={disabled}
+            aria-label={label}
+            className={cn("size-8 text-muted-foreground", danger && "hover:bg-danger/10 hover:text-danger")}
+          >
+            {children}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{label}</TooltipContent>
+    </Tooltip>
   );
 }

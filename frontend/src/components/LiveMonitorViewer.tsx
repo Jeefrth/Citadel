@@ -6,10 +6,13 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import Guacamole from "guacamole-common-js";
-import { Eye, Loader2, Power, X } from "lucide-react";
+import { Eye, Loader2, Power } from "lucide-react";
 import { api, getAuthToken, wsBaseUrl } from "@/services/api";
 import { errorMessage, type LiveSession, type MonitorMessage, type MonitorTicket } from "@/services/types";
-import { ProtocolBadge, READONLY_XTERM_OPTIONS, b64ToBytes } from "@/components/auditUi";
+import { ProtocolBadge, READONLY_XTERM_OPTIONS, StatusDot, TERMINAL_BG, b64ToBytes } from "@/components/auditUi";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 type ViewerState = "connecting" | "live" | "ended" | "error";
 
@@ -87,7 +90,7 @@ function SshMonitor({ session, onState }: { session: LiveSession } & StateProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.session_id]);
 
-  return <div ref={containerRef} className="w-full h-full rounded" style={{ backgroundColor: "#1a1b26" }} />;
+  return <div ref={containerRef} className="h-full w-full" style={{ backgroundColor: TERMINAL_BG }} />;
 }
 
 function RdpMonitor({ session, onState }: { session: LiveSession } & StateProps) {
@@ -164,7 +167,8 @@ function RdpMonitor({ session, onState }: { session: LiveSession } & StateProps)
   return (
     <div
       ref={containerRef}
-      className="w-full h-full bg-black rounded overflow-hidden relative"
+      className="relative h-full w-full overflow-hidden"
+      style={{ backgroundColor: TERMINAL_BG }}
       onContextMenu={(e) => e.preventDefault()}
     />
   );
@@ -189,64 +193,66 @@ export default function LiveMonitorViewer({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-card border rounded-lg shadow-lg w-full max-w-6xl mx-4 flex flex-col h-[90vh]">
-        <div className="flex items-center justify-between gap-3 p-3 border-b">
-          <div className="flex items-center gap-3 min-w-0">
-            <Eye size={18} className="text-primary shrink-0" />
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex h-[90vh] max-w-6xl flex-col gap-0 overflow-hidden p-0"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b py-3 pl-4 pr-12">
+          <div className="flex min-w-0 items-center gap-3">
+            <ProtocolBadge protocol={session.protocol} />
             <div className="min-w-0">
-              <p className="font-semibold text-sm flex items-center gap-2">
-                <ProtocolBadge protocol={session.protocol} />
-                <span className="truncate">
-                  {session.account ? `${session.account}@` : ""}
-                  {session.server}
-                </span>
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
+              <DialogTitle className="truncate font-mono text-sm font-medium">
+                {session.account && <span className="text-muted-foreground">{session.account}@</span>}
+                {session.server}
+              </DialogTitle>
+              <DialogDescription className="truncate text-xs">
                 {session.user}
-                {session.client_ip && <> depuis {session.client_ip}</>}
-              </p>
+                {session.client_ip && (
+                  <>
+                    {" "}depuis <span className="font-mono">{session.client_ip}</span>
+                  </>
+                )}
+              </DialogDescription>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {onKill && state !== "ended" && (
-              <button
-                onClick={onKill}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-medium hover:bg-red-700"
-              >
-                <Power size={14} /> Terminer
-              </button>
-            )}
-            <button onClick={onClose} title="Fermer">
-              <X size={18} />
-            </button>
-          </div>
+          {onKill && state !== "ended" && (
+            <Button variant="destructive" size="sm" onClick={onKill}>
+              <Power /> Terminer la session
+            </Button>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white text-xs font-semibold">
-          <Eye size={14} />
+        <div
+          className={cn(
+            "flex items-center gap-2 border-b px-4 py-1.5 text-xs font-medium",
+            state === "error" ? "border-danger/25 bg-danger/10 text-danger" : "border-live/25 bg-live/10 text-live",
+          )}
+        >
+          <Eye className="size-3.5" />
           Lecture seule : aucune saisie n'est transmise à la session
-          <span className="ml-auto flex items-center gap-1.5 font-normal">
+          <span className="ml-auto flex items-center gap-1.5">
             {state === "connecting" && (
-              <>
-                <Loader2 size={12} className="animate-spin" /> Connexion...
-              </>
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Connexion...
+              </span>
             )}
             {state === "live" && (
               <>
-                <span className="w-2 h-2 rounded-full bg-white animate-pulse" /> En direct
+                <StatusDot tone="live" pulse /> En direct
               </>
             )}
-            {state === "ended" && "Session terminée"}
+            {state === "ended" && <span className="text-muted-foreground">Session terminée</span>}
             {state === "error" && "Erreur"}
           </span>
         </div>
 
         {(state === "ended" || state === "error") && (
           <div
-            className={`px-3 py-2 text-sm border-b ${
-              state === "error" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900"
-            }`}
+            className={cn(
+              "border-b px-4 py-2 text-sm",
+              state === "error" ? "bg-danger/5 text-danger" : "bg-muted text-muted-foreground",
+            )}
           >
             {state === "ended"
               ? `La session est terminée.${message ? ` ${message}.` : ""}`
@@ -254,14 +260,14 @@ export default function LiveMonitorViewer({
           </div>
         )}
 
-        <div className="flex-1 p-2 min-h-0">
+        <div className="min-h-0 flex-1 p-3" style={{ backgroundColor: TERMINAL_BG }}>
           {session.protocol === "rdp" ? (
             <RdpMonitor session={session} onState={onState} />
           ) : (
             <SshMonitor session={session} onState={onState} />
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
+import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
 import {
   CalendarClock,
   Eye,
@@ -8,10 +10,12 @@ import {
   Plus,
   Power,
   Radar,
+  ServerOff,
   ShieldBan,
   ShieldCheck,
   TerminalSquare,
   Trash2,
+  UserSearch,
   Users,
 } from "lucide-react";
 import { api } from "@/services/api";
@@ -32,19 +36,29 @@ import {
 } from "@/services/types";
 import {
   Chip,
+  ConfirmModal,
+  EmptyState,
   ErrorBox,
   Field,
   Modal,
   MultiSelect,
+  PageHeader,
   SaveButton,
   Tabs,
-  btnSecondary,
   formatDate,
   iconBtn,
   iconBtnDanger,
-  inputCls,
   type Option,
 } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { DiscoveredAccountsPanel } from "@/components/DiscoveredAccounts";
 import { CommandRulesPanel, ConnectionRulesPanel } from "@/components/AclRules";
 
@@ -61,6 +75,49 @@ function toLocalInput(iso: string | null): string {
 
 function fromLocalInput(v: string): string | null {
   return v ? new Date(v).toISOString() : null;
+}
+
+/** Account chip: technical value in mono, virtual accounts (@ALL...) highlighted. */
+function AccountChip({ account, onRemove }: { account: string; onRemove?: () => void }) {
+  return (
+    <Chip
+      tone={account.startsWith("@") ? "primary" : "default"}
+      title={(VIRTUAL_ACCOUNT_HELP as Record<string, string>)[account]}
+      onRemove={onRemove}
+    >
+      <span className="font-mono">{account === "*" ? "tous" : account}</span>
+    </Chip>
+  );
+}
+
+/** Small section title inside a dialog (sentence case, no uppercase). */
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <h4 className="mb-3 text-sm font-medium">{children}</h4>;
+}
+
+/** Amber inline hint for a form state that is valid but probably not intended. */
+function WarnHint({ children }: { children: ReactNode }) {
+  return <p className="mt-2 text-xs text-live">{children}</p>;
+}
+
+/** Table skeleton: a few rows of the given column count. */
+export function TableSkeleton({ cols = 5, rows = 4 }: { cols?: number; rows?: number }) {
+  return (
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <div className="flex gap-4 border-b px-3 py-3">
+        {Array.from({ length: cols }).map((_, i) => (
+          <Skeleton key={i} className="h-3 flex-1" />
+        ))}
+      </div>
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} className="flex gap-4 border-b px-3 py-3.5 last:border-0">
+          {Array.from({ length: cols }).map((_, i) => (
+            <Skeleton key={i} className={cn("h-4 flex-1", i === 0 && "max-w-48")} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function policyState(p: AccessPolicyData): { label: string; tone: "green" | "amber" | "default" } {
@@ -218,65 +275,55 @@ function PolicyModal({
       size="3xl"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!valid}>
-            {policy ? "Enregistrer" : "Créer"}
+            {policy ? "Enregistrer la règle" : "Créer la règle"}
           </SaveButton>
         </>
       }
     >
       <ErrorBox message={error} />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Nom *">
-          <input
+          <Input
             value={form.name}
             onChange={(e) => set({ name: e.target.value })}
             placeholder="Ops prod Linux"
-            className={inputCls}
             autoFocus
           />
         </Field>
         <Field label="Description">
-          <input
-            value={form.description}
-            onChange={(e) => set({ description: e.target.value })}
-            className={inputCls}
-          />
+          <Input value={form.description} onChange={(e) => set({ description: e.target.value })} />
         </Field>
         <Field label="Valide à partir du" hint="Laisser vide pour une validité immédiate.">
-          <input
+          <Input
             type="datetime-local"
             value={form.valid_from}
             onChange={(e) => set({ valid_from: e.target.value })}
-            className={inputCls}
+            className="tabular dark:[color-scheme:dark]"
           />
         </Field>
         <Field label="Valide jusqu'au" hint="Laisser vide pour une validité illimitée.">
-          <input
+          <Input
             type="datetime-local"
             value={form.valid_until}
             onChange={(e) => set({ valid_until: e.target.value })}
-            className={inputCls}
+            className="tabular dark:[color-scheme:dark]"
           />
         </Field>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={form.is_active}
-          onChange={(e) => set({ is_active: e.target.checked })}
-          className="w-4 h-4 rounded"
-        />
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-sm">
+        <Checkbox checked={form.is_active} onCheckedChange={(v) => set({ is_active: v === true })} />
         Règle active
       </label>
 
       {/* Who */}
       <div className="border-t pt-4">
-        <h4 className="text-xs font-medium text-muted-foreground uppercase mb-3">Bénéficiaires</h4>
-        <div className="grid grid-cols-2 gap-4">
+        <SectionTitle>Bénéficiaires</SectionTitle>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Utilisateurs">
             <MultiSelect
               options={userOpts}
@@ -295,16 +342,14 @@ function PolicyModal({
           </Field>
         </div>
         {noBeneficiary && (
-          <p className="text-xs text-amber-700 mt-2">
-            Aucun bénéficiaire : la règle ne donnera accès à personne.
-          </p>
+          <WarnHint>Aucun bénéficiaire : la règle ne donnera accès à personne.</WarnHint>
         )}
       </div>
 
       {/* What */}
       <div className="border-t pt-4">
-        <h4 className="text-xs font-medium text-muted-foreground uppercase mb-3">Serveurs ciblés</h4>
-        <div className="grid grid-cols-2 gap-4">
+        <SectionTitle>Serveurs ciblés</SectionTitle>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Serveurs">
             <MultiSelect
               options={serverOpts}
@@ -333,29 +378,31 @@ function PolicyModal({
               )}
               {form.labels.map((l) => (
                 <Chip key={l} tone="blue" onRemove={() => set({ labels: form.labels.filter((x) => x !== l) })}>
-                  {l}
+                  <span className="font-mono">{l}</span>
                 </Chip>
               ))}
             </div>
             <div className="flex gap-2">
-              <select
-                value=""
-                onChange={(e) => addLabel(e.target.value)}
-                className={inputCls}
-                disabled={labelSelectors.length === 0}
-              >
-                <option value="">
-                  {labelSelectors.length === 0 ? "Aucune étiquette existante" : "Choisir une étiquette existante"}
-                </option>
-                {labelSelectors
-                  .filter((l) => !form.labels.includes(l))
-                  .map((l) => (
-                    <option key={l} value={l}>
-                      {l.endsWith("=") ? `${l} (toutes valeurs)` : l}
-                    </option>
-                  ))}
-              </select>
-              <input
+              <Select value="" onValueChange={addLabel} disabled={labelSelectors.length === 0}>
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      labelSelectors.length === 0 ? "Aucune étiquette existante" : "Choisir une étiquette existante"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {labelSelectors
+                    .filter((l) => !form.labels.includes(l))
+                    .map((l) => (
+                      <SelectItem key={l} value={l}>
+                        <span className="font-mono">{l}</span>
+                        {l.endsWith("=") && <span className="text-muted-foreground"> (toutes valeurs)</span>}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <Input
                 value={labelInput}
                 onChange={(e) => setLabelInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -366,49 +413,47 @@ function PolicyModal({
                   }
                 }}
                 placeholder="ou saisir clé=valeur"
-                className={inputCls}
+                className="font-mono"
               />
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0"
                 onClick={() => {
                   addLabel(labelInput);
                   setLabelInput("");
                 }}
-                className={btnSecondary}
                 disabled={!labelInput.includes("=")}
+                title="Ajouter l'étiquette"
               >
-                <Plus size={16} />
-              </button>
+                <Plus />
+              </Button>
             </div>
           </Field>
         </div>
         {noTarget && (
-          <p className="text-xs text-amber-700 mt-2">
-            Aucune cible : la règle ne couvre aucun serveur.
-          </p>
+          <WarnHint>Aucune cible : la règle ne couvre aucun serveur.</WarnHint>
         )}
       </div>
 
       {/* How */}
-      <div className="border-t pt-4 grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-2">
         <Field label="Comptes autorisés">
           <div className="flex flex-wrap gap-1 mb-2 min-h-[1.5rem]">
             {form.accounts.length === 0 && (
               <span className="text-xs text-muted-foreground">Aucun compte</span>
             )}
             {form.accounts.map((a) => (
-              <Chip
+              <AccountChip
                 key={a}
-                tone={a.startsWith("@") ? "primary" : "default"}
-                title={(VIRTUAL_ACCOUNT_HELP as Record<string, string>)[a]}
+                account={a}
                 onRemove={() => set({ accounts: form.accounts.filter((x) => x !== a) })}
-              >
-                {a}
-              </Chip>
+              />
             ))}
           </div>
           <div className="flex gap-2 mb-2">
-            <input
+            <Input
               value={accountInput}
               onChange={(e) => setAccountInput(e.target.value)}
               onKeyDown={(e) => {
@@ -419,19 +464,22 @@ function PolicyModal({
                 }
               }}
               placeholder="Nom de compte (ex. root)"
-              className={inputCls}
+              className="font-mono"
             />
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="icon"
+              className="shrink-0"
               onClick={() => {
                 addAccount(accountInput);
                 setAccountInput("");
               }}
-              className={btnSecondary}
               disabled={!accountInput.trim()}
+              title="Ajouter le compte"
             >
-              <Plus size={16} />
-            </button>
+              <Plus />
+            </Button>
           </div>
           <div className="space-y-1">
             {VIRTUAL_ACCOUNTS.map((v) => (
@@ -440,30 +488,25 @@ function PolicyModal({
                 type="button"
                 onClick={() => addAccount(v)}
                 disabled={form.accounts.includes(v)}
-                className="w-full flex items-center gap-2 px-2 py-1 rounded border text-left text-xs hover:bg-accent disabled:opacity-40"
+                className="flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left text-xs transition-colors hover:bg-accent disabled:opacity-40"
               >
-                <Plus size={12} />
+                <Plus className="size-3 text-muted-foreground" />
                 <span className="font-mono font-medium w-14">{v}</span>
                 <span className="text-muted-foreground">{VIRTUAL_ACCOUNT_HELP[v]}</span>
               </button>
             ))}
           </div>
           {unknownVirtual.length > 0 && (
-            <p className="text-xs text-red-700 mt-1">
-              Compte virtuel inconnu : {unknownVirtual.join(", ")}
+            <p className="mt-1 text-xs text-danger">
+              Compte virtuel inconnu : <span className="font-mono">{unknownVirtual.join(", ")}</span>
             </p>
           )}
         </Field>
         <Field label="Actions autorisées">
           <div className="space-y-2">
             {ALL_ACTIONS.map((a) => (
-              <label key={a} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.actions.includes(a)}
-                  onChange={() => toggleAction(a)}
-                  className="w-4 h-4 rounded"
-                />
+              <label key={a} className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox checked={form.actions.includes(a)} onCheckedChange={() => toggleAction(a)} />
                 {ACTION_LABELS[a]}
                 <span className="text-xs text-muted-foreground">
                   {
@@ -478,7 +521,7 @@ function PolicyModal({
               </label>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
+          <p className="mt-2 text-xs text-muted-foreground">
             Le rôle de l'utilisateur reste un plafond : un lecteur (viewer) n'obtient jamais
             l'exécution.
           </p>
@@ -528,21 +571,21 @@ function GroupModal({
       onClose={onClose}
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={save} loading={loading} disabled={!name.trim()}>
-            {group ? "Enregistrer" : "Créer"}
+            {group ? "Enregistrer le groupe" : "Créer le groupe"}
           </SaveButton>
         </>
       }
     >
       <ErrorBox message={error} />
       <Field label="Nom *">
-        <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} autoFocus />
+        <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </Field>
       <Field label="Description">
-        <input value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} />
+        <Input value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
       <Field label={`Membres (${members.length})`}>
         <MultiSelect
@@ -561,23 +604,28 @@ function GroupModal({
 
 export function AccessTable({ rows }: { rows: ServerAccess[] }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground p-4">Aucun serveur accessible.</p>;
+    return (
+      <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
+        <ServerOff className="size-4" strokeWidth={1.75} />
+        Aucun serveur accessible pour le moment.
+      </div>
+    );
   }
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b bg-muted/50">
-          <th className="text-left p-3 font-medium">Serveur</th>
-          <th className="text-left p-3 font-medium">Actions</th>
-          <th className="text-left p-3 font-medium">Comptes</th>
-          <th className="text-left p-3 font-medium">Accordé par</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead className="px-3">Serveur</TableHead>
+          <TableHead className="px-3">Actions</TableHead>
+          <TableHead className="px-3">Comptes</TableHead>
+          <TableHead className="px-3">Accordé par</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {rows.map((r) => (
-          <tr key={r.server_id} className="border-b last:border-0">
-            <td className="p-3 font-medium">{r.server_name}</td>
-            <td className="p-3">
+          <TableRow key={r.server_id}>
+            <TableCell className="px-3 font-medium">{r.server_name}</TableCell>
+            <TableCell className="px-3">
               <div className="flex flex-wrap gap-1">
                 {r.actions.map((a) => (
                   <Chip key={a} tone={a === "execute" || a === "*" ? "amber" : "green"}>
@@ -585,25 +633,54 @@ export function AccessTable({ rows }: { rows: ServerAccess[] }) {
                   </Chip>
                 ))}
               </div>
-            </td>
-            <td className="p-3">
+            </TableCell>
+            <TableCell className="px-3">
               <div className="flex flex-wrap gap-1">
                 {r.accounts.map((a) => (
-                  <Chip key={a} tone={a.startsWith("@") ? "primary" : "default"}>
-                    {a === "*" ? "tous" : a}
-                  </Chip>
+                  <AccountChip key={a} account={a} />
                 ))}
               </div>
-            </td>
-            <td className="p-3 text-xs text-muted-foreground">
+            </TableCell>
+            <TableCell className="px-3 text-xs text-muted-foreground">
               {r.policies.map((p) => (p === "admin" ? "rôle administrateur" : p)).join(", ")}
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
+
+/** Icon button with a tooltip (row actions). */
+function RowAction({
+  label,
+  onClick,
+  danger,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button onClick={onClick} className={danger ? iconBtnDanger : iconBtn} aria-label={label}>
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const rowExit = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.18 },
+};
 
 // ── Page ─────────────────────────────────────────────────────
 
@@ -616,6 +693,9 @@ export default function Access() {
   const [error, setError] = useState<string | null>(null);
   const [editPolicy, setEditPolicy] = useState<AccessPolicyData | null | undefined>(undefined);
   const [editGroup, setEditGroup] = useState<UserGroupData | null | undefined>(undefined);
+  const [confirmPolicy, setConfirmPolicy] = useState<AccessPolicyData | null>(null);
+  const [confirmGroup, setConfirmGroup] = useState<UserGroupData | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Effective access
   const [effUser, setEffUser] = useState("");
@@ -661,7 +741,15 @@ export default function Access() {
       .finally(() => setEffLoading(false));
   }, [effUser]);
 
-  if (userLoading) return <p className="text-muted-foreground">Chargement...</p>;
+  if (userLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-4 w-96 max-w-full" />
+        <TableSkeleton />
+      </div>
+    );
+  }
   if (!isAdmin) return <Navigate to="/" replace />;
 
   const togglePolicy = async (p: AccessPolicyData) => {
@@ -670,29 +758,41 @@ export default function Access() {
         is_active: !p.is_active,
       });
       setPolicies((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
+      toast.success(updated.is_active ? `Règle ${p.name} activée` : `Règle ${p.name} désactivée`);
     } catch (e) {
       setError(errorMessage(e));
     }
   };
 
-  const deletePolicy = async (p: AccessPolicyData) => {
-    if (!confirm(`Supprimer la règle ${p.name} ?`)) return;
+  const deletePolicy = async () => {
+    const p = confirmPolicy;
+    if (!p) return;
+    setDeleting(true);
     try {
       await api.delete(`/api/access-policies/${p.id}`);
       setPolicies((prev) => prev.filter((x) => x.id !== p.id));
+      toast.success(`Règle ${p.name} supprimée`);
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setDeleting(false);
+      setConfirmPolicy(null);
     }
   };
 
-  const deleteGroup = async (g: UserGroupData) => {
-    if (!confirm(`Supprimer le groupe ${g.name} ? Les règles qui le citent ne s'appliqueront plus à ses membres.`))
-      return;
+  const deleteGroup = async () => {
+    const g = confirmGroup;
+    if (!g) return;
+    setDeleting(true);
     try {
       await api.delete(`/api/user-groups/${g.id}`);
+      toast.success(`Groupe ${g.name} supprimé`);
       load();
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setDeleting(false);
+      setConfirmGroup(null);
     }
   };
 
@@ -700,30 +800,24 @@ export default function Access() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold">Accès</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Qui peut se connecter à quels serveurs, avec quels comptes et quelles actions.
-          </p>
-        </div>
-        {tab === "policies" && (
-          <button
-            onClick={() => setEditPolicy(null)}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
-          >
-            <Plus size={16} /> Nouvelle règle
-          </button>
-        )}
-        {tab === "groups" && (
-          <button
-            onClick={() => setEditGroup(null)}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90"
-          >
-            <Plus size={16} /> Nouveau groupe
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Accès"
+        description="Qui peut se connecter à quels serveurs, avec quels comptes et quelles actions."
+        actions={
+          <>
+            {tab === "policies" && (
+              <Button onClick={() => setEditPolicy(null)}>
+                <Plus /> Nouvelle règle
+              </Button>
+            )}
+            {tab === "groups" && (
+              <Button onClick={() => setEditGroup(null)}>
+                <Plus /> Nouveau groupe
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <Tabs<Tab>
         tabs={[
@@ -743,12 +837,12 @@ export default function Access() {
           <ErrorBox message={error} />
         </div>
       )}
-      {loading && <p className="text-muted-foreground">Chargement...</p>}
+      {loading && <TableSkeleton cols={6} />}
 
       {/* Policies */}
       {!loading && tab === "policies" && (
-        <>
-          <div className="mb-4 p-3 rounded-md border bg-muted/30 text-xs text-muted-foreground space-y-1">
+        <div className="space-y-4">
+          <div className="space-y-1 rounded-md border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground [&_strong]:font-medium [&_strong]:text-foreground">
             <p>
               Une règle accorde à des <strong>utilisateurs ou groupes</strong> l'accès à des{" "}
               <strong>serveurs</strong> (désignés directement, par nœud avec ses sous-nœuds, ou par
@@ -759,186 +853,203 @@ export default function Access() {
               Comptes virtuels :{" "}
               {VIRTUAL_ACCOUNTS.map((v, i) => (
                 <span key={v}>
-                  <span className="font-mono">{v}</span> = {VIRTUAL_ACCOUNT_HELP[v].toLowerCase()}
+                  <span className="font-mono text-foreground">{v}</span> = {VIRTUAL_ACCOUNT_HELP[v].toLowerCase()}
                   {i < VIRTUAL_ACCOUNTS.length - 1 ? " ; " : "."}
                 </span>
               ))}
             </p>
           </div>
           {policies.length === 0 ? (
-            <div className="bg-card border rounded-lg p-12 text-center">
-              <ShieldCheck size={48} className="mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                Aucune règle d'accès. Seuls les administrateurs voient les serveurs.
-              </p>
-            </div>
+            <EmptyState
+              icon={ShieldCheck}
+              title="Aucune règle d'accès"
+              action={
+                <Button onClick={() => setEditPolicy(null)}>
+                  <Plus /> Nouvelle règle
+                </Button>
+              }
+            >
+              Seuls les administrateurs voient les serveurs. Créez une règle pour ouvrir l'accès à d'autres
+              utilisateurs.
+            </EmptyState>
           ) : (
-            <div className="bg-card border rounded-lg overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-3 font-medium">Règle</th>
-                    <th className="text-left p-3 font-medium">Statut</th>
-                    <th className="text-left p-3 font-medium">Bénéficiaires</th>
-                    <th className="text-left p-3 font-medium">Cibles</th>
-                    <th className="text-left p-3 font-medium">Comptes</th>
-                    <th className="text-left p-3 font-medium">Actions</th>
-                    <th className="text-right p-3 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {policies.map((p) => {
-                    const st = policyState(p);
-                    return (
-                      <tr key={p.id} className="border-b last:border-0 align-top hover:bg-muted/30">
-                        <td className="p-3">
-                          <p className="font-medium">{p.name}</p>
-                          {p.description && (
-                            <p className="text-xs text-muted-foreground">{p.description}</p>
+            <Card className="overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="px-3">Règle</TableHead>
+                    <TableHead className="px-3">Statut</TableHead>
+                    <TableHead className="px-3">Bénéficiaires</TableHead>
+                    <TableHead className="px-3">Cibles</TableHead>
+                    <TableHead className="px-3">Comptes</TableHead>
+                    <TableHead className="px-3">Actions</TableHead>
+                    <TableHead className="px-3">
+                      <span className="sr-only">Gestion</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <AnimatePresence initial={false}>
+                    {policies.map((p) => {
+                      const st = policyState(p);
+                      return (
+                        <motion.tr
+                          key={p.id}
+                          layout
+                          {...rowExit}
+                          className={cn(
+                            "border-b align-top transition-colors hover:bg-muted/50",
+                            !p.is_active && "text-muted-foreground",
                           )}
-                          {(p.valid_from || p.valid_until) && (
-                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                              <CalendarClock size={11} />
-                              {p.valid_from ? formatDate(p.valid_from) : "..."} au{" "}
-                              {p.valid_until ? formatDate(p.valid_until) : "..."}
-                            </p>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <Chip tone={st.tone}>{st.label}</Chip>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-wrap gap-1 max-w-xs">
-                            {p.users.map((u) => (
-                              <Chip key={u.id}>{u.name}</Chip>
-                            ))}
-                            {p.groups.map((g) => (
-                              <Chip key={g.id} tone="primary">
-                                <Users size={11} /> {g.name}
-                              </Chip>
-                            ))}
-                            {p.users.length + p.groups.length === 0 && (
-                              <span className="text-xs text-muted-foreground">aucun</span>
+                        >
+                          <TableCell className="px-3 py-2.5">
+                            <p className="font-medium text-foreground">{p.name}</p>
+                            {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
+                            {(p.valid_from || p.valid_until) && (
+                              <p className="tabular mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                <CalendarClock className="size-3" />
+                                {p.valid_from ? formatDate(p.valid_from) : "..."} au{" "}
+                                {p.valid_until ? formatDate(p.valid_until) : "..."}
+                              </p>
                             )}
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-wrap gap-1 max-w-xs">
-                            {p.servers.map((s) => (
-                              <Chip key={s.id}>{s.name}</Chip>
-                            ))}
-                            {p.nodes.map((n) => (
-                              <Chip key={n.id} tone="green">
-                                {refs.nodes.find((x) => x.id === n.id)?.path || n.name}/*
-                              </Chip>
-                            ))}
-                            {p.labels.map((l) => (
-                              <Chip key={l} tone="blue">
-                                {l}
-                              </Chip>
-                            ))}
-                            {p.servers.length + p.nodes.length + p.labels.length === 0 && (
-                              <span className="text-xs text-muted-foreground">aucune</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-wrap gap-1">
-                            {p.accounts.map((a) => (
-                              <Chip key={a} tone={a.startsWith("@") ? "primary" : "default"}>
-                                {a}
-                              </Chip>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-wrap gap-1">
-                            {p.actions.map((a) => (
-                              <Chip key={a} tone={a === "execute" ? "amber" : "default"}>
-                                {ACTION_LABELS[a] || a}
-                              </Chip>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="p-3 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => togglePolicy(p)}
-                            className={iconBtn}
-                            title={p.is_active ? "Désactiver" : "Activer"}
-                          >
-                            <Power size={15} className={p.is_active ? "text-green-600" : ""} />
-                          </button>
-                          <button onClick={() => setEditPolicy(p)} className={iconBtn} title="Modifier">
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => deletePolicy(p)} className={iconBtnDanger} title="Supprimer">
-                            <Trash2 size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-2.5">
+                            <Chip tone={st.tone}>{st.label}</Chip>
+                          </TableCell>
+                          <TableCell className="px-3 py-2.5">
+                            <div className="flex max-w-xs flex-wrap gap-1">
+                              {p.users.map((u) => (
+                                <Chip key={u.id}>{u.name}</Chip>
+                              ))}
+                              {p.groups.map((g) => (
+                                <Chip key={g.id} tone="primary">
+                                  <Users className="size-3" /> {g.name}
+                                </Chip>
+                              ))}
+                              {p.users.length + p.groups.length === 0 && (
+                                <span className="text-xs text-live">aucun</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-2.5">
+                            <div className="flex max-w-xs flex-wrap gap-1">
+                              {p.servers.map((s) => (
+                                <Chip key={s.id}>{s.name}</Chip>
+                              ))}
+                              {p.nodes.map((n) => (
+                                <Chip key={n.id} tone="green">
+                                  {refs.nodes.find((x) => x.id === n.id)?.path || n.name}/*
+                                </Chip>
+                              ))}
+                              {p.labels.map((l) => (
+                                <Chip key={l} tone="blue">
+                                  <span className="font-mono">{l}</span>
+                                </Chip>
+                              ))}
+                              {p.servers.length + p.nodes.length + p.labels.length === 0 && (
+                                <span className="text-xs text-live">aucune</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-2.5">
+                            <div className="flex flex-wrap gap-1">
+                              {p.accounts.map((a) => (
+                                <AccountChip key={a} account={a} />
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-2.5">
+                            <div className="flex flex-wrap gap-1">
+                              {p.actions.map((a) => (
+                                <Chip key={a} tone={a === "execute" ? "amber" : "default"}>
+                                  {ACTION_LABELS[a] || a}
+                                </Chip>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap px-3 py-1.5 text-right">
+                            <RowAction label={p.is_active ? "Désactiver" : "Activer"} onClick={() => togglePolicy(p)}>
+                              <Power className={cn("size-4", p.is_active && "text-success")} />
+                            </RowAction>
+                            <RowAction label="Modifier" onClick={() => setEditPolicy(p)}>
+                              <Pencil className="size-4" />
+                            </RowAction>
+                            <RowAction label="Supprimer" danger onClick={() => setConfirmPolicy(p)}>
+                              <Trash2 className="size-4" />
+                            </RowAction>
+                          </TableCell>
+                        </motion.tr>
+                      );
+                    })}
+                  </AnimatePresence>
+                </TableBody>
+              </Table>
+            </Card>
           )}
-        </>
+        </div>
       )}
 
       {/* Groups */}
       {!loading && tab === "groups" && (
         <>
           {refs.groups.length === 0 ? (
-            <div className="bg-card border rounded-lg p-12 text-center">
-              <Users size={48} className="mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                Aucun groupe. Les groupes simplifient l'attribution des règles d'accès.
-              </p>
-            </div>
+            <EmptyState
+              icon={Users}
+              title="Aucun groupe"
+              action={
+                <Button onClick={() => setEditGroup(null)}>
+                  <Plus /> Nouveau groupe
+                </Button>
+              }
+            >
+              Les groupes simplifient l'attribution des règles d'accès. Créez-en un pour commencer.
+            </EmptyState>
           ) : (
-            <div className="bg-card border rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-3 font-medium">Groupe</th>
-                    <th className="text-left p-3 font-medium">Membres</th>
-                    <th className="text-left p-3 font-medium">Créé le</th>
-                    <th className="text-right p-3 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
+            <Card className="overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="px-3">Groupe</TableHead>
+                    <TableHead className="px-3">Membres</TableHead>
+                    <TableHead className="px-3">Créé le</TableHead>
+                    <TableHead className="px-3">
+                      <span className="sr-only">Gestion</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {refs.groups.map((g) => (
-                    <tr key={g.id} className="border-b last:border-0 align-top hover:bg-muted/30">
-                      <td className="p-3">
+                    <TableRow key={g.id} className="align-top">
+                      <TableCell className="px-3 py-2.5">
                         <p className="font-medium">{g.name}</p>
                         {g.description && <p className="text-xs text-muted-foreground">{g.description}</p>}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-1 max-w-xl">
-                          {g.users.length === 0 && (
-                            <span className="text-xs text-muted-foreground">aucun membre</span>
-                          )}
+                      </TableCell>
+                      <TableCell className="px-3 py-2.5">
+                        <div className="flex max-w-xl flex-wrap gap-1">
+                          {g.users.length === 0 && <span className="text-xs text-muted-foreground">aucun membre</span>}
                           {g.users.map((u) => (
                             <Chip key={u.id} title={u.email}>
                               {u.display_name}
                             </Chip>
                           ))}
                         </div>
-                      </td>
-                      <td className="p-3 text-xs text-muted-foreground">{formatDate(g.created_at, false)}</td>
-                      <td className="p-3 text-right whitespace-nowrap">
-                        <button onClick={() => setEditGroup(g)} className={iconBtn} title="Modifier">
-                          <Pencil size={15} />
-                        </button>
-                        <button onClick={() => deleteGroup(g)} className={iconBtnDanger} title="Supprimer">
-                          <Trash2 size={15} />
-                        </button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                      <TableCell className="tabular px-3 py-2.5 text-xs text-muted-foreground">
+                        {formatDate(g.created_at, false)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap px-3 py-1.5 text-right">
+                        <RowAction label="Modifier" onClick={() => setEditGroup(g)}>
+                          <Pencil className="size-4" />
+                        </RowAction>
+                        <RowAction label="Supprimer" danger onClick={() => setConfirmGroup(g)}>
+                          <Trash2 className="size-4" />
+                        </RowAction>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TableBody>
+              </Table>
+            </Card>
           )}
         </>
       )}
@@ -947,25 +1058,36 @@ export default function Access() {
       {!loading && tab === "effective" && (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <select value={effUser} onChange={(e) => setEffUser(e.target.value)} className={`${inputCls} max-w-sm`}>
-              <option value="">Choisir un utilisateur</option>
-              {refs.users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name} ({u.email}, {u.role})
-                </option>
-              ))}
-            </select>
-            {effLoading && <Loader2 size={16} className="animate-spin text-muted-foreground" />}
+            <Select value={effUser} onValueChange={setEffUser}>
+              <SelectTrigger className="max-w-sm">
+                <SelectValue placeholder="Choisir un utilisateur" />
+              </SelectTrigger>
+              <SelectContent>
+                {refs.users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.display_name} <span className="text-muted-foreground">({u.email}, {u.role})</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {effLoading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
           </div>
           <ErrorBox message={effError} />
+          {!effUser && (
+            <EmptyState icon={UserSearch} title="Choisissez un utilisateur">
+              La liste montre les serveurs qu'il peut atteindre, avec les comptes, les actions et les règles qui les
+              accordent.
+            </EmptyState>
+          )}
           {selectedEffUser && effRows && (
-            <div className="bg-card border rounded-lg overflow-hidden">
-              <div className="p-3 border-b text-sm">
-                <strong>{selectedEffUser.display_name}</strong> accède à {effRows.length} serveur(s)
+            <Card className="overflow-hidden">
+              <div className="border-b px-3 py-2.5 text-sm">
+                <span className="font-medium">{selectedEffUser.display_name}</span> accède à{" "}
+                <span className="tabular">{effRows.length}</span> serveur(s)
                 {selectedEffUser.role === "admin" && " (administrateur : accès complet)"}.
               </div>
               <AccessTable rows={effRows} />
-            </div>
+            </Card>
           )}
         </div>
       )}
@@ -973,7 +1095,7 @@ export default function Access() {
       {/* Discovered accounts (all servers) */}
       {!loading && tab === "discovered" && <DiscoveredAccountsPanel servers={refs.servers} />}
 
-      {/* Connection / command ACLs (lot 3) */}
+      {/* Connection / command ACLs */}
       {!loading && tab === "acl-connection" && <ConnectionRulesPanel refs={refs} />}
       {!loading && tab === "acl-command" && <CommandRulesPanel refs={refs} />}
 
@@ -983,6 +1105,7 @@ export default function Access() {
           refs={refs}
           onClose={() => setEditPolicy(undefined)}
           onSaved={() => {
+            toast.success(editPolicy ? "Règle enregistrée" : "Règle créée");
             setEditPolicy(undefined);
             load();
           }}
@@ -994,10 +1117,35 @@ export default function Access() {
           users={refs.users}
           onClose={() => setEditGroup(undefined)}
           onSaved={() => {
+            toast.success(editGroup ? "Groupe enregistré" : "Groupe créé");
             setEditGroup(undefined);
             load();
           }}
         />
+      )}
+      {confirmPolicy && (
+        <ConfirmModal
+          title={`Supprimer la règle ${confirmPolicy.name}`}
+          confirmLabel="Supprimer la règle"
+          danger
+          loading={deleting}
+          onConfirm={deletePolicy}
+          onClose={() => setConfirmPolicy(null)}
+        >
+          <p>Les accès qu'elle accorde sont retirés immédiatement.</p>
+        </ConfirmModal>
+      )}
+      {confirmGroup && (
+        <ConfirmModal
+          title={`Supprimer le groupe ${confirmGroup.name}`}
+          confirmLabel="Supprimer le groupe"
+          danger
+          loading={deleting}
+          onConfirm={deleteGroup}
+          onClose={() => setConfirmGroup(null)}
+        >
+          <p>Les règles qui le citent ne s'appliqueront plus à ses membres.</p>
+        </ConfirmModal>
       )}
     </div>
   );

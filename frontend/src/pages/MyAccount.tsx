@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, KeyRound, Loader2, Plus, ShieldCheck, Trash2, User } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
+import { AlertTriangle, Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
@@ -11,15 +13,25 @@ import {
 import { AccessTable } from "@/pages/Access";
 import {
   Chip,
+  ConfirmModal,
+  EmptyState,
   ErrorBox,
   Field,
   Modal,
+  PageHeader,
   SaveButton,
-  btnSecondary,
   formatDate,
   iconBtnDanger,
-  inputCls,
 } from "@/components/kit";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Administrateur",
@@ -68,9 +80,9 @@ function CreateKeyModal({
       size="md"
       footer={
         <>
-          <button onClick={onClose} className={btnSecondary}>
+          <Button variant="outline" onClick={onClose}>
             Annuler
-          </button>
+          </Button>
           <SaveButton onClick={create} loading={loading} disabled={!name.trim()}>
             Créer la clé
           </SaveButton>
@@ -79,23 +91,28 @@ function CreateKeyModal({
     >
       <ErrorBox message={error} />
       <Field label="Nom *" hint="Pour reconnaître la clé (script, outil, poste...).">
-        <input
+        <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="script-inventaire"
-          className={inputCls}
+          className="font-mono"
           autoFocus
         />
       </Field>
       <Field label="Expiration">
-        <select value={days} onChange={(e) => setDays(e.target.value)} className={inputCls}>
-          <option value="7">7 jours</option>
-          <option value="30">30 jours</option>
-          <option value="90">90 jours (recommandé)</option>
-          <option value="180">180 jours</option>
-          <option value="365">1 an</option>
-          <option value="never">Jamais (déconseillé)</option>
-        </select>
+        <Select value={days} onValueChange={setDays}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">7 jours</SelectItem>
+            <SelectItem value="30">30 jours</SelectItem>
+            <SelectItem value="90">90 jours (recommandé)</SelectItem>
+            <SelectItem value="180">180 jours</SelectItem>
+            <SelectItem value="365">1 an</SelectItem>
+            <SelectItem value="never">Jamais (déconseillé)</SelectItem>
+          </SelectContent>
+        </Select>
       </Field>
       <p className="text-xs text-muted-foreground">
         La clé hérite de vos droits actuels. Elle ne peut pas créer d'autres clés.
@@ -121,16 +138,14 @@ function TokenOnceModal({ created, onClose }: { created: AccessKeyCreated; onClo
       onClose={onClose}
       size="lg"
       footer={
-        <button onClick={onClose} className={btnSecondary}>
-          J'ai copié la clé
-        </button>
+        <Button onClick={onClose}>J'ai copié la clé</Button>
       }
     >
-      <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-900 flex gap-2">
-        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+      <div className="flex gap-2 rounded-md border border-live/30 bg-live/10 px-3 py-2.5 text-sm">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-live" />
         <div>
-          <p className="font-medium">Copiez cette clé maintenant.</p>
-          <p className="text-xs mt-1">
+          <p className="font-medium text-live">Copiez cette clé maintenant.</p>
+          <p className="mt-1 text-xs text-foreground">
             Elle ne sera plus jamais affichée : Citadel n'en conserve qu'une empreinte. Traitez-la
             comme un mot de passe et ne la partagez pas. Utilisation : en-tête{" "}
             <span className="font-mono">Authorization: Bearer &lt;clé&gt;</span>.
@@ -138,21 +153,41 @@ function TokenOnceModal({ created, onClose }: { created: AccessKeyCreated; onClo
         </div>
       </div>
       <div className="flex gap-2">
-        <input
+        <Input
           readOnly
           value={created.token}
           onFocus={(e) => e.target.select()}
-          className={`${inputCls} font-mono text-xs`}
+          className="font-mono text-xs"
         />
-        <button onClick={copy} className={btnSecondary} title="Copier">
-          {copied ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
-        </button>
+        <Button variant="outline" size="icon" className="shrink-0" onClick={copy} title="Copier la clé">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={copied ? "ok" : "copy"}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.15 }}
+            >
+              {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+            </motion.span>
+          </AnimatePresence>
+        </Button>
       </div>
       <p className="text-xs text-muted-foreground">
         Expiration : {created.expires_at ? formatDate(created.expires_at) : "jamais"}
       </p>
     </Modal>
   );
+}
+
+function initials(name: string | undefined): string {
+  if (!name) return "?";
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
 }
 
 export default function MyAccount() {
@@ -165,6 +200,8 @@ export default function MyAccount() {
   const [allUsers, setAllUsers] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [created, setCreated] = useState<AccessKeyCreated | null>(null);
+  const [revoking, setRevoking] = useState<AccessKeyData | null>(null);
+  const [revokeLoading, setRevokeLoading] = useState(false);
 
   useEffect(() => {
     api
@@ -189,81 +226,93 @@ export default function MyAccount() {
     loadKeys();
   }, [loadKeys]);
 
-  const revoke = async (k: AccessKeyData) => {
-    if (!confirm(`Révoquer la clé ${k.name} (${k.prefix}) ? Les outils qui l'utilisent perdront l'accès.`)) return;
+  const revoke = async () => {
+    const k = revoking;
+    if (!k) return;
+    setRevokeLoading(true);
     try {
       await api.delete(`/api/access-keys/${k.id}`);
+      toast.success(`Clé ${k.name} révoquée`);
       loadKeys();
     } catch (e) {
       setKeysError(errorMessage(e));
+    } finally {
+      setRevokeLoading(false);
+      setRevoking(null);
     }
   };
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Mon compte</h2>
+      <PageHeader title="Mon compte" description="Votre profil, les serveurs auxquels vous avez accès et vos clés API." />
 
       {/* Profile */}
-      <div className="bg-card border rounded-lg p-4 flex items-center gap-4">
-        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-          <User size={22} className="text-primary" />
-        </div>
-        <div className="flex-1">
-          <p className="font-medium">{user?.display_name || "..."}</p>
-          <p className="text-sm text-muted-foreground">{user?.email}</p>
+      <Card className="flex items-center gap-4 p-4">
+        <Avatar className="size-10">
+          <AvatarFallback className="bg-muted text-sm font-medium">{initials(user?.display_name)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          {user ? (
+            <>
+              <p className="truncate font-medium">{user.display_name}</p>
+              <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+            </>
+          ) : (
+            <div className="space-y-1.5">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3.5 w-56" />
+            </div>
+          )}
         </div>
         {user && <Chip tone={user.role === "admin" ? "amber" : "primary"}>{ROLE_LABELS[user.role] || user.role}</Chip>}
-      </div>
+      </Card>
 
       {/* My access */}
-      <div className="bg-card border rounded-lg">
-        <div className="p-4 border-b">
-          <h3 className="font-semibold text-sm flex items-center gap-2">
-            <ShieldCheck size={16} /> Mes accès
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Serveurs auxquels vous avez accès, avec les comptes et actions accordés par les règles
-            d'accès.
-          </p>
-        </div>
+      <Card className="overflow-hidden">
+        <CardHeader className="space-y-1 border-b p-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="size-4 text-muted-foreground" /> Mes accès
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Serveurs auxquels vous avez accès, avec les comptes et actions accordés par les règles d'accès.
+          </CardDescription>
+        </CardHeader>
         {accessError && (
           <div className="p-4">
             <ErrorBox message={accessError} />
           </div>
         )}
-        {access === null && !accessError && <p className="p-4 text-sm text-muted-foreground">Chargement...</p>}
+        {access === null && !accessError && (
+          <div className="space-y-3 p-4">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-5 w-full" />
+            ))}
+          </div>
+        )}
         {access && <AccessTable rows={access} />}
-      </div>
+      </Card>
 
       {/* API keys */}
-      <div className="bg-card border rounded-lg">
-        <div className="flex items-center justify-between p-4 border-b">
-          <div>
-            <h3 className="font-semibold text-sm flex items-center gap-2">
-              <KeyRound size={16} /> Clés API
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
+          <div className="space-y-1">
+            <h3 className="flex items-center gap-2 text-base font-semibold leading-none">
+              <KeyRound className="size-4 text-muted-foreground" /> Clés API
             </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground">
               Jetons personnels pour l'API Citadel (scripts, intégrations). Ils héritent de vos droits.
             </p>
           </div>
           <div className="flex items-center gap-3">
             {isAdmin && (
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={allUsers}
-                  onChange={(e) => setAllUsers(e.target.checked)}
-                  className="w-4 h-4 rounded"
-                />
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <Checkbox checked={allUsers} onCheckedChange={(v) => setAllUsers(v === true)} />
                 Toutes les clés
               </label>
             )}
-            <button
-              onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90"
-            >
-              <Plus size={14} /> Nouvelle clé
-            </button>
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus /> Nouvelle clé
+            </Button>
           </div>
         </div>
         {keysError && (
@@ -271,56 +320,74 @@ export default function MyAccount() {
             <ErrorBox message={keysError} />
           </div>
         )}
-        {keysLoading ? (
-          <div className="p-4">
-            <Loader2 size={16} className="animate-spin text-muted-foreground" />
+        {keysLoading && keys.length === 0 ? (
+          <div className="space-y-3 p-4">
+            {[0, 1].map((i) => (
+              <Skeleton key={i} className="h-5 w-full" />
+            ))}
           </div>
         ) : keys.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">Aucune clé API.</p>
+          <div className="p-4">
+            <EmptyState
+              icon={KeyRound}
+              title="Aucune clé API"
+              action={
+                <Button variant="outline" size="sm" onClick={() => setShowCreate(true)}>
+                  <Plus /> Créer une clé
+                </Button>
+              }
+            >
+              Créez une clé pour appeler l'API Citadel depuis un script ou un outil.
+            </EmptyState>
+          </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium">Nom</th>
-                <th className="text-left p-3 font-medium">Préfixe</th>
-                {allUsers && <th className="text-left p-3 font-medium">Utilisateur</th>}
-                <th className="text-left p-3 font-medium">Statut</th>
-                <th className="text-left p-3 font-medium">Créée</th>
-                <th className="text-left p-3 font-medium">Expire</th>
-                <th className="text-left p-3 font-medium">Dernière utilisation</th>
-                <th className="text-right p-3 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="px-3">Nom</TableHead>
+                <TableHead className="px-3">Préfixe</TableHead>
+                {allUsers && <TableHead className="px-3">Utilisateur</TableHead>}
+                <TableHead className="px-3">Statut</TableHead>
+                <TableHead className="px-3">Créée</TableHead>
+                <TableHead className="px-3">Expire</TableHead>
+                <TableHead className="px-3">Dernière utilisation</TableHead>
+                <TableHead className="px-3">
+                  <span className="sr-only">Gestion</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className={cn(keysLoading && "opacity-60")}>
               {keys.map((k) => {
                 const st = keyState(k);
                 return (
-                  <tr key={k.id} className={`border-b last:border-0 ${k.is_active ? "" : "opacity-60"}`}>
-                    <td className="p-3 font-medium">{k.name}</td>
-                    <td className="p-3 font-mono text-xs">ctk_{k.prefix}_...</td>
-                    {allUsers && <td className="p-3 text-xs">{k.user_name}</td>}
-                    <td className="p-3">
+                  <TableRow key={k.id} className={k.is_active ? "" : "text-muted-foreground"}>
+                    <TableCell className="px-3 font-medium">{k.name}</TableCell>
+                    <TableCell className="px-3 font-mono text-xs">ctk_{k.prefix}_...</TableCell>
+                    {allUsers && <TableCell className="px-3 text-xs">{k.user_name}</TableCell>}
+                    <TableCell className="px-3">
                       <Chip tone={st.tone}>{st.label}</Chip>
-                    </td>
-                    <td className="p-3 text-xs text-muted-foreground">{formatDate(k.created_at)}</td>
-                    <td className="p-3 text-xs text-muted-foreground">
+                    </TableCell>
+                    <TableCell className="tabular px-3 text-xs text-muted-foreground">{formatDate(k.created_at)}</TableCell>
+                    <TableCell className="tabular px-3 text-xs text-muted-foreground">
                       {k.expires_at ? formatDate(k.expires_at) : "jamais"}
-                    </td>
-                    <td className="p-3 text-xs text-muted-foreground">{formatDate(k.last_used_at)}</td>
-                    <td className="p-3 text-right">
+                    </TableCell>
+                    <TableCell className="tabular px-3 text-xs text-muted-foreground">
+                      {formatDate(k.last_used_at)}
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right">
                       {k.is_active && (
-                        <button onClick={() => revoke(k)} className={iconBtnDanger} title="Révoquer">
-                          <Trash2 size={15} />
+                        <button onClick={() => setRevoking(k)} className={iconBtnDanger} title="Révoquer la clé">
+                          <Trash2 className="size-4" />
                         </button>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </Card>
 
       {showCreate && (
         <CreateKeyModal
@@ -333,6 +400,21 @@ export default function MyAccount() {
         />
       )}
       {created && <TokenOnceModal created={created} onClose={() => setCreated(null)} />}
+      {revoking && (
+        <ConfirmModal
+          title={`Révoquer la clé ${revoking.name}`}
+          confirmLabel="Révoquer la clé"
+          danger
+          loading={revokeLoading}
+          onConfirm={revoke}
+          onClose={() => setRevoking(null)}
+        >
+          <p>
+            La clé <span className="font-mono text-foreground">ctk_{revoking.prefix}_...</span> cessera de fonctionner
+            immédiatement. Les outils qui l'utilisent perdront l'accès.
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }
