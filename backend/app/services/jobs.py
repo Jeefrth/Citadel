@@ -121,13 +121,13 @@ def pick_account(server: Server, grant: ServerGrant, username: str | None) -> Re
 
 async def create_job(db: AsyncSession, user: User, *, kind: str, name: str, selector: dict,
                      command: str | None = None, playbook: Playbook | None = None, extra_vars: dict | None = None,
-                     parallelism: int = 10, timeout: int = 60) -> Job:
+                     parallelism: int = 10, timeout: int = 60, client_ip: str | None = None) -> Job:
     candidates = await resolve_targets(db, user, selector)
     if not candidates:
         raise ValueError("Aucun serveur ne correspond à la sélection")
     job = Job(kind=kind, name=name, command=command, playbook_id=playbook.id if playbook else None,
               extra_vars=extra_vars or {}, selector=selector, parallelism=parallelism, timeout=timeout,
-              user_id=user.id, status="pending")
+              user_id=user.id, client_ip=client_ip, status="pending")
     db.add(job)
     await db.flush()
     for c in candidates:
@@ -214,6 +214,7 @@ async def _run_command_job(job_id) -> None:
         target_ids = [t.id for t in job.targets if t.status == "pending"]
         sem = asyncio.Semaphore(max(1, min(job.parallelism, 50)))
         command, timeout, user_id, account_name = job.command, job.timeout, job.user_id, (job.selector or {}).get("account")
+        ip = job.client_ip
 
     async def one(target_id):
         async with sem:
@@ -235,11 +236,11 @@ async def _run_command_job(job_id) -> None:
                         raise ValueError("Droit « exécuter » retiré entre-temps")
                     account = pick_account(server, grant, account_name)
                     t.account = account.label
-                    await enforce_connect(db, user, server, account.username, None)
-                    outcome = await check_command(db, user, server, account.username, command, None, source="job")
+                    await enforce_connect(db, user, server, account.username, ip)
+                    outcome = await check_command(db, user, server, account.username, command, ip, source="job")
                     if not outcome.allowed:
                         await log_command(db, user=user, server=server, account=account.label, command=command,
-                                          source="job", decision=outcome.decision, rule=outcome.rule)
+                                          source="job", decision=outcome.decision, rule=outcome.rule, ip=ip)
                         t.status, t.message = "skipped", outcome.message
                     else:
                         res = await connection_manager.execute_command(server, account, command, timeout=timeout)
@@ -248,7 +249,7 @@ async def _run_command_job(job_id) -> None:
                         t.status = "success" if res.exit_code == 0 else "failed"
                         await log_command(db, user=user, server=server, account=account.label, command=command,
                                           source="job", decision=outcome.decision, rule=outcome.rule,
-                                          exit_code=res.exit_code)
+                                          exit_code=res.exit_code, ip=ip)
                 except GovernanceDenied as e:
                     t.status, t.message = "skipped", e.message
                 except asyncio.TimeoutError:
@@ -392,6 +393,7 @@ async def _run_playbook_job(job_id) -> None:
                 raise ValueError("Playbook supprimé")
             user = await db.get(User, job.user_id)
             account_name = (job.selector or {}).get("account")
+            ip = job.client_ip
             grants = await compute_grants(db, user)
             hosts, host_to_target = {}, {}
             for t in job.targets:
@@ -405,7 +407,7 @@ async def _run_playbook_job(job_id) -> None:
                     if grant is None or PolicyAction.EXECUTE.value not in grant.actions:
                         raise ValueError("Droit « exécuter » retiré entre-temps")
                     account = pick_account(server, grant, account_name)
-                    await enforce_connect(db, user, server, account.username, None)
+                    await enforce_connect(db, user, server, account.username, ip)
                     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
                     await stack.enter_async_context(routing.via(server))
                     host, port = await routing.tcp_endpoint(server.ip_address, port)
@@ -417,7 +419,7 @@ async def _run_playbook_job(job_id) -> None:
                     t.account, t.status, t.started_at = account.label, "running", _now()
                     await log_command(db, user=user, server=server, account=account.label,
                                       command=f"ansible-playbook {playbook.name}", source="playbook",
-                                      decision="allowed")
+                                      decision="allowed", ip=ip)
                 except GovernanceDenied as e:
                     t.status, t.message = "skipped", e.message
                 except Exception as e:  # noqa: BLE001

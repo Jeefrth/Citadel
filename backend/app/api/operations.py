@@ -492,6 +492,7 @@ async def create_job(data: JobIn, request: Request, db: AsyncSession = Depends(g
             db, user, kind=data.kind, name=name, selector=data.selector.model_dump(mode="json"),
             command=data.command, playbook=playbook, extra_vars=data.extra_vars,
             parallelism=data.parallelism, timeout=data.timeout if data.kind == "command" else max(data.timeout, 60),
+            client_ip=getattr(request.state, "client_ip", None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

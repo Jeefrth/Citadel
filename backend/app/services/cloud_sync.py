@@ -5,8 +5,11 @@ Read-only role needed on the subscriptions: "Reader" is enough.
 
 - New VMs are created as servers (no account: an admin adds one), under the
   account's node, in a sub-node per resource group, in the account's zone.
-- Known VMs (cloud_ref) get their IP / OS / Azure tags refreshed; names and
-  Citadel-side edits are kept.
+- Known VMs (cloud_ref) get their IP / OS refreshed and new Azure tags added;
+  names and existing tag values are kept (tags drive access policies and ACLs,
+  so whoever edits tags in Azure must not be able to change them in Citadel).
+  Only the sync's own keys (cloud, azure_rg, azure_location, azure_power) follow
+  Azure.
 - VMs gone from Azure are flagged cloud_state = "missing", never deleted.
 """
 
@@ -45,6 +48,12 @@ class AzureVm:
     power_state: str | None  # running | deallocated | stopped | ...
     tags: dict
 
+
+
+def merge_tags(existing: dict | None, azure: dict, managed: dict) -> dict:
+    """Existing Citadel values win over Azure tags (new Azure keys are added);
+    the sync's own keys always follow Azure."""
+    return {**azure, **(existing or {}), **managed}
 
 async def _token(client: httpx.AsyncClient, cfg: dict, secret: str) -> str:
     r = await client.post(f"{LOGIN}/{cfg['tenant_id']}/oauth2/v2.0/token", data={
@@ -164,7 +173,7 @@ async def sync_account(db: AsyncSession, account: CloudAccount, actor_id=None,
                 if ip:
                     server.ip_address = ip
                 server.os_type = os_type
-                server.tags = {**(server.tags or {}), **vm.tags, **cloud_tags}
+                server.tags = merge_tags(server.tags, vm.tags, cloud_tags)
                 server.cloud_state = "present"
                 stats["updated"] += 1
         prefix = "azure:"

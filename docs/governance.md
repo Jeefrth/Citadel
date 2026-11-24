@@ -38,11 +38,16 @@ Hors VPN ou hors horaires, la connexion part en validation.
 Dans le **terminal interactif**, Citadel reconstitue chaque ligne avant de transmettre Entrée :
 - frappe simple, retour arrière, Ctrl+U, Ctrl+C : depuis les touches ;
 - ligne éditée (flèches, historique, Tab, Ctrl+R) : relue dans l'écho du serveur, avec une émulation de curseur, après avoir attendu cet écho (au plus 0,6 s) ;
-- applications plein écran (vim, less, top) : ignorées.
+- applications plein écran (vim, less, top) : seules les touches tapées sont vérifiées, et seul un refus ou une validation a un effet (Entrée retenue, entrée au journal). Un faux passage en plein écran (`printf` de la séquence) ne désactive donc pas les règles ;
+- Ctrl+O (exécuter et passer à la suivante) compte comme Entrée, et le préfixe Ctrl+X (Ctrl+X Ctrl+E exécute la ligne depuis un éditeur) est ignoré à l'invite du shell.
 
 Une ligne refusée est effacée (Ctrl+E, Ctrl+U) et n'entre même pas dans l'historique du shell.
 
 C'est un **garde-fou, pas un bac à sable** : alias, scripts, encodages ou lignes très longues qui débordent de l'écran peuvent le contourner. L'enregistrement des sessions reste la source de vérité. Pour une interdiction stricte, préférer les droits du compte sur le serveur (sudoers).
+
+## Mises à jour système
+
+Appliquer des mises à jour (Mises à jour, ou la fiche serveur) suit les mêmes règles qu'une commande : ACL de connexion, puis ACL de commandes sur la ligne canonique `system-update --all` ou `system-update <paquets>`, et entrée au journal des commandes (source `updates`). Les noms de paquets sont strictement validés (lettres, chiffres, `.+:~_-`). Pour réserver les mises à jour en prod à une validation, créer une règle de commandes « validation » sur le motif `system-update`.
 
 ## Validation à 4 yeux
 

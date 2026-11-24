@@ -1,5 +1,7 @@
 """Update detection and application for Linux and Windows servers."""
 
+import shlex
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -204,14 +206,16 @@ async def apply_linux_updates(
     try:
         pm = await _detect_linux_pm(host, port, username, password, ssh_key)
 
+        # names are validated by the API schema; quoted anyway (defence in depth)
+        quoted = " ".join(shlex.quote(p) for p in packages) if packages else ""
         if pm == "apt":
             if packages:
-                cmd = f"sudo DEBIAN_FRONTEND=noninteractive apt-get install -y {' '.join(packages)} 2>&1"
+                cmd = f"sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -- {quoted} 2>&1"
             else:
                 cmd = "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1"
         elif pm in ("dnf", "yum"):
             if packages:
-                cmd = f"sudo {pm} update -y {' '.join(packages)} 2>&1"
+                cmd = f"sudo {pm} update -y -- {quoted} 2>&1"
             else:
                 cmd = f"sudo {pm} update -y 2>&1"
         else:

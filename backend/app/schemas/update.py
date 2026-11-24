@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+import re
+
+from pydantic import BaseModel, field_validator
 
 from app.models.base import JobStatus
 
@@ -24,8 +26,23 @@ class UpdateScanResponse(BaseModel):
     error: str | None = None
 
 
+PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+:~_-]{0,127}$")
+
+
 class UpdateApplyRequest(BaseModel):
     packages: list[str] | None = None  # None = apply all
+
+    @field_validator("packages")
+    @classmethod
+    def _valid_names(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if len(v) > 500:
+            raise ValueError("Too many packages (500 max)")
+        for name in v:
+            if not PACKAGE_NAME.fullmatch(name):
+                raise ValueError(f"Invalid package name: {name[:80]!r}")
+        return v
 
 
 class UpdateApplyResponse(BaseModel):

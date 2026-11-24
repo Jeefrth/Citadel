@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,8 @@ from app.schemas.update import (
     ComplianceEntry,
 )
 from app.services import routing, update_service
+from app.services.command_log import log_command
+from app.services.enforcement import GovernanceDenied, check_command, enforce_connect
 
 router = APIRouter()
 
@@ -78,6 +80,7 @@ async def scan_updates(
 async def apply_updates(
     server_id: uuid.UUID,
     body: UpdateApplyRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
@@ -86,6 +89,20 @@ async def apply_updates(
     credential = _password_account(default_account(server))
     if not grant.allows_account(credential.username):
         raise HTTPException(status_code=403, detail=f"Account '{credential.username}' not granted")
+
+    # Same governance as any command: connection ACL, then command ACL on a
+    # canonical command line ("system-update --all" or "system-update <pkgs>").
+    ip = getattr(request.state, "client_ip", None)
+    try:
+        await enforce_connect(db, user, server, credential.username, ip)
+    except GovernanceDenied as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=e.message)
+    canonical = "system-update " + (" ".join(body.packages) if body.packages else "--all")
+    outcome = await check_command(db, user, server, credential.username, canonical, ip, source="updates")
+    if not outcome.allowed:
+        await log_command(db, user=user, server=server, account=credential.label, command=canonical,
+                          source="updates", decision=outcome.decision, rule=outcome.rule, ip=ip)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=outcome.message)
     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
 
     # Create job record
@@ -118,6 +135,10 @@ async def apply_updates(
                 password=credential.password,
                 packages=body.packages,
             )
+
+    await log_command(db, user=user, server=server, account=credential.label, command=canonical,
+                      source="updates", decision=outcome.decision, rule=outcome.rule, ip=ip,
+                      exit_code=0 if result.success else 1)
 
     # Update job
     job.status = JobStatus.COMPLETED if result.success else JobStatus.FAILED

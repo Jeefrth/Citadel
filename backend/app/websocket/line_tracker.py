@@ -4,8 +4,15 @@ The terminal only sees keystrokes. Plain typing (with backspace, Ctrl+U,
 Ctrl+C) is rebuilt from the input. When the line was edited with cursor
 keys, Tab completion or history (escape sequences), the input alone is not
 reliable, so the line is read back from the echoed output instead (text
-after the last shell prompt marker). Full-screen applications (alternate
-screen: vim, less, top...) are ignored.
+after the last shell prompt marker). In full-screen applications (alternate
+screen: vim, less, top...) the screen is not read: only the typed keys are
+checked, and only a blocking decision is acted on (no journal noise). The
+alternate-screen state comes from the output, which the user controls
+(printf), so it must never switch the check off.
+
+Keys that make readline run the line without Enter are handled at the shell
+prompt: Ctrl+O (operate-and-get-next) counts as Enter, and the Ctrl+X prefix
+(Ctrl+X Ctrl+E runs the line from an editor) is dropped.
 
 This is a guard rail, not a sandbox: a determined user can obfuscate a
 command (aliases, scripts, encodings). Session recordings remain the
@@ -21,6 +28,8 @@ ALT_OFF = ("\x1b[?1049l", "\x1b[?1047l", "\x1b[?47l")
 PROMPT_MARKERS = ("$ ", "# ", "> ", "% ")
 
 ENTER = (b"\r", b"\n")
+SHELL_ENTER = (b"\x0f",)  # Ctrl+O: readline operate-and-get-next runs the line
+SHELL_DROP = (b"\x18",)   # Ctrl+X prefix (Ctrl+X Ctrl+E: edit-and-execute-command)
 KILL_LINE = b"\x05\x15"  # Ctrl+E (end of line) then Ctrl+U (kill to start): clears readline
 
 
@@ -131,8 +140,13 @@ class LineTracker:
         segments: list[tuple[bytes, bool]] = []
         start = 0
         for i, b in enumerate(data):
-            if bytes([b]) in ENTER:
+            key = bytes([b])
+            if key in ENTER or (not self.alt_screen and key in SHELL_ENTER):
                 segments.append((data[start:i], True))
+                start = i + 1
+            elif not self.alt_screen and key in SHELL_DROP:
+                if i > start:
+                    segments.append((data[start:i], False))
                 start = i + 1
         if start < len(data):
             segments.append((data[start:], False))
@@ -185,12 +199,11 @@ class LineTracker:
             await asyncio.sleep(0.02)
 
     def take_line(self) -> str | None:
-        """Command about to be executed (on Enter); None inside full-screen apps."""
+        """Command about to be executed (on Enter). Inside a full-screen app only the
+        typed keys are returned (the screen line is not a command line there)."""
         typed = "".join(self.buf)
-        line = self._from_output() if self.uncertain else typed
+        line = typed if self.alt_screen or not self.uncertain else self._from_output()
         self.buf.clear()
         self.uncertain = False
         self.prompt_col = None
-        if self.alt_screen:
-            return None
         return line.strip()

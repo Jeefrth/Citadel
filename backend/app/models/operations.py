@@ -69,6 +69,7 @@ class Job(UUIDMixin, TimestampMixin, Base):
     # pending | running | success | partial | failed | cancelled
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
     user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)  # launcher's IP, for connection/command ACLs
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)  # playbook log (ansible output)

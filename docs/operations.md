@@ -15,7 +15,7 @@ Sélection des cibles par serveurs, nœuds (avec sous-nœuds) ou étiquettes ; a
 
 ### Commande
 
-Chaque serveur est traité comme une commande interactive : droit `execute`, ACL de connexion, ACL de commandes. Une règle « alerter » laisse passer et notifie ; « refuser » ou « validation » **ignore ce serveur** avec la raison (pas de validation groupée). Sortie, code retour et décision par serveur ; chaque exécution entre dans le journal des commandes (source `job`).
+Chaque serveur est traité comme une commande interactive : droit `execute`, ACL de connexion, ACL de commandes. L'IP source évaluée est celle de la personne qui a lancé la tâche (enregistrée avec la tâche), aussi pour les playbooks. Une règle « alerter » laisse passer et notifie ; « refuser » ou « validation » **ignore ce serveur** avec la raison (pas de validation groupée). Sortie, code retour et décision par serveur ; chaque exécution entre dans le journal des commandes (source `job`).
 
 ### Playbook Ansible
 
@@ -40,6 +40,6 @@ Prérequis côté passerelle : `AllowTcpForwarding yes` dans `sshd_config`.
 ## Import Azure
 
 - Principal de service avec le rôle **Lecteur** sur les abonnements, secret chiffré dans le coffre.
-- Les VM deviennent des serveurs (IP privée, ou publique en option), sous le nœud choisi, dans un sous-nœud par groupe de ressources, dans la zone choisie. Étiquettes Azure reprises, plus `cloud=azure`, `azure_rg`, `azure_location`, `azure_power`.
+- Les VM deviennent des serveurs (IP privée, ou publique en option), sous le nœud choisi, dans un sous-nœud par groupe de ressources, dans la zone choisie. Étiquettes Azure reprises, plus `cloud=azure`, `azure_rg`, `azure_location`, `azure_power`. Aux synchronisations suivantes, seules les **nouvelles** clés Azure sont ajoutées : une étiquette déjà présente dans Citadel garde sa valeur, car les étiquettes pilotent les règles d'accès et les ACL (modifier un tag dans Azure ne doit pas ouvrir un accès dans Citadel). Les quatre clés ci-dessus suivent toujours Azure.
 - Synchronisation toutes les N minutes (60 par défaut) ou à la demande. Une VM supprimée côté Azure est marquée « disparue », jamais supprimée de Citadel. Les VM importées n'ont pas de compte : un admin en ajoute un.
 - Option « seulement les VM démarrées » pour ne pas importer les VM désallouées.

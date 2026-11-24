@@ -329,7 +329,9 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                             await session_manager.write(session.session_id, chunk)
                         if not enter:
                             continue
-                        await tracker.settle()
+                        in_app = tracker.alt_screen
+                        if not in_app:
+                            await tracker.settle()
                         command = tracker.take_line()
                         if command:
                             async with async_session() as cdb:
@@ -337,11 +339,21 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                                 cserver = await cdb.get(Server, srv_id)
                                 outcome = await check_command(
                                     cdb, cuser, cserver, account.username, command, ip, source="terminal")
-                                await log_command(
-                                    cdb, user=cuser, server=cserver, account=account.label, command=command,
-                                    source="terminal", decision=outcome.decision, rule=outcome.rule,
-                                    session_id=sid, ip=ip,
-                                    offset_ms=int((time.time() - recorder.start_time) * 1000))
+                                # full-screen app: journal only what gets blocked (a faked
+                                # alternate screen must not switch the ACL off)
+                                if not in_app or not outcome.allowed:
+                                    await log_command(
+                                        cdb, user=cuser, server=cserver, account=account.label, command=command,
+                                        source="terminal", decision=outcome.decision, rule=outcome.rule,
+                                        session_id=sid, ip=ip,
+                                        offset_ms=int((time.time() - recorder.start_time) * 1000))
+                            if not outcome.allowed and in_app:
+                                note = f"\r\n\x1b[1;31m[Citadel] {outcome.message}\x1b[0m\r\n"
+                                await websocket.send_json({
+                                    "type": "output",
+                                    "data": base64.b64encode(note.encode()).decode("ascii"),
+                                })
+                                continue  # Enter withheld; nothing typed into the app
                             if not outcome.allowed:
                                 # Never send Enter: clear the typed line, get a fresh prompt
                                 note = f"\r\n\x1b[1;31m[Citadel] {outcome.message}\x1b[0m\r\n"

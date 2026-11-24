@@ -51,12 +51,12 @@ def test_prompt_containing_marker_inside_command():
     assert t.take_line() == "echo '# not a prompt'"
 
 
-def test_full_screen_apps_are_ignored():
+def test_full_screen_apps_return_typed_keys_only():
     t = LineTracker()
     t.on_output(b"$ ")
     t.on_output(b"\x1b[?1049h")
-    _feed(t, inp=b":wq")
-    assert t.take_line() is None
+    _feed(t, inp=b"\x1b[A:wq", out=b"garbage on the screen line")
+    assert t.take_line() == ":wq"
     t.on_output(b"\x1b[?1049l$ ")
     _feed(t, inp=b"id")
     assert t.take_line() == "id"
