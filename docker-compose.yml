@@ -33,7 +33,7 @@ services:
       dockerfile: Dockerfile.dev
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
@@ -62,6 +62,9 @@ services:
       - "5173:5173"
     env_file:
       - .env
+    environment:
+      VITE_API_TARGET: http://backend:8000
+      VITE_WS_TARGET: ws://backend:8000
     depends_on:
       - backend
     volumes:
