@@ -37,6 +37,57 @@ function formatDetail(detail: unknown): string {
   return JSON.stringify(detail);
 }
 
+/** Error thrown by the API helpers; `status` lets callers react to e.g. 409 (integrity). */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/**
+ * Bearer token for WebSocket auth messages (same MSAL token as the terminal).
+ * In dev mode the backend ignores it, so an empty string is returned.
+ */
+export async function getAuthToken(): Promise<string> {
+  return (await getToken()) || "";
+}
+
+/** ws(s)://host, matching the page protocol (same origin as the API). */
+export function wsBaseUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}`;
+}
+
+async function throwForResponse(response: Response): Promise<never> {
+  const error = await response.json().catch(() => ({ detail: response.statusText }));
+  throw new ApiError(formatDetail(error.detail) || `API error ${response.status}`, response.status);
+}
+
+/** Authenticated GET returning the raw body as a Blob (recordings, CSV exports). */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const token = await getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const response = await fetch(`${apiConfig.baseUrl}${path}`, { headers });
+  if (!response.ok) await throwForResponse(response);
+  return response.blob();
+}
+
+/** Save a Blob as a file through a temporary link. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getToken();
 
@@ -54,10 +105,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     headers,
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(formatDetail(error.detail) || `API error ${response.status}`);
-  }
+  if (!response.ok) await throwForResponse(response);
 
   if (response.status === 204) return undefined as T;
   return response.json();

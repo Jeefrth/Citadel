@@ -1,390 +1,211 @@
-import { useEffect, useState, useRef, useCallback } from "react";
-import { api } from "@/services/api";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
+// Recorded sessions: list (SSH and RDP), replay, integrity check, deletion.
+// Deep links from the command journal: ?recording=<id>&t=<ms> or ?session=<session_id>&t=<ms>.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
-  Film,
-  Play,
-  Pause,
-  RotateCcw,
-  X,
-  Trash2,
-  Server,
-  User,
   Clock,
+  Film,
+  Globe,
   Loader2,
-  FastForward,
+  Play,
+  Power,
+  Server,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+  User,
 } from "lucide-react";
+import { ApiError, api, fetchBlob } from "@/services/api";
+import { useCurrentUser } from "@/services/useCurrentUser";
+import {
+  errorMessage,
+  type RecordingVerifyResult,
+  type SessionProtocol,
+  type SessionRecordingData,
+  type SessionRecordingDetail,
+} from "@/services/types";
+import { Chip, ConfirmModal, Notice, iconBtnDanger, type NoticeData } from "@/components/ui";
+import { ProtocolBadge, StorageChip, formatBytes, formatDuration } from "@/components/auditUi";
+import { RdpReplayPlayer, SshReplayPlayer } from "@/components/RecordingPlayers";
 
-interface SessionData {
-  id: string;
-  session_id: string;
-  server_id: string;
-  user_id: string;
-  server_name: string;
-  user_name: string;
-  started_at: string;
-  ended_at: string | null;
-  duration_seconds: number;
-  event_count: number;
-  size_bytes: number;
-}
+const LIST_LIMIT = 200;
+const LOOKUP_LIMIT = 500;
 
-interface SessionEvent {
-  t: number; // ms since start
-  type: "o" | "i";
-  data: string; // base64
-}
+type Replay =
+  | { kind: "ssh"; detail: SessionRecordingDetail; t: number | null }
+  | { kind: "rdp"; rec: SessionRecordingData; blob: Blob; t: number | null };
 
-interface SessionDetail extends SessionData {
-  events: SessionEvent[];
-}
+type Confirm = { kind: "one"; rec: SessionRecordingData } | { kind: "selected" } | { kind: "all" };
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m > 0 ? `${m}min ${s}s` : `${s}s`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
-}
-
-function SessionPlayer({
-  session,
-  onClose,
-}: {
-  session: SessionDetail;
-  onClose: () => void;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<XTerm | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [speed, setSpeed] = useState(1);
-  const eventIndexRef = useRef(0);
-
-  // Only output events for replay
-  const outputEvents = session.events.filter((e) => e.type === "o");
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const xterm = new XTerm({
-      cursorBlink: false,
-      disableStdin: true,
-      fontSize: 14,
-      fontFamily:
-        "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      theme: {
-        background: "#1a1b26",
-        foreground: "#a9b1d6",
-        cursor: "#1a1b26",
-        black: "#15161e",
-        red: "#f7768e",
-        green: "#9ece6a",
-        yellow: "#e0af68",
-        blue: "#7aa2f7",
-        magenta: "#bb9af7",
-        cyan: "#7dcfff",
-        white: "#a9b1d6",
-        brightBlack: "#414868",
-        brightRed: "#f7768e",
-        brightGreen: "#9ece6a",
-        brightYellow: "#e0af68",
-        brightBlue: "#7aa2f7",
-        brightMagenta: "#bb9af7",
-        brightCyan: "#7dcfff",
-        brightWhite: "#c0caf5",
-      },
-    });
-
-    const fitAddon = new FitAddon();
-    xterm.loadAddon(fitAddon);
-    xterm.open(containerRef.current);
-    fitAddon.fit();
-    xtermRef.current = xterm;
-
-    xterm.writeln(
-      `\x1b[1;34mSession replay: ${session.server_name}\x1b[0m`
-    );
-    xterm.writeln(
-      `\x1b[90mUser: ${session.user_name} | Duration: ${formatDuration(session.duration_seconds)} | Events: ${outputEvents.length}\x1b[0m\r\n`
-    );
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      xterm.dispose();
-    };
-  }, [session, outputEvents.length]);
-
-  const playNextEvent = useCallback(() => {
-    const idx = eventIndexRef.current;
-    if (idx >= outputEvents.length) {
-      setPlaying(false);
-      setProgress(100);
-      return;
-    }
-
-    const event = outputEvents[idx];
-    const bytes = Uint8Array.from(atob(event.data), (c) => c.charCodeAt(0));
-    xtermRef.current?.write(bytes);
-
-    eventIndexRef.current = idx + 1;
-    setProgress(Math.round(((idx + 1) / outputEvents.length) * 100));
-
-    // Schedule next event
-    if (idx + 1 < outputEvents.length) {
-      const delay = Math.max(
-        1,
-        (outputEvents[idx + 1].t - event.t) / speed
-      );
-      timerRef.current = setTimeout(playNextEvent, delay);
-    } else {
-      setPlaying(false);
-      setProgress(100);
-    }
-  }, [outputEvents, speed]);
-
-  const handlePlay = () => {
-    if (progress >= 100) {
-      handleReset();
-    }
-    setPlaying(true);
-    playNextEvent();
-  };
-
-  const handlePause = () => {
-    setPlaying(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
-  };
-
-  const handleReset = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setPlaying(false);
-    setProgress(0);
-    eventIndexRef.current = 0;
-    xtermRef.current?.reset();
-    xtermRef.current?.writeln(
-      `\x1b[1;34mSession replay: ${session.server_name}\x1b[0m`
-    );
-    xtermRef.current?.writeln(
-      `\x1b[90mUser: ${session.user_name} | Duration: ${formatDuration(session.duration_seconds)}\x1b[0m\r\n`
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-card border rounded-lg shadow-lg w-full max-w-4xl mx-4 flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between p-3 border-b">
-          <div className="flex items-center gap-3">
-            <Film size={18} className="text-primary" />
-            <div>
-              <p className="font-semibold text-sm">{session.server_name}</p>
-              <p className="text-xs text-muted-foreground">
-                {session.user_name} ·{" "}
-                {new Date(session.started_at).toLocaleString("fr-FR")}
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Terminal */}
-        <div className="flex-1 p-2 min-h-[400px]">
-          <div
-            ref={containerRef}
-            className="w-full h-full rounded"
-            style={{ backgroundColor: "#1a1b26" }}
-          />
-        </div>
-
-        {/* Controls */}
-        <div className="p-3 border-t flex items-center gap-4">
-          <div className="flex items-center gap-1">
-            {playing ? (
-              <button
-                onClick={handlePause}
-                className="p-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Pause size={16} />
-              </button>
-            ) : (
-              <button
-                onClick={handlePlay}
-                className="p-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Play size={16} />
-              </button>
-            )}
-            <button
-              onClick={handleReset}
-              className="p-2 rounded-md hover:bg-accent text-muted-foreground"
-            >
-              <RotateCcw size={16} />
-            </button>
-          </div>
-
-          {/* Progress bar */}
-          <div className="flex-1">
-            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-
-          <span className="text-xs text-muted-foreground min-w-[40px] text-right">
-            {progress}%
-          </span>
-
-          {/* Speed control */}
-          <div className="flex items-center gap-1">
-            <FastForward size={14} className="text-muted-foreground" />
-            {[1, 2, 5, 10].map((s) => (
-              <button
-                key={s}
-                onClick={() => setSpeed(s)}
-                className={`px-2 py-0.5 rounded text-xs ${
-                  speed === s
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-accent text-muted-foreground"
-                }`}
-              >
-                {s}x
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+/** Clear message for a replay failure (409 = SHA-256 mismatch). */
+function replayError(e: unknown): string {
+  if (e instanceof ApiError && e.status === 409)
+    return `Intégrité compromise : l'empreinte SHA-256 de l'enregistrement ne correspond plus. Lecture bloquée. (${e.message})`;
+  if (e instanceof ApiError && e.status === 404)
+    return `Contenu indisponible : session encore en cours ou jamais stockée. (${e.message})`;
+  return `Lecture impossible : ${errorMessage(e)}`;
 }
 
 export default function Sessions() {
-  const [sessions, setSessions] = useState<SessionData[]>([]);
+  const { isAdmin } = useCurrentUser();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [sessions, setSessions] = useState<SessionRecordingData[]>([]);
+  const [protocol, setProtocol] = useState<"" | SessionProtocol>("");
   const [loading, setLoading] = useState(true);
-  const [replaySession, setReplaySession] = useState<SessionDetail | null>(
-    null
-  );
+  const [notice, setNotice] = useState<NoticeData | null>(null);
+  const [replay, setReplay] = useState<Replay | null>(null);
   const [loadingReplay, setLoadingReplay] = useState<string | null>(null);
+  const [verify, setVerify] = useState<Record<string, RecordingVerifyResult | "loading">>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const deepLinkDone = useRef(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ limit: String(LIST_LIMIT) });
+      if (protocol) qs.set("protocol", protocol);
+      setSessions(await api.get<SessionRecordingData[]>(`/api/sessions/?${qs}`));
+    } catch (e) {
+      setNotice({ ok: false, text: errorMessage(e) });
+    } finally {
+      setLoading(false);
+    }
+  }, [protocol]);
 
   useEffect(() => {
-    api
-      .get<SessionData[]>("/api/sessions/")
-      .then(setSessions)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    load();
+  }, [load]);
 
-  const handleReplay = async (id: string) => {
-    setLoadingReplay(id);
+  const openReplay = useCallback(async (rec: SessionRecordingData, t: number | null = null) => {
+    setLoadingReplay(rec.id);
+    setNotice(null);
     try {
-      const detail = await api.get<SessionDetail>(`/api/sessions/${id}`);
-      setReplaySession(detail);
-    } catch {
-      // silently fail
+      if (rec.protocol === "rdp") {
+        const blob = await fetchBlob(`/api/sessions/${rec.id}/rdp`);
+        setReplay({ kind: "rdp", rec, blob, t });
+      } else {
+        const detail = await api.get<SessionRecordingDetail>(`/api/sessions/${rec.id}`);
+        setReplay({ kind: "ssh", detail, t });
+      }
+    } catch (e) {
+      setNotice({ ok: false, text: replayError(e) });
     } finally {
       setLoadingReplay(null);
     }
+  }, []);
+
+  // Deep link from the command journal, resolved once the first list is loaded
+  useEffect(() => {
+    if (loading || deepLinkDone.current) return;
+    const recId = searchParams.get("recording");
+    const sessionId = searchParams.get("session");
+    if (!recId && !sessionId) return;
+    deepLinkDone.current = true;
+    const tRaw = searchParams.get("t");
+    const t = tRaw !== null && !isNaN(Number(tRaw)) ? Number(tRaw) : null;
+    const match = (list: SessionRecordingData[]) =>
+      list.find((s) => (recId ? s.id === recId : s.session_id === sessionId));
+    (async () => {
+      let rec = match(sessions);
+      if (!rec) {
+        // Not in the current page: ask the API directly
+        try {
+          const query = sessionId
+            ? `session_id=${encodeURIComponent(sessionId)}`
+            : `limit=${LOOKUP_LIMIT}`;
+          rec = match(await api.get<SessionRecordingData[]>(`/api/sessions/?${query}`));
+        } catch {
+          /* handled below */
+        }
+      }
+      if (rec) openReplay(rec, t);
+      else
+        setNotice({
+          ok: false,
+          text: "Aucun enregistrement trouvé pour cette session (enregistrement désactivé, supprimé ou trop ancien).",
+        });
+    })();
+  }, [loading, sessions, searchParams, openReplay]);
+
+  const closeReplay = () => {
+    setReplay(null);
+    if (searchParams.has("recording") || searchParams.has("session")) setSearchParams({}, { replace: true });
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Supprimer cet enregistrement ?")) return;
+  const runVerify = async (rec: SessionRecordingData) => {
+    setVerify((v) => ({ ...v, [rec.id]: "loading" }));
     try {
-      await api.delete(`/api/sessions/${id}`);
-      setSessions((prev) => prev.filter((s) => s.id !== id));
-      setSelected((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    } catch {
-      // silently fail
+      const r = await api.get<RecordingVerifyResult>(`/api/sessions/${rec.id}/verify`);
+      setVerify((v) => ({ ...v, [rec.id]: r }));
+    } catch (e) {
+      setVerify((v) => ({ ...v, [rec.id]: { ok: false, message: errorMessage(e) } }));
     }
   };
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
 
-  const toggleSelectAll = () => {
-    if (selected.size === sessions.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(sessions.map((s) => s.id)));
-    }
-  };
+  const toggleSelectAll = () =>
+    setSelected(selected.size === sessions.length ? new Set() : new Set(sessions.map((s) => s.id)));
 
-  const handleDeleteSelected = async () => {
-    if (selected.size === 0) return;
-    if (!confirm(`Supprimer ${selected.size} enregistrement(s) ?`)) return;
+  const doDelete = async () => {
+    if (!confirm) return;
     setDeleting(true);
     try {
-      await api.post("/api/sessions/bulk-delete", {
-        ids: Array.from(selected),
-      });
-      setSessions((prev) => prev.filter((s) => !selected.has(s.id)));
+      if (confirm.kind === "one") {
+        await api.delete(`/api/sessions/${confirm.rec.id}`);
+        setNotice({ ok: true, text: "Enregistrement supprimé." });
+      } else if (confirm.kind === "selected") {
+        const r = await api.post<{ deleted: number }>("/api/sessions/bulk-delete", { ids: Array.from(selected) });
+        setNotice({ ok: true, text: `${r.deleted} enregistrement(s) supprimé(s).` });
+      } else {
+        const r = await api.post<{ deleted: number }>("/api/sessions/delete-all", {});
+        setNotice({ ok: true, text: `${r.deleted} enregistrement(s) supprimé(s). Les sessions en cours sont conservées.` });
+      }
       setSelected(new Set());
-    } catch {
-      // fallback
+    } catch (e) {
+      setNotice({ ok: false, text: errorMessage(e) });
     } finally {
       setDeleting(false);
-    }
-  };
-
-  const handleDeleteAll = async () => {
-    if (sessions.length === 0) return;
-    if (!confirm(`Supprimer TOUS les enregistrements (${sessions.length}) ?`)) return;
-    setDeleting(true);
-    try {
-      await api.post("/api/sessions/delete-all", {});
-      setSessions([]);
-      setSelected(new Set());
-    } catch {
-      // fallback
-    } finally {
-      setDeleting(false);
+      setConfirm(null);
+      load();
     }
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-bold">Sessions enregistrées</h2>
-        <div className="flex items-center gap-2">
-          {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={protocol}
+            onChange={(e) => setProtocol(e.target.value as "" | SessionProtocol)}
+            className="px-2 py-1.5 rounded-md border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">Tous protocoles</option>
+            <option value="ssh">SSH</option>
+            <option value="rdp">RDP</option>
+          </select>
+          {isAdmin && selected.size > 0 && (
             <button
-              onClick={handleDeleteSelected}
+              onClick={() => setConfirm({ kind: "selected" })}
               disabled={deleting}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-xs font-medium hover:bg-red-100 disabled:opacity-50"
             >
-              {deleting ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Trash2 size={14} />
-              )}
+              <Trash2 size={14} />
               Supprimer la sélection ({selected.size})
             </button>
           )}
-          {sessions.length > 0 && (
+          {isAdmin && sessions.length > 0 && (
             <button
-              onClick={handleDeleteAll}
+              onClick={() => setConfirm({ kind: "all" })}
               disabled={deleting}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-red-50 hover:text-red-700 hover:border-red-200 disabled:opacity-50 text-muted-foreground"
             >
@@ -394,9 +215,12 @@ export default function Sessions() {
           )}
           <span className="text-sm text-muted-foreground ml-2">
             {sessions.length} enregistrement{sessions.length !== 1 ? "s" : ""}
+            {sessions.length >= LIST_LIMIT && " (les plus récents)"}
           </span>
         </div>
       </div>
+
+      <Notice notice={notice} onClose={() => setNotice(null)} />
 
       {loading && (
         <div className="flex items-center justify-center h-32">
@@ -408,94 +232,166 @@ export default function Sessions() {
         <div className="bg-card border rounded-lg p-12 text-center">
           <Film size={48} className="mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">
-            Aucune session enregistrée. Ouvrez un terminal vers un serveur pour
-            commencer.
+            Aucune session enregistrée. Ouvrez un terminal ou un bureau à distance vers un serveur pour commencer.
           </p>
         </div>
       )}
 
-      {sessions.length > 0 && (
+      {!loading && sessions.length > 0 && (
         <div className="space-y-2">
-          <label className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground">
-            <input
-              type="checkbox"
-              checked={selected.size === sessions.length && sessions.length > 0}
-              onChange={toggleSelectAll}
-              className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            {selected.size === sessions.length ? "Tout désélectionner" : "Tout sélectionner"}
-          </label>
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`bg-card border rounded-lg p-4 flex items-center gap-4 transition-colors ${
-                selected.has(s.id) ? "border-primary/50 bg-primary/5" : "hover:border-primary/30"
-              }`}
-            >
+          {isAdmin && (
+            <label className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground">
               <input
                 type="checkbox"
-                checked={selected.has(s.id)}
-                onChange={() => toggleSelect(s.id)}
-                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                checked={selected.size === sessions.length && sessions.length > 0}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
-              <Film size={20} className="text-primary shrink-0" />
+              {selected.size === sessions.length ? "Tout désélectionner" : "Tout sélectionner"}
+            </label>
+          )}
+          {sessions.map((s) => {
+            const v = verify[s.id];
+            return (
+              <div
+                key={s.id}
+                className={`bg-card border rounded-lg p-4 flex items-center gap-4 transition-colors ${
+                  selected.has(s.id) ? "border-primary/50 bg-primary/5" : "hover:border-primary/30"
+                }`}
+              >
+                {isAdmin && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(s.id)}
+                    onChange={() => toggleSelect(s.id)}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                  />
+                )}
+                <ProtocolBadge protocol={s.protocol} />
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-sm flex items-center gap-1">
-                    <Server size={14} className="text-muted-foreground" />
-                    {s.server_name}
-                  </span>
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <User size={12} />
-                    {s.user_name}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span>
-                    {new Date(s.started_at).toLocaleString("fr-FR")}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock size={12} />
-                    {formatDuration(s.duration_seconds)}
-                  </span>
-                  <span>{s.event_count} events</span>
-                  <span>{formatBytes(s.size_bytes)}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => handleReplay(s.id)}
-                  disabled={loadingReplay === s.id}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {loadingReplay === s.id ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Play size={14} />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-medium text-sm flex items-center gap-1">
+                      <Server size={14} className="text-muted-foreground" />
+                      {s.account && <span className="font-mono text-xs">{s.account}@</span>}
+                      {s.server_name}
+                      {!s.server_id && (
+                        <Chip tone="default" title="Le serveur a été supprimé depuis">
+                          supprimé
+                        </Chip>
+                      )}
+                    </span>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <User size={12} />
+                      {s.user_name}
+                    </span>
+                    {s.client_ip && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1 font-mono">
+                        <Globe size={12} />
+                        {s.client_ip}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span>{new Date(s.started_at).toLocaleString("fr-FR")}</span>
+                    {s.ended_at ? (
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} />
+                        {formatDuration(s.duration_seconds)}
+                      </span>
+                    ) : (
+                      <Chip tone="green">en cours</Chip>
+                    )}
+                    {s.protocol === "ssh" && <span>{s.event_count} événements</span>}
+                    <span>{formatBytes(s.size_bytes)}</span>
+                    <StorageChip type={s.storage_type} />
+                    {s.sha256 && (
+                      <span className="font-mono" title={`SHA-256 ${s.sha256}`}>
+                        {s.sha256.slice(0, 12)}…
+                      </span>
+                    )}
+                  </div>
+                  {s.terminated_by && (
+                    <p className="text-xs text-red-700 flex items-center gap-1">
+                      <Power size={12} />
+                      Terminée par {s.terminated_by}
+                      {s.termination_reason && <> : {s.termination_reason}</>}
+                    </p>
                   )}
-                  Rejouer
-                </button>
-                <button
-                  onClick={() => handleDelete(s.id)}
-                  className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
-                  title="Supprimer"
-                >
-                  <Trash2 size={14} />
-                </button>
+                  {v && v !== "loading" && (
+                    <p
+                      className={`text-xs flex items-center gap-1 ${v.ok ? "text-green-700" : "text-red-700 font-medium"}`}
+                    >
+                      {v.ok ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
+                      {v.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1">
+                  {isAdmin && (
+                    <button
+                      onClick={() => runVerify(s)}
+                      disabled={v === "loading"}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-accent disabled:opacity-50"
+                      title="Relire l'objet stocké et contrôler son empreinte SHA-256"
+                    >
+                      {v === "loading" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+                      Vérifier l'intégrité
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openReplay(s)}
+                    disabled={loadingReplay === s.id || !s.ended_at}
+                    title={s.ended_at ? undefined : "Disponible à la fin de la session"}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {loadingReplay === s.id ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                    Rejouer
+                  </button>
+                  {isAdmin && (
+                    <button onClick={() => setConfirm({ kind: "one", rec: s })} className={iconBtnDanger} title="Supprimer">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Replay modal */}
-      {replaySession && (
-        <SessionPlayer
-          session={replaySession}
-          onClose={() => setReplaySession(null)}
-        />
+      {replay?.kind === "ssh" && <SshReplayPlayer session={replay.detail} initialMs={replay.t} onClose={closeReplay} />}
+      {replay?.kind === "rdp" && (
+        <RdpReplayPlayer rec={replay.rec} blob={replay.blob} initialMs={replay.t} onClose={closeReplay} />
+      )}
+
+      {confirm && (
+        <ConfirmModal
+          title={
+            confirm.kind === "one"
+              ? "Supprimer l'enregistrement"
+              : confirm.kind === "selected"
+                ? `Supprimer ${selected.size} enregistrement(s)`
+                : "Supprimer tous les enregistrements"
+          }
+          confirmLabel="Supprimer"
+          danger
+          loading={deleting}
+          onConfirm={doDelete}
+          onClose={() => setConfirm(null)}
+        >
+          {confirm.kind === "one" && (
+            <p>
+              Session de <strong>{confirm.rec.user_name}</strong> sur <strong>{confirm.rec.server_name}</strong> du{" "}
+              {new Date(confirm.rec.started_at).toLocaleString("fr-FR")}.
+            </p>
+          )}
+          {confirm.kind === "all" && (
+            <p>Tous les enregistrements terminés seront supprimés, y compris ceux qui ne sont pas affichés.</p>
+          )}
+          <p>La suppression est définitive (objet stocké compris) et journalisée dans l'audit.</p>
+        </ConfirmModal>
       )}
     </div>
   );

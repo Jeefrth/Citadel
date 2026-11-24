@@ -14,6 +14,8 @@ import {
   KeyRound,
   UserCog,
   ClipboardCheck,
+  Activity,
+  ScrollText,
 } from "lucide-react";
 import NotificationBell, { CountBadge, usePolledCount } from "@/components/NotificationBell";
 
@@ -22,6 +24,8 @@ const navItems = [
   { to: "/servers", icon: Server, label: "Serveurs", adminOnly: false },
   { to: "/terminal", icon: Terminal, label: "Terminal", adminOnly: false },
   { to: "/sessions", icon: Film, label: "Sessions", adminOnly: false },
+  { to: "/live", icon: Activity, label: "Sessions en direct", adminOnly: true },
+  { to: "/commands", icon: ScrollText, label: "Journal des commandes", adminOnly: false },
   { to: "/updates", icon: RefreshCw, label: "Mises à jour", adminOnly: false },
   { to: "/approvals", icon: ClipboardCheck, label: "Validations", adminOnly: false },
   { to: "/access", icon: KeyRound, label: "Accès", adminOnly: true },

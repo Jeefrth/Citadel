@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "@/services/api";
 import SecretsVaultCard from "@/components/SecretsVaultCard";
 import NotificationChannelsPanel from "@/components/NotificationChannels";
+import RecordingStorageCard from "@/components/RecordingStorageCard";
+import SiemTargetsPanel from "@/components/SiemTargets";
 import {
   Settings as SettingsIcon,
   Shield,
@@ -21,6 +23,8 @@ import {
   Info,
   Vault,
   Bell,
+  FileSearch,
+  Archive,
 } from "lucide-react";
 
 interface SettingMeta {
@@ -54,7 +58,7 @@ interface SystemInfo {
   alert_rules: number;
 }
 
-type Tab = "security" | "commands" | "network" | "ca" | "vault" | "notifications" | "users" | "system";
+type Tab = "security" | "commands" | "network" | "ca" | "vault" | "notifications" | "audit" | "users" | "system";
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>("security");
@@ -238,6 +242,7 @@ export default function Settings() {
     { id: "ca", icon: Key, label: "Certificats" },
     { id: "vault", icon: Vault, label: "Coffre de secrets" },
     { id: "notifications", icon: Bell, label: "Notifications" },
+    { id: "audit", icon: FileSearch, label: "Audit" },
     { id: "users", icon: Users, label: "Utilisateurs" },
     { id: "system", icon: Info, label: "Système" },
   ];
@@ -536,6 +541,26 @@ sudo systemctl restart sshd`}
           {activeTab === "vault" && <SecretsVaultCard />}
 
           {activeTab === "notifications" && <NotificationChannelsPanel />}
+
+          {/* Audit: recording storage, retention, SIEM export */}
+          {activeTab === "audit" && (
+            <div className="space-y-4">
+              <RecordingStorageCard />
+              <div className="bg-card border rounded-lg p-6">
+                <h3 className="font-semibold mb-1 flex items-center gap-2">
+                  <Archive size={18} /> Rétention et surveillance
+                </h3>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Durées de conservation en jours (0 = conservation illimitée). La purge est automatique et
+                  journalisée.
+                </p>
+                {renderSettingRow("recording_retention_days", "number")}
+                {renderSettingRow("command_log_retention_days", "number")}
+                {renderSettingRow("notify_user_on_monitor", "bool")}
+              </div>
+              <SiemTargetsPanel />
+            </div>
+          )}
 
           {/* Users */}
           {activeTab === "users" && (

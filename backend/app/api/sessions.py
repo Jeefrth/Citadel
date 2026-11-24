@@ -25,6 +25,7 @@ router = APIRouter()
 async def list_sessions(
     server_id: uuid.UUID | None = Query(default=None),
     protocol: str | None = Query(default=None, pattern="^(ssh|rdp)$"),
+    session_id: str | None = Query(default=None, description="Exact session id (command journal deep links)"),
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -37,6 +38,8 @@ async def list_sessions(
         query = query.where(SessionRecording.server_id == server_id)
     if protocol:
         query = query.where(SessionRecording.protocol == protocol)
+    if session_id:
+        query = query.where(SessionRecording.session_id == session_id)
     return (await db.execute(query.limit(limit))).scalars().all()
 
 
@@ -97,7 +100,8 @@ async def verify_recording(recording_id: uuid.UUID, db: AsyncSession = Depends(g
     """Re-read the stored object and check its SHA-256."""
     rec = await _get_visible(db, user, recording_id)
     if not rec.storage_key:
-        return {"ok": rec.events is not None, "message": "Ancien enregistrement stocké en base (sans empreinte)"}
+        return {"ok": rec.events is not None, "message": "Ancien enregistrement stocké en base (sans empreinte)",
+                "storage": "database"}
     try:
         await recording_storage.load(db, rec.storage_type, rec.storage_key, rec.sha256)
         return {"ok": True, "message": f"Intègre (SHA-256 {rec.sha256[:16]}…)", "storage": rec.storage_type}

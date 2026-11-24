@@ -18,6 +18,34 @@ declare module "guacamole-common-js" {
     onresize: ((width: number, height: number) => void) | null;
   }
 
+  /** Tunnel reading a whole Guacamole dump over plain HTTP GET (works with blob: URLs). */
+  export class StaticHTTPTunnel extends Tunnel {
+    constructor(url: string, crossDomain?: boolean, extraTunnelHeaders?: Record<string, string>);
+  }
+
+  /** Playback of a recorded Guacamole protocol dump (Blob or tunnel source). */
+  export class SessionRecording {
+    constructor(source: Blob | Tunnel);
+    connect(data?: string): void;
+    disconnect(): void;
+    abort(): void;
+    getDisplay(): Display;
+    isPlaying(): boolean;
+    getPosition(): number;
+    getDuration(): number;
+    play(): void;
+    pause(): void;
+    seek(position: number, callback?: () => void): void;
+    cancel(): void;
+    onload: (() => void) | null;
+    onerror: ((message: string) => void) | null;
+    onabort: (() => void) | null;
+    onprogress: ((duration: number, parsedSize: number) => void) | null;
+    onplay: (() => void) | null;
+    onpause: (() => void) | null;
+    onseek: ((position: number, current: number, total: number) => void) | null;
+  }
+
   export class Tunnel {
     constructor();
   }

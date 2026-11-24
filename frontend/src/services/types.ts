@@ -493,3 +493,186 @@ export interface NotificationChannelIn {
 export function isReviewMessage(msg: string | null | undefined): boolean {
   return !!msg && /soumise? à validation/i.test(msg);
 }
+
+// ── Audit (lot 4): live sessions, recordings, command journal, storage, SIEM ──
+
+export type SessionProtocol = "ssh" | "rdp";
+
+/** Active session from GET /api/live-sessions (timestamps are unix seconds). */
+export interface LiveSession {
+  session_id: string;
+  protocol: SessionProtocol;
+  user: string;
+  user_id: string;
+  server: string;
+  server_id: string;
+  account: string | null;
+  client_ip: string | null;
+  started_at: number;
+  last_activity: number;
+  watchers: string[];
+  guac_connection_id?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface KillSessionResult {
+  delivered: boolean;
+}
+
+export interface MonitorTicket {
+  ticket: string;
+  expires_in: number;
+  width: number | null;
+  height: number | null;
+}
+
+/** Messages of the SSH monitoring WebSocket (/ws/monitor/{session_id}). */
+export type MonitorMessage =
+  | { type: "meta"; session: LiveSession }
+  | { type: "output"; data: string }
+  | { type: "ended" }
+  | { type: "error"; message: string };
+
+export type RecordingStorageType = "local" | "s3" | "azure";
+
+export interface SessionRecordingData {
+  id: string;
+  session_id: string;
+  server_id: string | null; // null when the server was deleted
+  user_id: string;
+  server_name: string;
+  user_name: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number;
+  event_count: number;
+  size_bytes: number;
+  protocol: SessionProtocol;
+  account: string | null;
+  client_ip: string | null;
+  storage_type: RecordingStorageType | null; // null = legacy, stored in database
+  sha256: string | null;
+  terminated_by: string | null;
+  termination_reason: string | null;
+}
+
+export interface SessionEvent {
+  t: number; // ms since start
+  type: "o" | "i";
+  data: string; // base64
+}
+
+export interface SessionRecordingDetail extends SessionRecordingData {
+  events: SessionEvent[];
+}
+
+export interface RecordingVerifyResult {
+  ok: boolean;
+  message: string;
+  storage?: RecordingStorageType | null;
+}
+
+export type CommandDecision = "allowed" | "alert" | "denied" | "review" | "approved_run";
+export const COMMAND_DECISIONS: CommandDecision[] = ["allowed", "alert", "denied", "review", "approved_run"];
+export type CommandSource = "terminal" | "execute";
+
+export interface CommandLogEntry {
+  id: string;
+  session_id: string | null;
+  user_id: string;
+  user_name: string;
+  server_id: string | null;
+  server_name: string;
+  account: string | null;
+  command: string;
+  source: CommandSource;
+  decision: CommandDecision;
+  rule: string | null;
+  exit_code: number | null;
+  offset_ms: number | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface CommandLogPage {
+  total: number;
+  items: CommandLogEntry[];
+}
+
+export interface S3StorageConfig {
+  endpoint?: string;
+  bucket?: string;
+  region?: string;
+  access_key?: string;
+  secure?: boolean;
+  prefix?: string;
+}
+
+export interface AzureStorageConfig {
+  container_url?: string;
+  prefix?: string;
+}
+
+export interface RecordingStorageData {
+  type: RecordingStorageType;
+  config: S3StorageConfig & AzureStorageConfig;
+  has_secret: boolean;
+  last_error: string | null;
+}
+
+export interface RecordingStorageIn {
+  type: RecordingStorageType;
+  config: S3StorageConfig | AzureStorageConfig | Record<string, never>;
+  secret?: string;
+}
+
+export interface StorageTestResult {
+  ok: boolean;
+  message: string;
+  type: RecordingStorageType;
+}
+
+export type SiemTransport = "udp" | "tcp" | "tls" | "http";
+export type SiemFormat = "json" | "cef" | "hec";
+export type SiemStream = "audit" | "commands";
+
+export interface SiemConfig {
+  // syslog (udp / tcp / tls)
+  host?: string;
+  port?: number;
+  // http
+  url?: string;
+  sourcetype?: string;
+  index?: string;
+  bearer?: boolean; // HEC: "Bearer" instead of "Splunk" auth scheme
+  // tls / http
+  verify_tls?: boolean;
+}
+
+export interface SiemTargetData {
+  id: string;
+  name: string;
+  is_active: boolean;
+  transport: SiemTransport;
+  format: SiemFormat;
+  config: SiemConfig;
+  has_secret: boolean;
+  streams: SiemStream[];
+  cursors: Partial<Record<SiemStream, { ts: string; id: string }>>;
+  sent_count: number;
+  last_sent_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface SiemTargetIn {
+  name: string;
+  is_active: boolean;
+  transport: SiemTransport;
+  format: SiemFormat;
+  config: SiemConfig;
+  secret?: string;
+  streams: SiemStream[];
+  start_from?: "now" | "beginning"; // creation only
+}
