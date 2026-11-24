@@ -30,6 +30,9 @@ async def run_cycle() -> dict:
         from app.services.approvals import expire_pending
         stats["approvals_expired"] = await expire_pending(db)
 
+        # 0b. Retention of recordings and command journal (D8)
+        stats.update(await apply_retention(db))
+
         # 1. Due rotations
         accounts = (await db.execute(
             select(Account).where(Account.is_active.is_(True), Account.rotation_enabled.is_(True))
@@ -71,6 +74,41 @@ async def run_cycle() -> dict:
                 server.accounts_discovered_at = now
                 await db.commit()
     return stats
+
+
+async def apply_retention(db) -> dict:
+    from sqlalchemy import delete
+
+    from app.models.audit import AuditLog
+    from app.models.audit_trail import CommandLog
+    from app.models.session_recording import SessionRecording
+    from app.services import recording_storage
+    from app.services.settings_service import get_setting_int
+
+    out = {"recordings_purged": 0, "commands_purged": 0}
+    now = datetime.now(timezone.utc)
+    days = await get_setting_int(db, "recording_retention_days")
+    if days > 0:
+        old = (await db.execute(select(SessionRecording).where(
+            SessionRecording.ended_at.is_not(None), SessionRecording.started_at < now - timedelta(days=days)
+        ).limit(200))).scalars().all()
+        for rec in old:
+            if rec.storage_key:
+                await recording_storage.remove(db, rec.storage_type, rec.storage_key)
+            await db.delete(rec)
+        out["recordings_purged"] = len(old)
+        if old:
+            from app.services.secrets_ops import _system_user_id
+            uid = await _system_user_id(db)
+            if uid:
+                db.add(AuditLog(user_id=uid, action="recording.retention",
+                                result=f"{len(old)} recording(s) older than {days} days deleted"))
+    days = await get_setting_int(db, "command_log_retention_days")
+    if days > 0:
+        res = await db.execute(delete(CommandLog).where(CommandLog.created_at < now - timedelta(days=days)))
+        out["commands_purged"] = res.rowcount or 0
+    await db.commit()
+    return out
 
 
 async def scheduler_loop(stop: asyncio.Event) -> None:

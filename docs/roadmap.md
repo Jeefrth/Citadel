@@ -7,6 +7,7 @@
 - **Sprint B** : Mini-CA Ed25519, certificats SSH éphémères.
 - **Sprint C** : MFA par session, command filter, timeout 30 min, CA persistante.
 - **Sprint PAM-1** (11/2026) : règles d'accès, comptes par serveur, comptes virtuels, arborescence de nœuds, étiquettes, favoris, clés API, tickets RDP.
+- **Sprint PAM-4** (11/2026) : enregistrement RDP (guacd), journal des commandes indexé, supervision en lecture seule et coupure en direct (SSH et RDP), stockage local / S3 / Azure avec SHA-256 et rétention, export SIEM (syslog CEF/JSON, HTTP HEC).
 - **Sprint PAM-3** (11/2026) : ACL de connexion (login / connect, IP, horaires) et de commandes (API + terminal interactif), validation à 4 yeux, demandes d'accès temporaires, notifications (cloche, e-mail, Teams, webhook).
 - **Sprint PAM-2** (11/2026) : coffre OpenBao (Transit + CA SSH + AppRole), migration et rotation de clé, rotation des mots de passe, vérification et collecte des comptes, planificateur. Correctifs : émetteurs Entra explicites, CORS restreint.
 
@@ -19,7 +20,7 @@ Analyse du 24/11/2026 de `jumpserver/jumpserver` (v5.2.1). JumpServer est sous *
 | 1. Socle PAM | C1 règles d'accès, B1 comptes par actif, B9 comptes virtuels, A1 nœuds, A2 étiquettes, A5 favoris, F4 clés API | ✅ Sprint PAM-1 |
 | 2. Secrets | B10 coffre OpenBao (= D1), B3 rotation automatique, B5 collecte des comptes, B6 vérification des comptes | ✅ Sprint PAM-2 (voir `docs/vault.md`) |
 | 3. Gouvernance | C3 ACL de connexion (IP, horaires), C5 ACL de commandes (refuser / alerter / valider), G1 demandes d'accès, G2 validation (= D2), G4 notifications | ✅ Sprint PAM-3 (voir `docs/governance.md`) |
-| 4. Audit | D2 enregistrement RDP, D3 journal des commandes indexé, D4 supervision en direct, D5 coupure de session, D8 stockage externe, D9 SIEM (= E1) | À choisir |
+| 4. Audit | D2 enregistrement RDP, D3 journal des commandes indexé, D4 supervision en direct, D5 coupure de session, D8 stockage externe, D9 SIEM (= E1) | ✅ Sprint PAM-4 (voir `docs/audit.md`) |
 | 5. Opérations | E1 SFTP web, E2 commandes multi-serveurs, E3 playbooks Ansible, A4 passerelles et zones, A8 synchro cloud | À choisir |
 | Écartés pour l'instant | A9 à A11 (bases, Kubernetes, web), A14 RemoteApp, C7 masquage SQL, C9 multi-organisations, H2 haute dispo | Plus tard |
 
@@ -29,8 +30,8 @@ Analyse du 24/11/2026 de `jumpserver/jumpserver` (v5.2.1). JumpServer est sous *
 - ~~`main.py` : CORS ouvert à toutes les origines~~ : corrigé en PAM-2.
 - Rotation : pas encore de clés SSH ni de comptes de domaine AD ; sous Windows, le script peut apparaître dans le journal PowerShell 4104.
 - Monitoring et mises à jour ne savent pas encore utiliser un compte en certificat éphémère (mot de passe ou clé requis).
-- `docker-compose.prod.yml` n'a pas de service `guacd` : le RDP ne fonctionne pas en prod.
-- Suppression d'un serveur : les enregistrements de session et les règles d'alerte qui le référencent bloquent la suppression (clés étrangères sans cascade).
+- ~~`docker-compose.prod.yml` sans `guacd`~~ : ajouté en PAM-4 (et guacd n'est plus publié sur le réseau en dev).
+- ~~Suppression d'un serveur bloquée par ses enregistrements~~ : corrigé en PAM-4 (enregistrements conservés, règles d'alerte supprimées).
 
 ## Priorité : axe sécurité
 
@@ -59,7 +60,7 @@ L'objectif des sprints D / E / F est de transformer Citadel d'un bastion fonctio
 
 ### Sprint E — Visibilité & supply chain
 
-#### E1. Export SIEM
+#### E1. Export SIEM (✅ fait en PAM-4)
 
 - Sortie syslog RFC5424 (TCP + TLS) et format CEF / LEEF.
 - Webhook générique configurable (Splunk HEC, Elastic, Microsoft Sentinel).

@@ -464,6 +464,7 @@ async def create_connect_ticket(
         extra={
             "copy": PolicyAction.COPY.value in grant.actions,
             "paste": PolicyAction.PASTE.value in grant.actions,
+            "ip": getattr(request.state, "client_ip", None),
         },
     )
     return ConnectTicketResponse(ticket=ticket, expires_in=tickets.TICKET_TTL_SECONDS, account=account.label)

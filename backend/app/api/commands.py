@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.audit import AuditLog
 from app.models.base import UserRole
+from app.services.command_log import log_command
 from app.services.enforcement import GovernanceDenied, check_command as check_command_acl, enforce_connect
 from app.core.permissions import default_account, require_server, resolve_for_user
 from app.models.pam import PolicyAction
@@ -76,6 +77,8 @@ async def execute_command(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=e.message)
     outcome = await check_command_acl(db, user, server, account.username, body.command, ip)
     if not outcome.allowed:
+        await log_command(db, user=user, server=server, account=account.label, command=body.command,
+                          source="execute", decision=outcome.decision, rule=outcome.rule, ip=ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=outcome.message)
 
     try:
@@ -90,6 +93,9 @@ async def execute_command(
             detail=f"Command execution failed: {e}",
         )
 
+    await log_command(db, user=user, server=server, account=account.label, command=body.command,
+                      source="execute", decision=outcome.decision, rule=outcome.rule, ip=ip,
+                      exit_code=result.exit_code)
     db.add(AuditLog(
         user_id=user.id,
         server_id=server_id,

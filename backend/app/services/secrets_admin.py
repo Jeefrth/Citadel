@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.database import async_session
 from app.core.security import _local_decrypt, decrypt_value, is_vault_blob, vault_blob_version
 from app.models.credential import Credential
+from app.models.audit_trail import RecordingStorage, SiemTarget
 from app.models.governance import NotificationChannel
 from app.models.pam import SecretHistory
 
@@ -17,6 +18,8 @@ ENCRYPTED_FIELDS = [
     (Credential, ("encrypted_password", "encrypted_ssh_key")),
     (SecretHistory, ("encrypted_secret",)),
     (NotificationChannel, ("encrypted_secret",)),
+    (RecordingStorage, ("encrypted_secret",)),
+    (SiemTarget, ("encrypted_secret",)),
 ]
 
 

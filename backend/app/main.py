@@ -11,8 +11,8 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance
-from app.websocket import terminal, rdp
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit
+from app.websocket import terminal, rdp, monitor
 
 # Structured logging
 logging.basicConfig(
@@ -24,13 +24,15 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     stop = asyncio.Event()
-    task = None
+    tasks = []
     if settings.SCHEDULER_ENABLED and not settings.DEV_MODE:
         from app.services.scheduler import scheduler_loop
-        task = asyncio.create_task(scheduler_loop(stop))
+        tasks.append(asyncio.create_task(scheduler_loop(stop)))
+    from app.services.siem import siem_loop
+    tasks.append(asyncio.create_task(siem_loop(stop)))  # SIEM export runs even in dev mode
     yield
     stop.set()
-    if task:
+    for task in tasks:
         task.cancel()
 
 
@@ -69,8 +71,10 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(pam.router, prefix="/api", tags=["pam"])
 app.include_router(secrets.router, prefix="/api", tags=["secrets"])
 app.include_router(governance.router, prefix="/api", tags=["governance"])
+app.include_router(audit.router, prefix="/api", tags=["audit"])
 app.include_router(terminal.router, tags=["terminal"])
 app.include_router(rdp.router, tags=["rdp"])
+app.include_router(monitor.router, tags=["monitor"])
 
 
 @app.get("/api/health")

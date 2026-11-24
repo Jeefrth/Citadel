@@ -84,6 +84,20 @@ DEFAULTS = {
         "value": "1000",
         "description": "Maximum number of session recordings to keep (oldest deleted first)",
     },
+
+    # Audit (lot 4)
+    "recording_retention_days": {
+        "value": "0",
+        "description": "Delete session recordings older than N days (0 = keep forever)",
+    },
+    "command_log_retention_days": {
+        "value": "0",
+        "description": "Delete command journal entries older than N days (0 = keep forever)",
+    },
+    "notify_user_on_monitor": {
+        "value": "true",
+        "description": "Tell the user in their terminal when an admin starts watching the session",
+    },
 }
 
 

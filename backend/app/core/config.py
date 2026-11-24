@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     CONNECT_GRANT_MINUTES: int = 60    # an approved connection can be opened during
     COMMAND_GRANT_MINUTES: int = 30    # an approved command can be run once during
 
+    # Audit (lot 4)
+    RECORDING_DIR: str = "/recordings"          # local storage root, shared with guacd
+    GUACD_RECORDING_PATH: str = "/recordings/raw"  # where guacd writes raw RDP dumps
+    LIVE_BUFFER_CHUNKS: int = 300                # output kept for monitors joining late
+
     # Dev mode (bypass auth)
     DEV_MODE: bool = False
 

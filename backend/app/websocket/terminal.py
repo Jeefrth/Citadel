@@ -1,7 +1,9 @@
 import asyncio
 import base64
 import json
+import logging
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -13,6 +15,10 @@ from app.core.governance import client_ip
 from app.core.permissions import require_server, resolve_for_user
 from app.models.server import Server
 from app.models.user import User
+from sqlalchemy import select
+
+from app.services import live, recording_storage
+from app.services.command_log import log_command
 from app.services.enforcement import GovernanceDenied, check_command, enforce_connect
 from app.websocket.line_tracker import KILL_LINE, LineTracker
 from app.models.pam import PolicyAction
@@ -22,6 +28,7 @@ from app.models.base import OSType
 from app.websocket.session_manager import session_manager
 
 router = APIRouter()
+logger = logging.getLogger("citadel.terminal")
 
 
 class SessionRecorder:
@@ -191,6 +198,12 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             result=(f"account={account.label} "
                     + (f"cert={cert_max_seconds}s" if cert_max_seconds else "password/key")),
         ))
+        # Recording row created at start: an interrupted session still leaves a trace
+        db.add(SessionRecording(
+            session_id=session.session_id, server_id=srv_id, user_id=user_id,
+            server_name=server_name, user_name=user_name, protocol="ssh",
+            account=account.label, client_ip=ip, events=None,
+        ))
         await db.commit()
 
     # Start recording
@@ -202,12 +215,25 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
     IDLE_TIMEOUT = 1800  # 30 minutes
 
     await websocket.send_json({"type": "connected", "session_id": session.session_id})
+    sid = session.session_id
+    terminated: dict = {}
+    try:
+        await live.register(sid, {
+            "protocol": "ssh", "user_id": str(user_id), "user": user_name, "server_id": str(srv_id),
+            "server": server_name, "account": account.label, "client_ip": ip,
+        })
+    except Exception:  # noqa: BLE001 - live monitoring must never block a session
+        logger.warning("live registry unavailable for %s", sid)
 
     # Session timeout watchdog (idle + cert expiry)
     async def _idle_watchdog():
         nonlocal last_activity
         while not stop_event.is_set():
             await asyncio.sleep(10)
+            try:
+                await live.heartbeat(sid, last_activity=last_activity)
+            except Exception:  # noqa: BLE001
+                pass
 
             # Check cert expiry (hard limit)
             if cert_max_seconds:
@@ -267,11 +293,13 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                 if data:
                     recorder.record_output(data)
                     tracker.on_output(data)
+                    b64 = base64.b64encode(data).decode("ascii")
                     try:
-                        await websocket.send_json({
-                            "type": "output",
-                            "data": base64.b64encode(data).decode("ascii"),
-                        })
+                        await live.publish_output(sid, b64)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    try:
+                        await websocket.send_json({"type": "output", "data": b64})
                     except Exception:
                         break
         except Exception:
@@ -304,6 +332,11 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                                 cserver = await cdb.get(Server, srv_id)
                                 outcome = await check_command(
                                     cdb, cuser, cserver, account.username, command, ip, source="terminal")
+                                await log_command(
+                                    cdb, user=cuser, server=cserver, account=account.label, command=command,
+                                    source="terminal", decision=outcome.decision, rule=outcome.rule,
+                                    session_id=sid, ip=ip,
+                                    offset_ms=int((time.time() - recorder.start_time) * 1000))
                             if not outcome.allowed:
                                 # Never send Enter: clear the typed line, get a fresh prompt
                                 note = f"\r\n\x1b[1;31m[Citadel] {outcome.message}\x1b[0m\r\n"
@@ -325,11 +358,50 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         finally:
             stop_event.set()
 
+    async def _control_listener():
+        """Admin actions from any backend process: kill (D5), monitor notices (D4)."""
+        pubsub = live.redis().pubsub()
+        try:
+            await pubsub.subscribe(live.channel("ctl", sid))
+            async for msg in pubsub.listen():
+                if stop_event.is_set():
+                    break
+                if msg.get("type") != "message":
+                    continue
+                ctl = json.loads(msg["data"])
+                if ctl.get("action") == "kill":
+                    terminated.update(by=ctl.get("by"), reason=ctl.get("reason"))
+                    text = f"Session terminée par {ctl.get('by')}" + (f" : {ctl['reason']}" if ctl.get("reason") else "")
+                    note = f"\r\n\x1b[1;31m[Citadel] {text}\x1b[0m\r\n"
+                    try:
+                        await websocket.send_json({"type": "output", "data": base64.b64encode(note.encode()).decode()})
+                        await websocket.send_json({"type": "error", "message": text})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    stop_event.set()
+                    break
+                if ctl.get("action") == "watch":
+                    note = f"\r\n\x1b[1;33m[Citadel] Cette session est observée par {ctl.get('by')}.\x1b[0m\r\n"
+                    try:
+                        await websocket.send_json({"type": "output", "data": base64.b64encode(note.encode()).decode()})
+                    except Exception:  # noqa: BLE001
+                        pass
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001
+            logger.warning("control channel unavailable for %s", sid)
+        finally:
+            try:
+                await pubsub.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+
     # Run all tasks, cancel survivors when one exits
     tasks = [
         asyncio.create_task(_read_from_server()),
         asyncio.create_task(_read_from_client()),
         asyncio.create_task(_idle_watchdog()),
+        asyncio.create_task(_control_listener()),
     ]
 
     try:
@@ -344,28 +416,39 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
 
         await session_manager.close(session.session_id)
 
-        # Save recording + audit log
+        try:
+            await live.unregister(sid)
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Store the recording (D8) and close the audit trail
         try:
             async with async_session() as db:
-                recording = SessionRecording(
-                    session_id=session.session_id,
-                    server_id=srv_id,
-                    user_id=user_id,
-                    server_name=server_name,
-                    user_name=user_name,
-                    events=recorder.events,
-                    duration_seconds=recorder.duration_seconds,
-                    event_count=recorder.event_count,
-                    size_bytes=recorder.size_bytes,
-                )
-                db.add(recording)
-
+                payload = json.dumps(recorder.events, separators=(",", ":")).encode()
+                started = datetime.fromtimestamp(recorder.start_time, timezone.utc)
+                key = f"ssh/{started:%Y/%m/%d}/{sid}.json.gz"
+                stored = await recording_storage.store(db, key, payload)
+                rec = (await db.execute(
+                    select(SessionRecording).where(SessionRecording.session_id == sid))).scalar_one_or_none()
+                if rec is None:
+                    rec = SessionRecording(session_id=sid, server_id=srv_id, user_id=user_id,
+                                           server_name=server_name, user_name=user_name, protocol="ssh")
+                    db.add(rec)
+                rec.events = None
+                rec.storage_type, rec.storage_key, rec.sha256 = stored.storage_type, stored.key, stored.sha256
+                rec.ended_at = datetime.now(timezone.utc)
+                rec.duration_seconds = recorder.duration_seconds
+                rec.event_count = recorder.event_count
+                rec.size_bytes = recorder.size_bytes
+                rec.terminated_by = terminated.get("by")
+                rec.termination_reason = terminated.get("reason")
                 db.add(AuditLog(
                     user_id=user_id,
                     server_id=srv_id,
                     action="terminal.close",
-                    result=f"Recorded {recorder.event_count} events, {recorder.duration_seconds}s",
+                    result=(f"Recorded {recorder.event_count} events, {recorder.duration_seconds}s"
+                            + (f", killed by {terminated['by']}" if terminated.get("by") else "")),
                 ))
                 await db.commit()
-        except Exception:
-            pass  # Don't crash on recording save failure
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to store recording %s", sid)

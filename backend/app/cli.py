@@ -181,6 +181,20 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
+def cmd_init_volumes(_args) -> None:
+    """Prepare shared directories (recordings) for guacd (uid 1000) and the backend."""
+    root = Path(os.environ.get("RECORDING_DIR", "/recordings"))
+    for sub in ("raw", "store"):
+        d = root / sub
+        d.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chown(d, 1000, 1000)
+            d.chmod(0o770)
+        except PermissionError:
+            pass  # bind mounts on Docker Desktop: permissions are managed by the host
+    print(f"[init-volumes] {root} ready", flush=True)
+
+
 def cmd_status(_args) -> None:
     from app.services import secrets_admin
     print(json.dumps(_run_async(secrets_admin.status_standalone()), indent=2, default=str))
@@ -202,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("vault-bootstrap", help="Initialize/unseal/configure OpenBao for Citadel (idempotent)")
     b.add_argument("--rotate-secret-id", action="store_true", help="Issue a new AppRole secret_id and destroy the old one")
     b.set_defaults(func=cmd_bootstrap)
+    sub.add_parser("init-volumes", help="Create shared recording directories").set_defaults(func=cmd_init_volumes)
     sub.add_parser("secrets-status").set_defaults(func=cmd_status)
     sub.add_parser("secrets-migrate", help="Re-encrypt local AES blobs with the vault").set_defaults(func=cmd_migrate)
     sub.add_parser("secrets-rotate-key", help="Rotate the transit key and rewrap every blob").set_defaults(func=cmd_rotate_key)

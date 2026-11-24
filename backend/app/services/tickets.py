@@ -68,6 +68,8 @@ async def consume_ticket(ticket: str) -> tuple[dict, ResolvedAccount] | None:
     if raw is None:
         return None
     payload = json.loads(raw)
+    if payload.get("raw") or "account" not in payload:
+        return None  # a monitoring ticket can never open a session
     a = payload["account"]
     account = ResolvedAccount(
         username=a["username"],
@@ -79,3 +81,20 @@ async def consume_ticket(ticket: str) -> tuple[dict, ResolvedAccount] | None:
         account_id=uuid.UUID(a["account_id"]) if a["account_id"] else None,
     )
     return payload, account
+
+
+async def issue_raw(payload: dict) -> str:
+    """Ticket carrying an arbitrary payload (e.g. RDP monitoring), same TTL and one-shot use."""
+    ticket = secrets.token_urlsafe(32)
+    await _redis().set(_PREFIX + ticket, json.dumps({"raw": True, **payload}), ex=TICKET_TTL_SECONDS)
+    return ticket
+
+
+async def consume_raw(ticket: str) -> dict | None:
+    if not ticket:
+        return None
+    raw = await _redis().getdel(_PREFIX + ticket)
+    if raw is None:
+        return None
+    payload = json.loads(raw)
+    return payload if payload.get("raw") else None

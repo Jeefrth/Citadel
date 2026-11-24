@@ -33,6 +33,7 @@
 - Roadmap (sprints D/E/F sécurité + axes ultérieurs) : `docs/roadmap.md`
 - Coffre de secrets (OpenBao) et cycle de vie des comptes : `docs/vault.md`
 - Gouvernance (ACL, validations, notifications) : `docs/governance.md`
+- Audit (enregistrements, journal, direct, SIEM) : `docs/audit.md`
 - README complet : `README.md`
 
 ## Historique des phases
@@ -47,6 +48,7 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **Sprint PAM-4** (11/2026) : audit : enregistrement RDP, journal des commandes, sessions en direct (observer, terminer), stockage local/S3/Azure + SHA-256 + rétention, export SIEM. Voir `docs/audit.md`
 - **Sprint PAM-3** (11/2026) : ACL de connexion et de commandes (API + terminal, `websocket/line_tracker.py`), validation à 4 yeux, demandes d'accès, notifications. Voir `docs/governance.md`
 - **Sprint PAM-2** (11/2026) : coffre OpenBao (Transit, CA SSH, AppRole, bootstrap idempotent), migration local → coffre et rotation de clé, rotation des mots de passe, vérification et collecte des comptes, planificateur (verrou Redis). Voir `docs/vault.md`
 - **Sprint PAM-1** (11/2026, inspiré de JumpServer, réimplémenté) : règles d'accès (C1), comptes par serveur (B1), comptes virtuels @ALL/@USER/@INPUT (B9), arborescence de nœuds (A1), étiquettes (A2), favoris (A5), clés API personnelles (F4), tickets RDP à usage unique
@@ -140,7 +142,7 @@ frontend/
 
 ### Docker (`docker-compose.yml`)
 
-Services dev : `openbao` (2.7.2, UI sur 127.0.0.1:8200), `vault-bootstrap` (job idempotent : init, unseal, transit, CA SSH, AppRole ; fichiers dans `data/openbao/`), `db` (Postgres 16, 5432), `redis` (7, 6379), `backend` (FastAPI, port hôte `BACKEND_PORT`, 8000 par défaut ; 8010 sur le Mac de JF car 8000 est pris par un serveur LLM local), `guacd` (Guacamole, 4822), `frontend` (Vite, 5173, proxy vers `backend:8000`). Clé de la CA montée depuis `./data/ca`. Prod : `docker-compose.prod.yml` avec nginx en reverse proxy, pas d'exposition DB/Redis.
+Services dev : `guacd` (1.6.0, non publié, enregistre dans `data/recordings/raw`), `openbao` (2.7.2, UI sur 127.0.0.1:8200), `vault-bootstrap` (job idempotent : init, unseal, transit, CA SSH, AppRole ; fichiers dans `data/openbao/`), `db` (Postgres 16, 5432), `redis` (7, 6379), `backend` (FastAPI, port hôte `BACKEND_PORT`, 8000 par défaut ; 8010 sur le Mac de JF car 8000 est pris par un serveur LLM local), `guacd` (Guacamole, 4822), `frontend` (Vite, 5173, proxy vers `backend:8000`). Clé de la CA montée depuis `./data/ca`. Prod : `docker-compose.prod.yml` avec nginx en reverse proxy, pas d'exposition DB/Redis.
 
 ### Décisions architecturales clés
 
@@ -156,6 +158,7 @@ Services dev : `openbao` (2.7.2, UI sur 127.0.0.1:8200), `vault-bootstrap` (job 
 10. **RDP par ticket** : `POST /connect-ticket` contrôle les droits et résout le compte, puis le WebSocket n'accepte qu'un ticket Redis à usage unique (60 s). Aucun jeton ni mot de passe dans les URL (uvicorn journalise les query strings).
 11. **Clés API** : `ctk_<prefix>_<secret>`, seul le SHA-256 est stocké, héritent des droits de l'utilisateur, ne peuvent pas créer d'autres clés.
 12. **Gouvernance** : point de contrôle unique `services/enforcement.py` (terminal, ticket RDP, execute). Règles ordonnées par priorité, première correspondance gagnante, aucune = autorisé. 4 yeux strict (jamais sa propre demande). IP client via `core/governance.client_ip` (X-Forwarded-For seulement depuis `TRUSTED_PROXIES`).
+13. **Audit** : enregistrements stockés hors base (gzip + SHA-256 vérifié à la relecture, `services/recording_storage.py`), registre des sessions en direct dans Redis (`services/live.py`, pub/sub sortie + contrôle), SIEM par curseur persistant (`services/siem.py`).
 
 ## Commandes utiles
 

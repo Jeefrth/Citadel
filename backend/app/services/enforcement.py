@@ -58,6 +58,8 @@ class CommandOutcome:
     allowed: bool
     message: str | None = None
     approval_number: int | None = None
+    decision: str = "allowed"   # allowed | alert | denied | review | approved_run
+    rule: str | None = None
 
 
 async def check_command(
@@ -69,7 +71,7 @@ async def check_command(
     decision = await evaluate_command(db, user, server, account, cmd)
 
     if decision.action == CommandAction.ALLOW.value:
-        return CommandOutcome(True)
+        return CommandOutcome(True, rule=decision.rule)
 
     if decision.action == CommandAction.ALERT.value:
         db.add(AuditLog(user_id=user.id, server_id=server.id, action="command.alert", command=cmd,
@@ -78,7 +80,7 @@ async def check_command(
                      f"{user.display_name} ({account}) : {cmd}\nRègle « {decision.rule} ».",
                      link=f"/servers/{server.id}", level="warning")
         await db.commit()
-        return CommandOutcome(True)
+        return CommandOutcome(True, decision="alert", rule=decision.rule)
 
     if decision.action == CommandAction.DENY.value:
         db.add(AuditLog(user_id=user.id, server_id=server.id, action="command.denied", status="failure",
@@ -87,7 +89,8 @@ async def check_command(
                      f"{user.display_name} ({account}) : {cmd}\nRègle « {decision.rule} ».",
                      link=f"/servers/{server.id}", level="warning")
         await db.commit()
-        return CommandOutcome(False, f"Commande refusée par la règle « {decision.rule} ».")
+        return CommandOutcome(False, f"Commande refusée par la règle « {decision.rule} ».",
+                              decision="denied", rule=decision.rule)
 
     # review: one-shot grant for this exact command
     grant = await find_grant(db, user, ApprovalKind.COMMAND.value, server.id, account, command=cmd)
@@ -96,7 +99,7 @@ async def check_command(
         db.add(AuditLog(user_id=user.id, server_id=server.id, action="command.approved_run", command=cmd,
                         ip_address=ip, result=f"#{grant.number} {source} account={account}"))
         await db.commit()
-        return CommandOutcome(True)
+        return CommandOutcome(True, decision="approved_run", rule=decision.rule)
     req = await request_approval(db, user, ApprovalKind.COMMAND.value, decision, server=server,
                                  account=account, command=cmd)
     db.add(AuditLog(user_id=user.id, server_id=server.id, action="command.review", status="pending",
@@ -105,5 +108,5 @@ async def check_command(
     return CommandOutcome(
         False,
         f"Commande soumise à validation (demande #{req.number}). Relancez-la à l'identique une fois approuvée.",
-        req.number,
+        req.number, decision="review", rule=decision.rule,
     )

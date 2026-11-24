@@ -44,7 +44,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
-    command: ["python", "-m", "app.cli", "vault-bootstrap"]
+    command: ["sh", "-c", "python -m app.cli init-volumes && python -m app.cli vault-bootstrap"]
     restart: "no"
     environment:
       VAULT_ADDR: http://openbao:8200
@@ -58,6 +58,7 @@ services:
       - ./data/openbao/init:/bootstrap/init
       - ./data/openbao/approle:/bootstrap/approle
       - ./data/ca:/data/ca:ro
+      - ./data/recordings:/recordings
 
   backend:
     build:
@@ -86,12 +87,15 @@ services:
       - ./data/ca:/data/ca
       # AppRole credentials written by vault-bootstrap (read-only here)
       - ./data/openbao/approle:/bootstrap/approle:ro
+      # Session recordings (local storage + raw RDP dumps written by guacd)
+      - ./data/recordings:/recordings
 
   guacd:
-    image: guacamole/guacd:latest
+    image: guacamole/guacd:1.6.0
     restart: unless-stopped
-    ports:
-      - "4822:4822"
+    # No published port: guacd has no authentication, only the backend may reach it
+    volumes:
+      - ./data/recordings:/recordings
 
   frontend:
     build:

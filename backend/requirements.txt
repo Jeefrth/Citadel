@@ -32,3 +32,6 @@ pywinrm==0.5.0
 pytest==8.3.5
 pytest-asyncio==0.25.3
 httpx==0.28.1
+
+# Recording storage (S3-compatible)
+minio==7.2.18

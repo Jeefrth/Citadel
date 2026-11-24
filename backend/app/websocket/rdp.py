@@ -6,7 +6,11 @@ guacd handles the actual RDP connection.
 """
 
 import asyncio
+import json
 import os
+import re
+import time
+from datetime import datetime, timezone
 import uuid
 import socket
 import logging
@@ -17,7 +21,10 @@ from sqlalchemy import select
 from app.core.database import async_session
 from app.core.security import decrypt_value
 from app.models.server import Server
+from app.core.config import settings
+from app.models.session_recording import SessionRecording
 from app.models.user import User
+from app.services import live, recording_storage
 from app.services.tickets import consume_ticket
 from app.models.audit import AuditLog
 
@@ -26,6 +33,7 @@ logger = logging.getLogger("citadel.rdp")
 
 GUACD_HOST = os.environ.get("GUACD_HOST", "localhost")
 GUACD_PORT = int(os.environ.get("GUACD_PORT", "4822"))
+GUACD_RECORDING_PATH = settings.GUACD_RECORDING_PATH
 
 
 def _guac_encode(*args: str) -> bytes:
@@ -59,10 +67,19 @@ def _guac_decode(data: bytes) -> list[list[str]]:
     return instructions
 
 
+READY_RE = re.compile(rb"5\.ready,(\d+)\.")
+
+
 def _connect_guacd(hostname: str, port: int, username: str, password: str,
                    width: int, height: int, dpi: int = 96,
-                   disable_copy: bool = False, disable_paste: bool = False) -> socket.socket:
-    """Connect to guacd and perform the Guacamole handshake for RDP."""
+                   disable_copy: bool = False, disable_paste: bool = False,
+                   recording_name: str | None = None,
+                   join_connection: str | None = None, read_only: bool = False) -> tuple[socket.socket, str | None]:
+    """Connect to guacd and perform the Guacamole handshake.
+
+    New RDP connection, or (join_connection) join an existing one, e.g. read-only
+    for live monitoring. Returns (socket, guacd connection id).
+    """
     # Split DOMAIN\user format into separate fields
     domain = ""
     if "\\" in username:
@@ -72,8 +89,8 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
     sock.connect((GUACD_HOST, GUACD_PORT))
     sock.settimeout(10)
 
-    # Step 1: Select RDP protocol
-    sock.sendall(_guac_encode("select", "rdp"))
+    # Step 1: Select RDP protocol, or the existing connection to join
+    sock.sendall(_guac_encode("select", join_connection or "rdp"))
 
     # Step 2: Read args instruction
     buf = b""
@@ -106,7 +123,16 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
         "enable-font-smoothing": "true",
         "disable-copy": "true" if disable_copy else "false",
         "disable-paste": "true" if disable_paste else "false",
+        "read-only": "true" if read_only else "",
     }
+    if recording_name and not join_connection:
+        # Native guacd recording (D2). Keystrokes are NOT recorded (passwords).
+        params.update({
+            "recording-path": GUACD_RECORDING_PATH,
+            "recording-name": recording_name,
+            "create-recording-path": "true",
+            "recording-include-keys": "false",
+        })
 
     # Step 4: Send size, audio, video, image, then connect
     sock.sendall(_guac_encode("size", str(width), str(height), str(dpi)))
@@ -128,8 +154,15 @@ def _connect_guacd(hostname: str, port: int, username: str, password: str,
         error_msg = ready_buf.decode("utf-8", errors="replace")
         raise RuntimeError(f"guacd error: {error_msg}")
 
+    conn_id = None
+    m = READY_RE.search(ready_buf)
+    if m:
+        length = int(m.group(1))
+        start = m.end()
+        conn_id = ready_buf[start:start + length].decode("utf-8", errors="replace")
+
     sock.settimeout(0.02)  # Non-blocking reads
-    return sock
+    return sock, conn_id
 
 
 @router.websocket("/ws/rdp/{server_id}")
@@ -186,8 +219,14 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
 
         user_id = user.id
         srv_id = server.id
+        user_name, server_name = user.display_name, server.name
+        sid = f"rdp-{uuid.uuid4()}"
+        ip = payload["extra"].get("ip")
 
         db.add(AuditLog(user_id=user_id, server_id=srv_id, action="rdp.open", result=f"account={account.label}"))
+        db.add(SessionRecording(session_id=sid, server_id=srv_id, user_id=user_id, server_name=server_name,
+                                user_name=user_name, protocol="rdp", account=account.label,
+                                client_ip=ip, events=None))
         await db.commit()
 
     # Connect to guacd
@@ -195,14 +234,26 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
         sock = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: _connect_guacd(rdp_host, rdp_port, rdp_user, rdp_pass, width, height,
-                                   disable_copy=disable_copy, disable_paste=disable_paste),
+                                   disable_copy=disable_copy, disable_paste=disable_paste,
+                                   recording_name=sid),
         )
+        sock, guac_conn_id = sock
     except Exception as e:
         logger.error("guacd connection failed: %s", e)
         await websocket.close(code=4005, reason=f"RDP connection failed: {e}")
         return
 
     logger.info("RDP connected to %s:%d for user %s", rdp_host, rdp_port, rdp_user)
+    started = time.time()
+    terminated: dict = {}
+    try:
+        await live.register(sid, {
+            "protocol": "rdp", "user_id": str(user_id), "user": user_name, "server_id": str(srv_id),
+            "server": server_name, "account": account.label, "client_ip": ip,
+            "guac_connection_id": guac_conn_id, "width": width, "height": height,
+        })
+    except Exception:  # noqa: BLE001
+        logger.warning("live registry unavailable for %s", sid)
 
     sock.settimeout(0.02)
 
@@ -257,9 +308,36 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
         finally:
             stop.set()
 
+    async def _control():
+        pubsub = live.redis().pubsub()
+        try:
+            await pubsub.subscribe(live.channel("ctl", sid))
+            last_beat = 0.0
+            while not stop.is_set():
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if time.time() - last_beat > 20:
+                    last_beat = time.time()
+                    await live.heartbeat(sid)
+                if not msg:
+                    continue
+                ctl = json.loads(msg["data"])
+                if ctl.get("action") == "kill":
+                    terminated.update(by=ctl.get("by"), reason=ctl.get("reason"))
+                    stop.set()
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001
+            logger.warning("control channel unavailable for %s", sid)
+        finally:
+            try:
+                await pubsub.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+
     tasks = [
         asyncio.create_task(_guacd_to_ws()),
         asyncio.create_task(_ws_to_guacd()),
+        asyncio.create_task(_control()),
     ]
 
     try:
@@ -273,6 +351,47 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
         except Exception:
             pass
 
+        if terminated:
+            try:
+                await websocket.close(code=4010, reason=f"Session terminée par {terminated.get('by')}"[:120])
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            await live.unregister(sid)
+        except Exception:  # noqa: BLE001
+            pass
+        await _store_rdp_recording(sid, user_id, srv_id, started, terminated)
+
+
+async def _store_rdp_recording(sid: str, user_id, srv_id, started: float, terminated: dict) -> None:
+    """Move the raw guacd dump to the recording storage (gzip + SHA-256), close the audit trail."""
+    raw_path = os.path.join(GUACD_RECORDING_PATH, sid)
+    await asyncio.sleep(1)  # let guacd flush and close the file
+    try:
         async with async_session() as db:
-            db.add(AuditLog(user_id=user_id, server_id=srv_id, action="rdp.close"))
+            rec = (await db.execute(select(SessionRecording).where(SessionRecording.session_id == sid))).scalar_one_or_none()
+            duration = int(time.time() - started)
+            note = f"{duration}s"
+            if os.path.exists(raw_path):
+                with open(raw_path, "rb") as f:
+                    raw = f.read()
+                key = f"rdp/{datetime.now(timezone.utc):%Y/%m/%d}/{sid}.guac.gz"
+                stored = await recording_storage.store(db, key, raw)
+                os.unlink(raw_path)
+                if rec:
+                    rec.storage_type, rec.storage_key, rec.sha256 = stored.storage_type, stored.key, stored.sha256
+                    rec.size_bytes = len(raw)
+                note += f", {len(raw)} bytes recorded"
+            else:
+                logger.warning("no guacd recording found at %s", raw_path)
+                note += ", no recording file"
+            if rec:
+                rec.ended_at = datetime.now(timezone.utc)
+                rec.duration_seconds = duration
+                rec.terminated_by = terminated.get("by")
+                rec.termination_reason = terminated.get("reason")
+            db.add(AuditLog(user_id=user_id, server_id=srv_id, action="rdp.close",
+                            result=note + (f", killed by {terminated['by']}" if terminated.get("by") else "")))
             await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to store RDP recording %s", sid)

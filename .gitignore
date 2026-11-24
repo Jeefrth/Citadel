@@ -44,3 +44,4 @@ data/ca/
 # TypeScript incremental build info
 *.tsbuildinfo
 data/openbao/
+data/recordings/

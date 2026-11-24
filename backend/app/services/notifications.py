@@ -37,6 +37,7 @@ EVENTS = {
     "connect.denied": "Connexion refusée par une ACL",
     "rotation.failed": "Échec de rotation de mot de passe",
     "discovery.privileged": "Compte privilégié non géré découvert",
+    "session.killed": "Session terminée par un administrateur",
     "test": "Message de test",
 }
 

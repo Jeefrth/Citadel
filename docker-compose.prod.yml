@@ -35,11 +35,17 @@ services:
       - ./deploy/openbao/citadel.hcl:/openbao/config/citadel.hcl:ro
       - openbao-data:/openbao/file
 
+  guacd:
+    image: guacamole/guacd:1.6.0
+    restart: always
+    volumes:
+      - recordings:/recordings
+
   vault-bootstrap:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: ["python", "-m", "app.cli", "vault-bootstrap"]
+    command: ["sh", "-c", "python -m app.cli init-volumes && python -m app.cli vault-bootstrap"]
     restart: "no"
     user: "0"   # writes the init / AppRole volumes
     environment:
@@ -53,6 +59,7 @@ services:
       - openbao-init:/bootstrap/init
       - openbao-approle:/bootstrap/approle
       - ca_data:/data/ca:ro
+      - recordings:/recordings
 
   backend:
     build:
@@ -65,6 +72,7 @@ services:
       VAULT_ADDR: http://openbao:8200
       # Only nginx can reach the backend (no published port): trust its X-Forwarded-For
       TRUSTED_PROXIES: 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16
+      GUACD_HOST: guacd
     depends_on:
       db:
         condition: service_healthy
@@ -82,6 +90,7 @@ services:
       # Mini-CA private key (local CA backend only)
       - ca_data:/data/ca
       - openbao-approle:/bootstrap/approle:ro
+      - recordings:/recordings
 
   frontend:
     build:
@@ -98,6 +107,7 @@ services:
       - backend
 
 volumes:
+  recordings:
   openbao-data:
   openbao-init:
   openbao-approle:

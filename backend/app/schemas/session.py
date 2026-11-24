@@ -13,7 +13,7 @@ class SessionEvent(BaseModel):
 class SessionRecordingList(BaseModel):
     id: uuid.UUID
     session_id: str
-    server_id: uuid.UUID
+    server_id: uuid.UUID | None
     user_id: uuid.UUID
     server_name: str
     user_name: str
@@ -22,6 +22,13 @@ class SessionRecordingList(BaseModel):
     duration_seconds: int
     event_count: int
     size_bytes: int
+    protocol: str = "ssh"
+    account: str | None = None
+    client_ip: str | None = None
+    storage_type: str | None = None
+    sha256: str | None = None
+    terminated_by: str | None = None
+    termination_reason: str | None = None
 
     model_config = {"from_attributes": True}
 
