@@ -118,13 +118,18 @@ async def execute_command(
     timeout: int = 30,
     use_ephemeral_cert: bool = False,
     cert_validity_minutes: int = 480,
+    stdin: str | None = None,
 ) -> CommandResult:
-    """Execute a command over SSH and return the result."""
+    """Execute a command over SSH and return the result.
+
+    stdin: data written to the command's standard input (keeps secrets
+    out of the command line, which is visible in `ps` on the target).
+    """
     conn = await _connect(host, port, username, password, ssh_key,
                           use_ephemeral_cert=use_ephemeral_cert,
                           cert_validity_minutes=cert_validity_minutes)
     try:
-        result = await conn.run(command, timeout=timeout)
+        result = await conn.run(command, timeout=timeout, input=stdin)
         return CommandResult(
             exit_code=result.exit_status or 0,
             stdout=result.stdout or "",

@@ -7,6 +7,7 @@
 - **Sprint B** : Mini-CA Ed25519, certificats SSH éphémères.
 - **Sprint C** : MFA par session, command filter, timeout 30 min, CA persistante.
 - **Sprint PAM-1** (11/2026) : règles d'accès, comptes par serveur, comptes virtuels, arborescence de nœuds, étiquettes, favoris, clés API, tickets RDP.
+- **Sprint PAM-2** (11/2026) : coffre OpenBao (Transit + CA SSH + AppRole), migration et rotation de clé, rotation des mots de passe, vérification et collecte des comptes, planificateur. Correctifs : émetteurs Entra explicites, CORS restreint.
 
 ## Fonctionnalités inspirées de JumpServer
 
@@ -15,7 +16,7 @@ Analyse du 24/11/2026 de `jumpserver/jumpserver` (v5.2.1). JumpServer est sous *
 | Lot | Contenu | Statut |
 |-----|---------|--------|
 | 1. Socle PAM | C1 règles d'accès, B1 comptes par actif, B9 comptes virtuels, A1 nœuds, A2 étiquettes, A5 favoris, F4 clés API | ✅ Sprint PAM-1 |
-| 2. Secrets | B10 coffre externe (= D1), B3 rotation automatique, B5 collecte des comptes, B6 vérification des comptes | À choisir |
+| 2. Secrets | B10 coffre OpenBao (= D1), B3 rotation automatique, B5 collecte des comptes, B6 vérification des comptes | ✅ Sprint PAM-2 (voir `docs/vault.md`) |
 | 3. Gouvernance | C3 ACL de connexion (IP, horaires), C5 ACL de commandes (refuser / alerter / valider), G1 demandes d'accès, G2 validation (= D2), G4 notifications | À choisir |
 | 4. Audit | D2 enregistrement RDP, D3 journal des commandes indexé, D4 supervision en direct, D5 coupure de session, D8 stockage externe, D9 SIEM (= E1) | À choisir |
 | 5. Opérations | E1 SFTP web, E2 commandes multi-serveurs, E3 playbooks Ansible, A4 passerelles et zones, A8 synchro cloud | À choisir |
@@ -23,8 +24,9 @@ Analyse du 24/11/2026 de `jumpserver/jumpserver` (v5.2.1). JumpServer est sous *
 
 ### Points relevés pendant PAM-1
 
-- `auth.py` : le repli de validation sans vérification de l'émetteur reste à remplacer par une liste explicite des deux émetteurs du tenant (v1 `sts.windows.net/<tenant>/`, v2 `login.microsoftonline.com/<tenant>/v2.0`). À traiter avec D1.
-- `main.py` : CORS `allow_origin_regex=".*"` avec `allow_credentials=True` accepte n'importe quelle origine. À restreindre aux origines configurées.
+- ~~`auth.py` : repli de validation sans vérification de l'émetteur~~ : corrigé en PAM-2 (émetteurs v1/v2 du tenant + `tid`).
+- ~~`main.py` : CORS ouvert à toutes les origines~~ : corrigé en PAM-2.
+- Rotation : pas encore de clés SSH ni de comptes de domaine AD ; sous Windows, le script peut apparaître dans le journal PowerShell 4104.
 - Monitoring et mises à jour ne savent pas encore utiliser un compte en certificat éphémère (mot de passe ou clé requis).
 - `docker-compose.prod.yml` n'a pas de service `guacd` : le RDP ne fonctionne pas en prod.
 - Suppression d'un serveur : les enregistrements de session et les règles d'alerte qui le référencent bloquent la suppression (clés étrangères sans cascade).
@@ -35,7 +37,7 @@ L'objectif des sprints D / E / F est de transformer Citadel d'un bastion fonctio
 
 ### Sprint D — Secrets & gouvernance
 
-#### D1. Externaliser `CREDENTIAL_ENCRYPTION_KEY`
+#### D1. Externaliser `CREDENTIAL_ENCRYPTION_KEY` (✅ fait en PAM-2 avec OpenBao Transit)
 
 - Backend `core/security.py` : abstraire derrière un `KeyProvider` (env / Azure Key Vault / HashiCorp Vault).
 - Rotation de clé : migration Alembic pour ré-encrypter les credentials avec un champ `key_version`.

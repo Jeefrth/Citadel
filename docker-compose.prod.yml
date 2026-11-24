@@ -24,6 +24,36 @@ services:
       timeout: 5s
       retries: 5
 
+  openbao:
+    image: openbao/openbao:2.7.2
+    restart: always
+    command: ["server", "-config=/openbao/config/citadel.hcl"]
+    environment:
+      SKIP_SETCAP: "true"
+    # No published port: only the backend talks to the vault
+    volumes:
+      - ./deploy/openbao/citadel.hcl:/openbao/config/citadel.hcl:ro
+      - openbao-data:/openbao/file
+
+  vault-bootstrap:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.cli", "vault-bootstrap"]
+    restart: "no"
+    user: "0"   # writes the init / AppRole volumes
+    environment:
+      VAULT_ADDR: http://openbao:8200
+      VAULT_INIT_DIR: /bootstrap/init
+      VAULT_APPROLE_DIR: /bootstrap/approle
+      CA_KEY_DIR: /data/ca
+    depends_on:
+      - openbao
+    volumes:
+      - openbao-init:/bootstrap/init
+      - openbao-approle:/bootstrap/approle
+      - ca_data:/data/ca:ro
+
   backend:
     build:
       context: ./backend
@@ -31,11 +61,15 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      VAULT_ADDR: http://openbao:8200
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      vault-bootstrap:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health').raise_for_status()"]
       interval: 30s
@@ -43,8 +77,9 @@ services:
       retries: 3
       start_period: 15s
     volumes:
-      # Mini-CA private key must survive rebuilds
+      # Mini-CA private key (local CA backend only)
       - ca_data:/data/ca
+      - openbao-approle:/bootstrap/approle:ro
 
   frontend:
     build:
@@ -61,5 +96,8 @@ services:
       - backend
 
 volumes:
+  openbao-data:
+  openbao-init:
+  openbao-approle:
   ca_data:
   pgdata:

@@ -27,6 +27,38 @@ services:
       timeout: 3s
       retries: 5
 
+  openbao:
+    image: openbao/openbao:2.7.2
+    restart: unless-stopped
+    command: ["server", "-config=/openbao/config/citadel.hcl"]
+    environment:
+      SKIP_SETCAP: "true"
+    ports:
+      - "127.0.0.1:8200:8200"   # web UI / CLI from the host only
+    volumes:
+      - ./deploy/openbao/citadel.hcl:/openbao/config/citadel.hcl:ro
+      - openbao-data:/openbao/file
+
+  # One-shot, idempotent: init (first run), unseal, configure transit / SSH CA / AppRole
+  vault-bootstrap:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    command: ["python", "-m", "app.cli", "vault-bootstrap"]
+    restart: "no"
+    environment:
+      VAULT_ADDR: http://openbao:8200
+      VAULT_INIT_DIR: /bootstrap/init
+      VAULT_APPROLE_DIR: /bootstrap/approle
+      CA_KEY_DIR: /data/ca
+    depends_on:
+      - openbao
+    volumes:
+      - ./backend:/app
+      - ./data/openbao/init:/bootstrap/init
+      - ./data/openbao/approle:/bootstrap/approle
+      - ./data/ca:/data/ca:ro
+
   backend:
     build:
       context: ./backend
@@ -40,15 +72,20 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-citadel}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-citadel}
       REDIS_URL: redis://redis:6379/0
       GUACD_HOST: guacd
+      VAULT_ADDR: http://openbao:8200
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      vault-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
-      # Mini-CA private key must survive rebuilds (gitignored)
+      # Mini-CA private key (local CA backend only, gitignored)
       - ./data/ca:/data/ca
+      # AppRole credentials written by vault-bootstrap (read-only here)
+      - ./data/openbao/approle:/bootstrap/approle:ro
 
   guacd:
     image: guacamole/guacd:latest
@@ -75,4 +112,5 @@ services:
       - /app/node_modules
 
 volumes:
+  openbao-data:
   pgdata:

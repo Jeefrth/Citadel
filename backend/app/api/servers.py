@@ -34,7 +34,25 @@ router = APIRouter()
 
 
 def account_read(account: Account) -> AccountRead:
+    from datetime import timedelta
+    from app.services.secrets_ops import rotation_blocker
+    blocker = rotation_blocker(account)
+    nxt = None
+    if account.rotation_enabled and not blocker:
+        nxt = (account.last_rotated_at + timedelta(days=account.rotation_interval_days)
+               if account.last_rotated_at else None)
     return AccountRead(
+        rotation_enabled=account.rotation_enabled,
+        rotation_interval_days=account.rotation_interval_days,
+        rotation_supported=blocker is None,
+        rotation_blocker=blocker,
+        last_rotated_at=account.last_rotated_at,
+        next_rotation_at=nxt,
+        last_rotation_status=account.last_rotation_status,
+        last_rotation_message=account.last_rotation_message,
+        verify_status=account.verify_status,
+        verify_message=account.verify_message,
+        last_verified_at=account.last_verified_at,
         id=account.id,
         server_id=account.server_id,
         username=account.username,
@@ -354,8 +372,18 @@ async def update_account(
         setattr(account, field, value)
     if changes.get("is_active") is False:
         account.is_default = False  # an inactive account cannot drive automation
+    if "credential_id" in changes:
+        await db.flush()
+        await db.refresh(account, attribute_names=["credential"])
     if not account.use_cert and not account.credential_id:
         raise HTTPException(status_code=400, detail="Choose a credential or the ephemeral certificate")
+    if changes.get("rotation_enabled"):
+        from app.services.secrets_ops import rotation_blocker
+        blocker = rotation_blocker(account)
+        if blocker:
+            raise HTTPException(status_code=400, detail=blocker)
+    if "credential_id" in changes or "use_cert" in changes:
+        account.verify_status = "unknown"  # secret changed: previous verification is stale
     if changes.get("is_default"):
         await _clear_other_defaults(db, server_id, account.id)
     db.add(AuditLog(user_id=user.id, server_id=server_id, action="account.update", result=account.username))

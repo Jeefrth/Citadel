@@ -3,6 +3,7 @@ from app.models.user import User
 from app.models.server import Server
 from app.models.pam import (
     Node, Account, UserGroup, AccessPolicy, UserFavorite, AccessKey, PolicyAction,
+    SecretHistory, SecretStatus, DiscoveredAccount,
 )
 from app.models.credential import Credential
 from app.models.audit import AuditLog
@@ -21,6 +22,9 @@ __all__ = [
     "UserFavorite",
     "AccessKey",
     "PolicyAction",
+    "SecretHistory",
+    "SecretStatus",
+    "DiscoveredAccount",
     "Credential",
     "AuditLog",
     "UpdateJob",

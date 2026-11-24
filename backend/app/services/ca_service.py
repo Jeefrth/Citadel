@@ -1,8 +1,11 @@
 """Mini Certificate Authority for ephemeral SSH certificates.
 
-Generates a CA key pair on first run (stored on disk), then signs
-short-lived SSH user certificates on demand using ssh-keygen.
-Existing credential types (password, ssh_key, winrm) are NOT affected.
+Two backends (CA_BACKEND):
+- local: CA key pair generated on first run and stored in CA_KEY_DIR,
+  certificates signed with ssh-keygen.
+- vault: the CA key lives in the OpenBao / Vault SSH secrets engine and
+  never touches the Citadel host; only the ephemeral user key pair is
+  generated locally, its public half is signed by the vault.
 """
 
 import os
@@ -49,8 +52,15 @@ def _ensure_ca_exists():
         _generate_ca_key()
 
 
+def _use_vault() -> bool:
+    return settings.CA_BACKEND == "vault"
+
+
 def get_ca_public_key() -> str:
     """Return the CA public key string (for sshd_config TrustedUserCAKeys)."""
+    if _use_vault():
+        from app.core.vault import get_vault
+        return get_vault().ssh_public_key()
     _ensure_ca_exists()
     return CA_PUBLIC_KEY_PATH.read_text().strip()
 
@@ -68,7 +78,8 @@ def sign_user_certificate(
     validity_minutes: certificate lifetime in minutes (default 480 = 8h).
     Supports any value from 1 minute to 1440 minutes (24h).
     """
-    _ensure_ca_exists()
+    if not _use_vault():
+        _ensure_ca_exists()
 
     if principals is None:
         principals = [username]
@@ -84,6 +95,19 @@ def sign_user_certificate(
         check=True,
     )
 
+    key_id = f"citadel-{username}-{int(time.time())}"
+
+    if _use_vault():
+        from app.core.vault import get_vault
+        public_key = Path(key_path + ".pub").read_text().strip()
+        signed = get_vault().ssh_sign(public_key, principals, validity_minutes, key_id)
+        Path(cert_path).write_text(signed + "\n")
+        logger.info(
+            "Vault-signed ephemeral certificate: user=%s, principals=%s, valid=%dmin, key_id=%s",
+            username, principals, validity_minutes, key_id,
+        )
+        return key_path, cert_path
+
     # Build validity string for ssh-keygen: +Nm for minutes, +Nh for hours
     if validity_minutes < 60:
         validity_str = f"+{validity_minutes}m"
@@ -96,7 +120,6 @@ def sign_user_certificate(
             validity_str = f"+{hours}h{remaining_min}m"
 
     # Sign with CA
-    key_id = f"citadel-{username}-{int(time.time())}"
     subprocess.run(
         [
             "ssh-keygen", "-s", str(CA_PRIVATE_KEY_PATH),
@@ -109,7 +132,7 @@ def sign_user_certificate(
     )
 
     logger.info(
-        "Signed ephemeral certificate: user=%s, principals=%s, valid=%dh, key_id=%s",
+        "Signed ephemeral certificate: user=%s, principals=%s, valid=%dmin, key_id=%s",
         username, principals, validity_minutes, key_id,
     )
 

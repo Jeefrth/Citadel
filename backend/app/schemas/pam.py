@@ -46,6 +46,8 @@ class AccountUpdate(BaseModel):
     is_default: bool | None = None
     is_active: bool | None = None
     description: str | None = None
+    rotation_enabled: bool | None = None
+    rotation_interval_days: int | None = Field(default=None, ge=1, le=365)
 
 
 class AccountRead(BaseModel):
@@ -61,6 +63,62 @@ class AccountRead(BaseModel):
     is_active: bool
     description: str | None
     created_at: datetime
+    rotation_enabled: bool = False
+    rotation_interval_days: int = 30
+    rotation_supported: bool = False
+    rotation_blocker: str | None = None
+    last_rotated_at: datetime | None = None
+    next_rotation_at: datetime | None = None
+    last_rotation_status: str | None = None
+    last_rotation_message: str | None = None
+    verify_status: str = "unknown"
+    verify_message: str | None = None
+    last_verified_at: datetime | None = None
+
+
+class OperationResult(BaseModel):
+    ok: bool
+    message: str
+    account: AccountRead | None = None
+
+
+class SecretHistoryRead(BaseModel):
+    id: uuid.UUID
+    status: str
+    reason: str
+    error: str | None
+    actor_id: uuid.UUID | None
+    created_at: datetime
+    activated_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class DiscoveredAccountRead(BaseModel):
+    id: uuid.UUID
+    server_id: uuid.UUID
+    server_name: str | None = None
+    username: str
+    uid: str | None
+    shell: str | None
+    enabled: bool | None
+    privileged: bool
+    last_login: str | None
+    status: str          # new | ignored | gone
+    managed: bool        # an Account with this username exists on the server
+    first_seen: datetime
+    last_seen: datetime
+
+
+class DiscoveredAccountUpdate(BaseModel):
+    status: str = Field(pattern="^(new|ignored)$")
+
+
+class ManageDiscoveredAccount(BaseModel):
+    credential_id: uuid.UUID | None = None
+    use_cert: bool = False
+    privileged: bool | None = None
+    rotation_enabled: bool = False
 
 
 # ── User groups ──

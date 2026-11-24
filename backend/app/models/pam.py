@@ -11,7 +11,7 @@
 import enum
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, String, Table, UniqueConstraint, func,
+    Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Table, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -64,8 +64,68 @@ class Account(UUIDMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Automatic password rotation (B3)
+    rotation_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    rotation_interval_days: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    last_rotated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_rotation_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_rotation_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Secret verification (B6): unknown | ok | failed | error
+    verify_status: Mapped[str] = mapped_column(String(20), default="unknown", nullable=False)
+    verify_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    last_verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     server = relationship("Server", back_populates="accounts")
     credential = relationship("Credential", lazy="joined")
+
+
+class SecretStatus(str, enum.Enum):
+    PENDING = "pending"   # generated, not yet applied on the target
+    ACTIVE = "active"     # current secret
+    RETIRED = "retired"   # replaced by a newer one
+    FAILED = "failed"     # target change failed, never active
+
+
+class SecretHistory(UUIDMixin, TimestampMixin, Base):
+    """Every secret Citadel generated for an account, encrypted.
+
+    The new secret is persisted BEFORE it is applied on the target, so a
+    crash between "changed on the server" and "saved" never loses it.
+    """
+    __tablename__ = "secret_history"
+
+    account_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    encrypted_secret: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=SecretStatus.PENDING.value)
+    reason: Mapped[str] = mapped_column(String(50), nullable=False, default="rotation")
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    actor_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    activated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DiscoveredAccount(UUIDMixin, Base):
+    """OS accounts found on a server by discovery (B5)."""
+    __tablename__ = "discovered_accounts"
+    __table_args__ = (UniqueConstraint("server_id", "username", name="uq_discovered_server_username"),)
+
+    server_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    uid: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    shell: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    privileged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_login: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # new | ignored | gone (managed is computed by matching Account.username)
+    status: Mapped[str] = mapped_column(String(20), default="new", nullable=False)
+    first_seen: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 user_group_members = Table(

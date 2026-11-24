@@ -68,35 +68,27 @@ async def _validate_token(token: str) -> dict:
             detail="Unable to find matching signing key",
         )
 
-    # Try both audience formats: raw client ID and api:// URI
+    # Audience: api:// URI or raw client ID. Issuer: v2 or v1 format of OUR
+    # tenant only (Entra signing keys are shared across tenants, so the
+    # issuer check is what pins tokens to this tenant).
     payload = None
     last_error = None
     for aud in [f"api://{settings.AZURE_CLIENT_ID}", settings.AZURE_CLIENT_ID]:
         try:
-            payload = jwt.decode(
-                token,
-                rsa_key,
-                algorithms=["RS256"],
-                audience=aud,
-                issuer=settings.azure_issuer,
-            )
-            break
+            payload = jwt.decode(token, rsa_key, algorithms=["RS256"], audience=aud,
+                                 options={"verify_iss": False})
         except JWTError as e:
             last_error = e
             continue
-
-    if payload is None:
-        # Try without issuer validation as fallback (v1 vs v2 tokens)
-        try:
-            payload = jwt.decode(
-                token,
-                rsa_key,
-                algorithms=["RS256"],
-                audience=f"api://{settings.AZURE_CLIENT_ID}",
-                options={"verify_iss": False},
-            )
-        except JWTError as e:
-            last_error = e
+        if payload.get("iss") not in settings.azure_issuers:
+            last_error = JWTError(f"Untrusted issuer: {payload.get('iss')}")
+            payload = None
+            continue
+        if payload.get("tid") and payload["tid"] != settings.AZURE_TENANT_ID:
+            last_error = JWTError("Token from another tenant")
+            payload = None
+            continue
+        break
 
     if payload is None:
         raise HTTPException(

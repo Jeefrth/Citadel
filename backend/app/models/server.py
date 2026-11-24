@@ -26,6 +26,10 @@ class Server(UUIDMixin, TimestampMixin, Base):
     # Labels: flat {"key": "value"} map (A2)
     tags: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
+    accounts_discovered_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     node_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True, index=True
     )

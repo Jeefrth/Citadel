@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +11,7 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets
 from app.websocket import terminal, rdp
 
 # Structured logging
@@ -19,7 +21,21 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    stop = asyncio.Event()
+    task = None
+    if settings.SCHEDULER_ENABLED and not settings.DEV_MODE:
+        from app.services.scheduler import scheduler_loop
+        task = asyncio.create_task(scheduler_loop(stop))
+    yield
+    stop.set()
+    if task:
+        task.cancel()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Citadel API",
     description="API de gestion centralisée de serveurs Windows et Linux",
     version="0.1.0",
@@ -38,7 +54,6 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_origin_regex=r".*",  # Fallback for WebSocket connections
 )
 
 # Routers
@@ -52,6 +67,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(ca.router, prefix="/api/ca", tags=["ca"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(pam.router, prefix="/api", tags=["pam"])
+app.include_router(secrets.router, prefix="/api", tags=["secrets"])
 app.include_router(terminal.router, tags=["terminal"])
 app.include_router(rdp.router, tags=["rdp"])
 
