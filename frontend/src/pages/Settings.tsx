@@ -49,6 +49,7 @@ const SETTING_LABELS: Record<string, string> = {
   recording_retention_days: "Rétention des enregistrements (jours)",
   command_log_retention_days: "Rétention du journal des commandes (jours)",
   notify_user_on_monitor: "Prévenir l'utilisateur observé",
+  access_expiry_notice_days: "Rappel avant la fin d'une règle d'accès (jours)",
 };
 
 function settingLabel(key: string): string {
@@ -537,7 +538,14 @@ sudo systemctl restart sshd`}
 
         {activeTab === "vault" && <SecretsVaultCard />}
 
-        {activeTab === "notifications" && <NotificationChannelsPanel />}
+        {activeTab === "notifications" && (
+          <>
+            <SettingsCard icon={Bell} title="Rappels" description="Prévenir avant la fin d'un accès accordé.">
+              {renderSettingRow("access_expiry_notice_days", "number")}
+            </SettingsCard>
+            <NotificationChannelsPanel />
+          </>
+        )}
 
         {/* Audit: recording storage, retention, SIEM export */}
         {activeTab === "audit" && (

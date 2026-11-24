@@ -4,7 +4,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import {
   CalendarClock,
+  Download,
   Eye,
+  FileUp,
   Loader2,
   Pencil,
   Plus,
@@ -15,10 +17,11 @@ import {
   ShieldCheck,
   TerminalSquare,
   Trash2,
+  Upload,
   UserSearch,
   Users,
 } from "lucide-react";
-import { api } from "@/services/api";
+import { api, fetchBlob, saveBlob } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
   ACTION_LABELS,
@@ -28,6 +31,7 @@ import {
   errorMessage,
   type AccessPolicyData,
   type NodeData,
+  type PolicyImportReport,
   type ServerAccess,
   type ServerAction,
   type ServerData,
@@ -126,6 +130,18 @@ function policyState(p: AccessPolicyData): { label: string; tone: "green" | "amb
   if (p.valid_from && new Date(p.valid_from).getTime() > now) return { label: "Planifiée", tone: "amber" };
   if (p.valid_until && new Date(p.valid_until).getTime() < now) return { label: "Expirée", tone: "default" };
   return { label: "Active", tone: "green" };
+}
+
+/** Rules ending within this many days get an "ends soon" badge. */
+const EXPIRY_WARNING_DAYS = 7;
+
+/** "Expire dans 3 j" for an active rule ending within EXPIRY_WARNING_DAYS, else null. */
+function expiresSoon(p: AccessPolicyData): string | null {
+  if (!p.is_active || !p.valid_until) return null;
+  const left = new Date(p.valid_until).getTime() - Date.now();
+  if (left <= 0 || left > EXPIRY_WARNING_DAYS * 86_400_000) return null;
+  const hours = Math.ceil(left / 3_600_000);
+  return hours < 24 ? `Expire dans ${hours} h` : `Expire dans ${Math.ceil(hours / 24)} j`;
 }
 
 interface RefData {
@@ -698,6 +714,8 @@ export default function Access() {
   const [confirmPolicy, setConfirmPolicy] = useState<AccessPolicyData | null>(null);
   const [confirmGroup, setConfirmGroup] = useState<UserGroupData | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   // Effective access
   const [effUser, setEffUser] = useState("");
@@ -800,6 +818,18 @@ export default function Access() {
 
   const selectedEffUser = refs.users.find((u) => u.id === effUser);
 
+  const exportPolicies = async () => {
+    setExporting(true);
+    try {
+      const blob = await fetchBlob("/api/access-policies/export");
+      saveBlob(blob, `citadel-regles-acces-${new Date().toISOString().slice(0, 10)}.json`);
+    } catch (e) {
+      setError(`Export impossible : ${errorMessage(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -808,9 +838,18 @@ export default function Access() {
         actions={
           <>
             {tab === "policies" && (
-              <Button onClick={() => setEditPolicy(null)}>
-                <Plus /> Nouvelle règle
-              </Button>
+              <>
+                <Button variant="outline" onClick={exportPolicies} disabled={exporting || policies.length === 0}>
+                  {exporting ? <Loader2 className="animate-spin" /> : <Download />}
+                  Exporter
+                </Button>
+                <Button variant="outline" onClick={() => setShowImport(true)}>
+                  <Upload /> Importer
+                </Button>
+                <Button onClick={() => setEditPolicy(null)}>
+                  <Plus /> Nouvelle règle
+                </Button>
+              </>
             )}
             {tab === "groups" && (
               <Button onClick={() => setEditGroup(null)}>
@@ -894,6 +933,7 @@ export default function Access() {
                   <AnimatePresence initial={false}>
                     {policies.map((p) => {
                       const st = policyState(p);
+                      const soon = expiresSoon(p);
                       return (
                         <motion.tr
                           key={p.id}
@@ -916,7 +956,14 @@ export default function Access() {
                             )}
                           </TableCell>
                           <TableCell className="px-3 py-2.5">
-                            <Chip tone={st.tone}>{st.label}</Chip>
+                            <div className="flex flex-col items-start gap-1">
+                              <Chip tone={st.tone}>{st.label}</Chip>
+                              {soon && (
+                                <Chip tone="orange" title={`Fin le ${formatDate(p.valid_until)}`}>
+                                  {soon}
+                                </Chip>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="px-3 py-2.5">
                             <div className="flex max-w-xs flex-wrap gap-1">
@@ -1125,6 +1172,16 @@ export default function Access() {
           }}
         />
       )}
+      {showImport && (
+        <ImportPoliciesModal
+          onClose={() => setShowImport(false)}
+          onImported={() => {
+            setShowImport(false);
+            load();
+          }}
+        />
+      )}
+
       {confirmPolicy && (
         <ConfirmModal
           title={`Supprimer la règle ${confirmPolicy.name}`}
@@ -1150,5 +1207,195 @@ export default function Access() {
         </ConfirmModal>
       )}
     </div>
+  );
+}
+
+// ── Import ───────────────────────────────────────────────────
+
+function ImportList({ title, names, tone }: { title: string; names: string[]; tone: "green" | "blue" | "default" }) {
+  if (names.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-sm font-medium">
+        {title} <span className="tabular text-muted-foreground">({names.length})</span>
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {names.map((n) => (
+          <Chip key={n} tone={tone}>
+            {n}
+          </Chip>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Import access rules from a JSON export: always a simulation first, then the real import. */
+function ImportPoliciesModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [payload, setPayload] = useState<Record<string, unknown> | null>(null);
+  const [overwrite, setOverwrite] = useState(false);
+  const [report, setReport] = useState<PolicyImportReport | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(
+    async (dryRun: boolean) => {
+      if (!payload) return null;
+      return api.post<PolicyImportReport>("/api/access-policies/import", {
+        payload,
+        overwrite,
+        dry_run: dryRun,
+      });
+    },
+    [payload, overwrite],
+  );
+
+  // Simulate whenever the file or the "replace" option changes
+  useEffect(() => {
+    if (!payload) return;
+    let alive = true;
+    setSimulating(true);
+    setError(null);
+    run(true)
+      .then((r) => alive && setReport(r))
+      .catch((e) => {
+        if (!alive) return;
+        setReport(null);
+        setError(errorMessage(e));
+      })
+      .finally(() => alive && setSimulating(false));
+    return () => {
+      alive = false;
+    };
+  }, [payload, run]);
+
+  const pickFile = async (file: File | undefined) => {
+    setReport(null);
+    setPayload(null);
+    setError(null);
+    if (!file) return;
+    setFileName(file.name);
+    try {
+      const data: unknown = JSON.parse(await file.text());
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        setError("Ce fichier n'est pas un export de règles d'accès Citadel.");
+        return;
+      }
+      setPayload(data as Record<string, unknown>);
+    } catch {
+      setError("Fichier illisible : choisissez le fichier JSON produit par « Exporter ».");
+    }
+  };
+
+  const doImport = async () => {
+    setImporting(true);
+    setError(null);
+    try {
+      const r = await run(false);
+      if (r) {
+        const parts = [
+          `${r.created.length} créée${r.created.length > 1 ? "s" : ""}`,
+          `${r.updated.length} remplacée${r.updated.length > 1 ? "s" : ""}`,
+        ];
+        if (r.skipped.length) parts.push(`${r.skipped.length} ignorée${r.skipped.length > 1 ? "s" : ""}`);
+        if (r.errors.length) parts.push(`${r.errors.length} en erreur`);
+        toast.success(`Règles importées : ${parts.join(", ")}`);
+      }
+      onImported();
+    } catch (e) {
+      setError(errorMessage(e));
+      setImporting(false);
+    }
+  };
+
+  const toApply = report ? report.created.length + report.updated.length : 0;
+
+  return (
+    <Modal
+      title="Importer des règles d'accès"
+      description="Fichier JSON produit par « Exporter », depuis ce Citadel ou un autre."
+      size="2xl"
+      onClose={importing ? () => {} : onClose}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={importing}>
+            Annuler
+          </Button>
+          <SaveButton onClick={doImport} loading={importing} disabled={!report || simulating || toApply === 0}>
+            Importer
+          </SaveButton>
+        </>
+      }
+    >
+      <ErrorBox message={error} />
+      <Field label="Fichier" hint="Les références sont des noms : utilisateurs par e-mail, groupes et serveurs par nom, nœuds par chemin.">
+        <label className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed px-3 py-3 text-sm hover:bg-muted/50">
+          <FileUp className="size-4 shrink-0 text-muted-foreground" />
+          <span className={cn("min-w-0 truncate", fileName ? "font-mono text-xs" : "text-muted-foreground")}>
+            {fileName || "Choisir un fichier JSON"}
+          </span>
+          <input
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            onChange={(e) => {
+              pickFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </Field>
+      <label className="flex cursor-pointer items-start gap-2 text-sm">
+        <Checkbox checked={overwrite} onCheckedChange={(v) => setOverwrite(v === true)} className="mt-0.5" />
+        <span>
+          Remplacer les règles existantes
+          <span className="block text-xs text-muted-foreground">
+            Sinon, une règle qui porte déjà le même nom est ignorée.
+          </span>
+        </span>
+      </label>
+
+      {simulating && (
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-5 w-full" />
+        </div>
+      )}
+      {report && !simulating && (
+        <div className="space-y-3 rounded-md border bg-muted/40 p-3">
+          <p className="text-sm">
+            Simulation : <span className="tabular font-medium">{report.created.length}</span> à créer,{" "}
+            <span className="tabular font-medium">{report.updated.length}</span> à remplacer,{" "}
+            <span className="tabular font-medium">{report.skipped.length}</span> ignorée
+            {report.skipped.length > 1 ? "s" : ""},{" "}
+            <span className={cn("tabular font-medium", report.errors.length > 0 && "text-danger")}>
+              {report.errors.length}
+            </span>{" "}
+            en erreur. Rien n'est encore enregistré.
+          </p>
+          <ImportList title="À créer" names={report.created} tone="green" />
+          <ImportList title="À remplacer" names={report.updated} tone="blue" />
+          <ImportList title="Ignorées (existent déjà)" names={report.skipped} tone="default" />
+          {report.errors.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium text-danger">
+                En erreur, non importées <span className="tabular">({report.errors.length})</span>
+              </p>
+              <ul className="space-y-1 text-sm">
+                {report.errors.map((e, i) => (
+                  <li key={`${e.name}-${i}`}>
+                    <span className="font-medium">{e.name}</span>
+                    <span className="text-muted-foreground"> : {e.problems.join(" ; ")}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {toApply === 0 && <p className="text-xs text-muted-foreground">Aucune règle à importer.</p>}
+        </div>
+      )}
+    </Modal>
   );
 }

@@ -73,6 +73,9 @@ services:
       # Only the nginx container (fixed address below) may set X-Forwarded-For
       TRUSTED_PROXIES: 172.31.250.10/32
       GUACD_HOST: guacd
+    ports:
+      # SSH proxy (lot 7). Remove this mapping to disable it (or SSH_PROXY_ENABLED=false)
+      - "2222:2222"
     depends_on:
       db:
         condition: service_healthy

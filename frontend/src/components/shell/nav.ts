@@ -1,10 +1,12 @@
 import {
   Activity,
   ClipboardCheck,
+  FileBarChart,
   Film,
   KeyRound,
   LayoutDashboard,
   ListChecks,
+  LogIn,
   type LucideIcon,
   Network,
   RefreshCw,
@@ -54,6 +56,8 @@ export const NAV: NavGroup[] = [
       { to: "/sessions", label: "Enregistrements", icon: Film },
       { to: "/commands", label: "Journal des commandes", icon: ScrollText },
       { to: "/audit", label: "Journal d'audit", icon: Shield },
+      { to: "/logins", label: "Connexions", icon: LogIn, adminOnly: true },
+      { to: "/reports", label: "Rapports", icon: FileBarChart, adminOnly: true },
     ],
   },
   {

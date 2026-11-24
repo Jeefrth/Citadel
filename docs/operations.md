@@ -44,3 +44,26 @@ Prérequis côté passerelle : `AllowTcpForwarding yes` dans `sshd_config`.
 - Synchronisation toutes les N minutes (60 par défaut) ou à la demande. Une VM supprimée côté Azure est marquée « disparue », jamais supprimée de Citadel. Les VM importées n'ont pas de compte : un admin en ajoute un.
 - Option « seulement les VM démarrées » pour ne pas importer les VM désallouées.
 - Option **« revue des nouvelles VM »** : une nouvelle VM n'est pas importée, elle attend dans Infrastructure > Cloud > À valider (notification `cloud.pending` aux admins). Importer la crée comme une synchro normale ; ignorer la garde ignorée aux synchros suivantes (réversible).
+
+## Proxy SSH (lot 7)
+
+Se connecter aux serveurs Linux accordés avec **son propre client SSH**, avec les mêmes contrôles que le terminal web (règle de connexion à Citadel, règles d'accès, ACL de connexion, ACL de commandes ligne par ligne, enregistrement, observation et arrêt par un admin, masquage).
+
+```
+ssh -p 2222 'prenom.nom@domaine.ch'@citadel                 menu des serveurs
+ssh -p 2222 'prenom.nom@domaine.ch#web-01'@citadel          compte par défaut
+ssh -p 2222 'prenom.nom@domaine.ch#root#web-01'@citadel     compte précis
+```
+
+- Identifiant : l'e-mail, ou sa partie avant `@` si elle est unique.
+- Authentification, à préparer dans Mon compte > Accès SSH :
+  - **clé publique** (ed25519 conseillée, RSA 3072 bits au moins) ;
+  - **jeton de connexion** : un mot de passe affiché une seule fois, valable de 1 minute à 24 heures, réutilisable jusqu'à son expiration, révocable.
+- Chaque connexion entre dans le journal des connexions (méthode `ssh`), réussie ou refusée.
+- Un nom de serveur ambigu (plusieurs serveurs du même nom) affiche le menu filtré.
+- Volontairement absent : exécution directe (`ssh host commande`), SFTP/SCP, redirection de ports, transfert d'agent. Seul un shell interactif est ouvert.
+- Clé d'hôte : générée au premier démarrage, chiffrée dans le coffre (paramètre interne). Son empreinte est affichée dans Mon compte, à vérifier à la première connexion.
+- Configuration : `SSH_PROXY_ENABLED` (vrai par défaut), `SSH_PROXY_PORT` (2222), `SSH_PROXY_PUBLIC_HOST` (nom affiché, sinon l'hôte de `PUBLIC_URL`). En production, le port 2222 est publié par le conteneur backend.
+- L'authentification forte Entra ne s'applique pas au proxy : protéger les clés privées par une phrase de passe et restreindre si besoin les IP par une règle de connexion `login`.
+
+Le RDP natif (`.rdp` pour mstsc) n'est pas proposé : il faudrait un proxy RDP complet, hors de portée ; le RDP reste dans le navigateur.

@@ -1,12 +1,17 @@
+import { useEffect, useState } from "react";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "@/services/authConfig";
-import { ShieldCheck } from "lucide-react";
+import { clearSignOutReason, signOutReason } from "@/services/api";
+import { Info, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Sign-in screen. Always rendered in the dark "Salle de contrôle" palette,
 // whatever theme the browser or the stored preference asks for.
 export default function LoginPage() {
   const { instance } = useMsal();
+  // Shown once after a forced sign-out (this browser was disconnected)
+  const [reason] = useState(signOutReason);
+  useEffect(() => clearSignOutReason(), []);
 
   const handleLogin = () => {
     instance.loginRedirect(loginRequest);
@@ -31,6 +36,12 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-3">
+              {reason && (
+                <div role="status" className="flex items-start gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2.5 text-sm">
+                  <Info className="mt-0.5 size-4 shrink-0 text-info" />
+                  <span>{reason}</span>
+                </div>
+              )}
               <Button onClick={handleLogin} size="lg" className="w-full px-4">
                 <MicrosoftMark />
                 Se connecter avec Microsoft

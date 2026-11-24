@@ -830,11 +830,98 @@ export interface CloudAccountData {
   last_sync_at: string | null;
   last_sync_status: "ok" | "error" | null;
   last_sync_message: string | null;
+  /** New VMs wait in "À valider" instead of being imported. */
+  review_new: boolean;
   created_at: string;
 }
 
 export interface CloudSyncResult {
-  /** created / updated / missing / skipped; "error" (message) when the sync failed. */
+  /** created / updated / missing / skipped / pending / new_pending; "error" (message) when the sync failed. */
   stats: Record<string, number | string>;
   account: CloudAccountData;
+}
+
+// ── Lot 6: cloud review queue ───────────────────────────
+
+export type CloudPendingStatus = "pending" | "ignored";
+
+export interface CloudPendingVM {
+  id: string;
+  cloud_account_id: string;
+  cloud_ref: string;
+  name: string;
+  computer_name: string | null;
+  ip_address: string | null;
+  os_type: string | null;
+  resource_group: string | null;
+  location: string | null;
+  power_state: string | null;
+  tags: Record<string, string>;
+  status: CloudPendingStatus;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface CloudPendingDecision {
+  done: number;
+  errors: string[];
+}
+
+// ── Lot 6: sign-ins, devices, reports, policy import ─────
+
+export type DeviceKind = "web" | "access_key";
+
+export interface DeviceData {
+  id: string;
+  user_id: string;
+  user_name: string;
+  kind: DeviceKind;
+  label: string;
+  ip_address: string | null;
+  first_seen: string;
+  last_seen: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  current: boolean;
+}
+
+export type LoginMethod = "entra" | "access_key";
+export type LoginResult = "success" | "denied";
+
+export interface LoginEventData {
+  id: string;
+  user_id: string | null;
+  user_name: string;
+  method: LoginMethod;
+  result: LoginResult;
+  reason: string | null;
+  ip_address: string | null;
+  device: string | null;
+  created_at: string;
+}
+
+export interface LoginEventPage {
+  total: number;
+  items: LoginEventData[];
+}
+
+export type ReportKind = "users" | "servers" | "accounts";
+export type ReportValue = string | number | boolean | null;
+
+export interface ReportData {
+  kind: ReportKind;
+  title: string;
+  from: string;
+  to: string;
+  generated_at: string;
+  generated_by: string;
+  rows: Record<string, ReportValue>[];
+}
+
+export interface PolicyImportReport {
+  dry_run: boolean;
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  errors: { name: string; problems: string[] }[];
 }

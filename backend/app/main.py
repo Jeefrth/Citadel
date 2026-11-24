@@ -35,6 +35,15 @@ async def lifespan(_app: FastAPI):
         tasks.append(asyncio.create_task(scheduler_loop(stop)))
     from app.services.siem import siem_loop
     tasks.append(asyncio.create_task(siem_loop(stop)))  # SIEM export runs even in dev mode
+    if settings.SSH_PROXY_ENABLED:
+        from app.services.ssh_proxy import serve
+
+        async def _proxy():
+            try:
+                await serve(stop)
+            except Exception:  # noqa: BLE001 - never take the API down with it
+                logging.getLogger("citadel.ssh_proxy").exception("SSH proxy failed to start")
+        tasks.append(asyncio.create_task(_proxy()))
     yield
     stop.set()
     for task in tasks:

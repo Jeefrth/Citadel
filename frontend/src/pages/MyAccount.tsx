@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { AlertTriangle, Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
-import { api } from "@/services/api";
+import { AlertTriangle, Check, Copy, History, KeyRound, Laptop, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { api, handleDeviceRevoked } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
   errorMessage,
   type AccessKeyCreated,
   type AccessKeyData,
+  type DeviceData,
+  type LoginEventPage,
   type ServerAccess,
 } from "@/services/types";
+import { DevicesTable, LoginEventsTable, RevokeDeviceText } from "@/components/identityUi";
 import { AccessTable } from "@/pages/Access";
 import {
   Chip,
@@ -202,6 +205,13 @@ export default function MyAccount() {
   const [created, setCreated] = useState<AccessKeyCreated | null>(null);
   const [revoking, setRevoking] = useState<AccessKeyData | null>(null);
   const [revokeLoading, setRevokeLoading] = useState(false);
+  const [devices, setDevices] = useState<DeviceData[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(true);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [revokingDevice, setRevokingDevice] = useState<DeviceData | null>(null);
+  const [deviceLoading, setDeviceLoading] = useState(false);
+  const [logins, setLogins] = useState<LoginEventPage | null>(null);
+  const [loginsError, setLoginsError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -226,6 +236,48 @@ export default function MyAccount() {
     loadKeys();
   }, [loadKeys]);
 
+  const loadDevices = useCallback(() => {
+    setDevicesLoading(true);
+    api
+      .get<DeviceData[]>("/api/me/devices")
+      .then((d) => {
+        setDevices(d);
+        setDevicesError(null);
+      })
+      .catch((e) => setDevicesError(errorMessage(e)))
+      .finally(() => setDevicesLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadDevices();
+    api
+      .get<LoginEventPage>("/api/login-events?limit=20")
+      .then(setLogins)
+      .catch((e) => setLoginsError(errorMessage(e)));
+  }, [loadDevices]);
+
+  const revokeDevice = async () => {
+    const d = revokingDevice;
+    if (!d) return;
+    setDeviceLoading(true);
+    try {
+      await api.post(`/api/me/devices/${d.id}/revoke`, {});
+      if (d.current) {
+        // This very browser: sign out now rather than on the next API call
+        handleDeviceRevoked();
+        return;
+      }
+      toast.success(`${d.label} déconnecté`);
+      loadDevices();
+      if (d.kind === "access_key") loadKeys();
+    } catch (e) {
+      setDevicesError(errorMessage(e));
+    } finally {
+      setDeviceLoading(false);
+      setRevokingDevice(null);
+    }
+  };
+
   const revoke = async () => {
     const k = revoking;
     if (!k) return;
@@ -244,7 +296,10 @@ export default function MyAccount() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Mon compte" description="Votre profil, les serveurs auxquels vous avez accès et vos clés API." />
+      <PageHeader
+        title="Mon compte"
+        description="Votre profil, vos accès, vos appareils, vos connexions et vos clés API."
+      />
 
       {/* Profile */}
       <Card className="flex items-center gap-4 p-4">
@@ -388,6 +443,63 @@ export default function MyAccount() {
           </Table>
         )}
       </Card>
+
+      {/* Devices */}
+      <Card className="overflow-hidden">
+        <CardHeader className="space-y-1 border-b p-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Laptop className="size-4 text-muted-foreground" /> Appareils
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Navigateurs et clés API qui ont utilisé votre compte. Déconnectez ceux que vous ne reconnaissez pas.
+          </CardDescription>
+        </CardHeader>
+        {devicesError && (
+          <div className="p-4 pb-0">
+            <ErrorBox message={devicesError} />
+          </div>
+        )}
+        {!devicesLoading && devices.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">Aucun appareil enregistré.</p>
+        ) : (
+          <DevicesTable devices={devices} loading={devicesLoading} showUser={false} onRevoke={setRevokingDevice} />
+        )}
+      </Card>
+
+      {/* Recent sign-ins */}
+      <Card className="overflow-hidden">
+        <CardHeader className="space-y-1 border-b p-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <History className="size-4 text-muted-foreground" /> Mes connexions
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Vos 20 dernières connexions à Citadel, réussies ou refusées.
+          </CardDescription>
+        </CardHeader>
+        {loginsError && (
+          <div className="p-4 pb-0">
+            <ErrorBox message={loginsError} />
+          </div>
+        )}
+        {logins && logins.items.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">Aucune connexion enregistrée.</p>
+        ) : (
+          !loginsError && <LoginEventsTable items={logins?.items || []} loading={logins === null} showUser={false} />
+        )}
+      </Card>
+
+      {revokingDevice && (
+        <ConfirmModal
+          title={`Déconnecter ${revokingDevice.label}`}
+          confirmLabel="Déconnecter"
+          danger
+          loading={deviceLoading}
+          onConfirm={revokeDevice}
+          onClose={() => setRevokingDevice(null)}
+        >
+          <RevokeDeviceText device={revokingDevice} own />
+        </ConfirmModal>
+      )}
 
       {showCreate && (
         <CreateKeyModal

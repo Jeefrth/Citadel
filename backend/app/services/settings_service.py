@@ -12,6 +12,10 @@ from app.models.settings import AppSetting
 
 # Default settings with descriptions
 DEFAULTS = {
+    "data_masking_rules": {
+        "value": "[]",
+        "description": "Masquage dans la sortie des terminaux : liste JSON de règles {name, pattern, replacement, enabled}.",
+    },
     "access_expiry_notice_days": {
         "value": "3",
         "description": "Prévenir les personnes concernées et les admins ce nombre de jours avant la fin d'une règle d'accès. 0 : jamais.",

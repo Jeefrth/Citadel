@@ -81,3 +81,9 @@ Citadel n'utilise `X-Forwarded-For` que si la requête vient d'un proxy listé d
 - **Rappel** : `access_expiry_notice_days` jours (3 par défaut, 0 : jamais) avant la fin d'une règle d'accès, les personnes concernées (utilisateurs et membres des groupes) et les admins sont prévenus (événement `access.expiring`). Un seul rappel par date de fin ; changer la date réarme le rappel.
 - **Export** (Accès > Exporter) : JSON portable, les références sont des noms (utilisateurs par e-mail, ou `oid:<id Entra>` sans e-mail ; groupes et serveurs par nom ; nœuds par chemin `Prod/Web`).
 - **Import** : toujours une simulation d'abord (créées, remplacées, ignorées, en erreur avec la raison). Une règle dont une référence est inconnue n'est pas importée du tout. Une règle qui existe déjà est ignorée, sauf si « remplacer » est coché.
+
+## Masquage des données (lot 7)
+
+Paramètres > Masquage : des règles (expression régulière, remplacement) appliquées à tout ce que le serveur affiche dans un terminal (web ou proxy SSH), **avant** l'utilisateur, l'observation en direct et l'enregistrement : la valeur masquée n'est stockée nulle part. Les commandes tapées sont masquées de la même façon dans le journal des commandes. Modèles fournis : numéro de carte, `password=...`, jeton Bearer, clé privée, clé AWS. Un bouton permet d'essayer les règles sur un texte.
+
+Limite : la recherche se fait par paquet de sortie ; une valeur coupée entre deux paquets peut passer. Ce n'est pas une prévention de fuite, c'est une réduction de l'exposition à l'écran et dans les enregistrements.

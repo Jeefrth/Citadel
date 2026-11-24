@@ -1,9 +1,9 @@
-// Recorded sessions: list (SSH and RDP), replay, integrity check, deletion.
+// Recorded sessions: list (SSH and RDP), replay, integrity check, bulk download (ZIP), deletion.
 // Deep links from the command journal: ?recording=<id>&t=<ms> or ?session=<session_id>&t=<ms>.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Film, Loader2, Play, Power, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
-import { ApiError, api, fetchBlob } from "@/services/api";
+import { Download, Film, Loader2, Play, Power, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { ApiError, api, fetchBlob, postBlob, saveBlob } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
   errorMessage,
@@ -31,6 +31,8 @@ import { RdpReplayPlayer, SshReplayPlayer } from "@/components/RecordingPlayers"
 
 const LIST_LIMIT = 200;
 const LOOKUP_LIMIT = 500;
+/** Server-side cap of POST /api/sessions/bulk-download. */
+const DOWNLOAD_MAX = 200;
 
 type Replay =
   | { kind: "ssh"; detail: SessionRecordingDetail; t: number | null }
@@ -58,6 +60,7 @@ export default function Sessions() {
   const [loadingReplay, setLoadingReplay] = useState<string | null>(null);
   const [verify, setVerify] = useState<Record<string, RecordingVerifyResult | "loading">>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [deleting, setDeleting] = useState(false);
   const deepLinkDone = useRef(false);
@@ -180,8 +183,32 @@ export default function Sessions() {
     }
   };
 
+  const downloadSelected = async () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0 || ids.length > DOWNLOAD_MAX) return;
+    setDownloading(true);
+    try {
+      const blob = await postBlob("/api/sessions/bulk-download", { ids });
+      saveBlob(blob, `citadel-enregistrements-${new Date().toISOString().slice(0, 10)}.zip`);
+      setNotice({
+        ok: true,
+        text: (
+          <>
+            Archive téléchargée. Le fichier <span className="font-mono">manifest.csv</span> indique le résultat du
+            contrôle d'empreinte de chaque enregistrement.
+          </>
+        ),
+      });
+    } catch (e) {
+      setNotice({ ok: false, text: `Téléchargement impossible : ${errorMessage(e)}` });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const allSelected = selected.size === sessions.length && sessions.length > 0;
-  const cols = isAdmin ? 9 : 8;
+  const tooMany = selected.size > DOWNLOAD_MAX;
+  const cols = 9;
 
   return (
     <div className="space-y-4">
@@ -200,6 +227,22 @@ export default function Sessions() {
                 <SelectItem value="rdp">RDP</SelectItem>
               </SelectContent>
             </Select>
+            {selected.size > 0 && (
+              <Tip
+                content={
+                  tooMany
+                    ? `${DOWNLOAD_MAX} enregistrements au plus par archive.`
+                    : "Archive ZIP : SSH au format asciinema (.cast), RDP au format Guacamole (.guac), avec un manifeste."
+                }
+              >
+                <span>
+                  <Button variant="outline" size="sm" onClick={downloadSelected} disabled={downloading || tooMany}>
+                    {downloading ? <Loader2 className="animate-spin" /> : <Download />}
+                    Télécharger (<span className="tabular">{selected.size}</span>)
+                  </Button>
+                </span>
+              </Tip>
+            )}
             {isAdmin && selected.size > 0 && (
               <Button variant="destructive" size="sm" onClick={() => setConfirm({ kind: "selected" })} disabled={deleting}>
                 <Trash2 />
@@ -233,16 +276,14 @@ export default function Sessions() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                {isAdmin && (
-                  <TableHead className="w-10 pl-4">
-                    <Checkbox
-                      checked={allSelected ? true : selected.size > 0 ? "indeterminate" : false}
-                      onCheckedChange={toggleSelectAll}
-                      aria-label={allSelected ? "Tout désélectionner" : "Tout sélectionner"}
-                    />
-                  </TableHead>
-                )}
-                <TableHead className={isAdmin ? "" : "pl-4"}>Session</TableHead>
+                <TableHead className="w-10 pl-4">
+                  <Checkbox
+                    checked={allSelected ? true : selected.size > 0 ? "indeterminate" : false}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label={allSelected ? "Tout désélectionner" : "Tout sélectionner"}
+                  />
+                </TableHead>
+                <TableHead>Session</TableHead>
                 <TableHead>Utilisateur</TableHead>
                 <TableHead>IP client</TableHead>
                 <TableHead>Début</TableHead>
@@ -261,12 +302,10 @@ export default function Sessions() {
                   const isSel = selected.has(s.id);
                   return (
                     <TableRow key={s.id} data-state={isSel ? "selected" : undefined}>
-                      {isAdmin && (
-                        <TableCell className="pl-4">
-                          <Checkbox checked={isSel} onCheckedChange={() => toggleSelect(s.id)} aria-label="Sélectionner" />
-                        </TableCell>
-                      )}
-                      <TableCell className={isAdmin ? "py-2" : "py-2 pl-4"}>
+                      <TableCell className="pl-4">
+                        <Checkbox checked={isSel} onCheckedChange={() => toggleSelect(s.id)} aria-label="Sélectionner" />
+                      </TableCell>
+                      <TableCell className="py-2">
                         <div className="flex items-center gap-2">
                           <ProtocolBadge protocol={s.protocol} />
                           <span className="truncate font-mono text-sm">

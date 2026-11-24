@@ -60,6 +60,100 @@ async function getToken(): Promise<string | null> {
   }
 }
 
+// ── Device identifier (lot 6) ──────────────────────────
+// Each browser sends a random id in X-Citadel-Device so an admin (or the user)
+// can sign this browser out of Citadel. Kept in localStorage; storage may be
+// unavailable (private mode, blocked site data): fall back to an in-memory id.
+
+const DEVICE_KEY = "citadel.device";
+const SIGNOUT_KEY = "citadel.signout";
+let memoryDeviceId: string | null = null;
+
+function newDeviceId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function getDeviceId(): string {
+  try {
+    const stored = localStorage.getItem(DEVICE_KEY);
+    if (stored) return stored;
+    const id = memoryDeviceId ?? newDeviceId();
+    localStorage.setItem(DEVICE_KEY, id);
+    memoryDeviceId = id;
+    return id;
+  } catch {
+    memoryDeviceId ??= newDeviceId();
+    return memoryDeviceId;
+  }
+}
+
+function forgetDeviceId(): void {
+  memoryDeviceId = null;
+  try {
+    localStorage.removeItem(DEVICE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Reason shown on the sign-in page after a forced sign-out. */
+export function signOutReason(): string | null {
+  try {
+    return localStorage.getItem(SIGNOUT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearSignOutReason(): void {
+  try {
+    localStorage.removeItem(SIGNOUT_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+let signingOut = false;
+
+/**
+ * This browser was signed out of Citadel ("Déconnecter" in Mon compte or by an
+ * admin): forget the device id, then sign out of MSAL. The next sign-in gets a
+ * fresh device id.
+ */
+export function handleDeviceRevoked(): void {
+  if (signingOut) return;
+  signingOut = true;
+  forgetDeviceId();
+  try {
+    localStorage.setItem(
+      SIGNOUT_KEY,
+      "Ce navigateur a été déconnecté de Citadel. Reconnectez-vous pour continuer.",
+    );
+  } catch {
+    /* storage unavailable: no message on the sign-in page */
+  }
+  if (DEV_MODE || !msalInstance) {
+    window.location.reload();
+    return;
+  }
+  const account = msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0];
+  msalInstance.logoutRedirect(account ? { account } : undefined).catch(() => window.location.reload());
+}
+
+function isDeviceRevoked(status: number, detail: unknown): boolean {
+  return status === 401 && detail === "device_revoked";
+}
+
+/** Headers sent on every API call: device id, plus the bearer token when there is one. */
+function baseHeaders(token: string | null): Record<string, string> {
+  const headers: Record<string, string> = { "X-Citadel-Device": getDeviceId() };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 // FastAPI returns either a string or a list of validation errors in `detail`
 function formatDetail(detail: unknown): string {
   if (!detail) return "";
@@ -98,15 +192,30 @@ export function wsBaseUrl(): string {
 
 async function throwForResponse(response: Response): Promise<never> {
   const error = await response.json().catch(() => ({ detail: response.statusText }));
+  if (isDeviceRevoked(response.status, error?.detail)) {
+    handleDeviceRevoked();
+    // The page is navigating away: never settle, so callers don't show an error
+    return new Promise<never>(() => {});
+  }
   throw new ApiError(formatDetail(error.detail) || `API error ${response.status}`, response.status);
 }
 
 /** Authenticated GET returning the raw body as a Blob (recordings, CSV exports). */
 export async function fetchBlob(path: string): Promise<Blob> {
   const token = await getToken();
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const response = await fetch(`${apiConfig.baseUrl}${path}`, { headers });
+  const response = await fetch(`${apiConfig.baseUrl}${path}`, { headers: baseHeaders(token) });
+  if (!response.ok) await throwForResponse(response);
+  return response.blob();
+}
+
+/** Authenticated POST with a JSON body returning a Blob (e.g. ZIP of recordings). */
+export async function postBlob(path: string, body: unknown): Promise<Blob> {
+  const token = await getToken();
+  const response = await fetch(`${apiConfig.baseUrl}${path}`, {
+    method: "POST",
+    headers: { ...baseHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!response.ok) await throwForResponse(response);
   return response.blob();
 }
@@ -129,11 +238,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...options.headers as Record<string, string>,
+    ...baseHeaders(token),
   };
-
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
 
   const response = await fetch(`${apiConfig.baseUrl}${path}`, {
     ...options,
@@ -171,7 +277,7 @@ export async function postMultipart<T>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${apiConfig.baseUrl}${path}`);
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    for (const [k, v] of Object.entries(baseHeaders(token))) xhr.setRequestHeader(k, v);
     if (onProgress) {
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
@@ -188,6 +294,10 @@ export async function postMultipart<T>(
         resolve(body as T);
       } else {
         const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : null;
+        if (isDeviceRevoked(xhr.status, detail)) {
+          handleDeviceRevoked();
+          return;
+        }
         reject(new ApiError(formatDetail(detail) || `API error ${xhr.status}`, xhr.status));
       }
     };

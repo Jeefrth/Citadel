@@ -67,6 +67,7 @@ services:
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+      - "${SSH_PROXY_HOST_PORT:-2222}:2222"
     env_file:
       - .env
     environment:

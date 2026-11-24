@@ -134,3 +134,50 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * Printable reports (Audit > Rapports): the page renders a copy of the report
+ * in a `.citadel-print` element attached to <body>. On paper only that copy is
+ * shown, in the light palette whatever the screen theme.
+ */
+.citadel-print {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 12mm;
+  }
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  html.dark {
+    color-scheme: light;
+  }
+  html.dark,
+  html.dark body {
+    --background: 0 0% 100%;
+    --foreground: 222 45% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 45% 10%;
+    --muted: 220 30% 94%;
+    --muted-foreground: 221 17% 35%;
+    --border: 219 25% 80%;
+  }
+  body:has(> .citadel-print) {
+    background: hsl(0 0% 100%) !important;
+  }
+  body:has(> .citadel-print) > :not(.citadel-print) {
+    display: none !important;
+  }
+  .citadel-print {
+    display: block;
+    color: hsl(var(--foreground));
+  }
+  .citadel-print thead {
+    display: table-header-group;
+  }
+}

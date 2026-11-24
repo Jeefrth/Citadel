@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     GUACD_RECORDING_PATH: str = "/recordings/raw"  # where guacd writes raw RDP dumps
     LIVE_BUFFER_CHUNKS: int = 300                # output kept for monitors joining late
 
+    # SSH proxy (lot 7): "ssh -p 2222 <login>@citadel" with a registered key or a connection token
+    SSH_PROXY_ENABLED: bool = True
+    SSH_PROXY_PORT: int = 2222
+    SSH_PROXY_PUBLIC_HOST: str = ""   # shown to users; empty = host of PUBLIC_URL
+
     # Dev mode (bypass auth)
     DEV_MODE: bool = False
 

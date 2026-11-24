@@ -62,8 +62,37 @@ async def update_setting(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid JSON value")
 
+    if key == "data_masking_rules":
+        from app.services import masking
+        try:
+            body.value = json.dumps(masking.validate_rules(json.loads(body.value)), ensure_ascii=False)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     await settings_service.set_setting(db, key, body.value)
     return {"key": key, "value": body.value}
+
+
+@router.get("/masking/presets")
+async def masking_presets(_: User = Depends(require_role(UserRole.ADMIN))):
+    from app.services import masking
+    return masking.PRESETS
+
+
+class MaskTest(BaseModel):
+    rules: list
+    sample: str
+
+
+@router.post("/masking/test")
+async def masking_test(body: MaskTest, _: User = Depends(require_role(UserRole.ADMIN))):
+    from app.services import masking
+    try:
+        rules = masking.validate_rules(body.rules)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    m = masking.build(rules)
+    return {"result": m.apply(body.sample[:20000].encode()).decode(errors="replace"), "hits": m.hits}
 
 
 @router.post("/settings/reset/{key}")

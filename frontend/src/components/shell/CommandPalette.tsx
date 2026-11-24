@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
-import { KeyRound, Moon, Server, Sun, Terminal } from "lucide-react";
+import { CloudCog, KeyRound, Laptop, Moon, Server, Sun, Terminal } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -127,6 +127,16 @@ export default function CommandPalette({
             <KeyRound />
             Demander un accès temporaire
           </CommandItem>
+          <CommandItem value="mes appareils déconnecter navigateur mon compte" onSelect={() => go("/account")}>
+            <Laptop />
+            Gérer mes appareils
+          </CommandItem>
+          {isAdmin && (
+            <CommandItem value="valider nouvelles vm cloud azure à valider" onSelect={() => go("/infrastructure?tab=pending")}>
+              <CloudCog />
+              Valider les nouvelles VM cloud
+            </CommandItem>
+          )}
           <CommandItem
             value="thème clair sombre"
             onSelect={() => {

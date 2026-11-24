@@ -3,12 +3,30 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { Cloud, Loader2, Pencil, Plus, PlugZap, RefreshCw, Route, ShieldCheck, Trash2, X } from "lucide-react";
+import {
+  Cloud,
+  CloudCog,
+  Download,
+  EyeOff,
+  Loader2,
+  Pencil,
+  Plus,
+  PlugZap,
+  RefreshCw,
+  Route,
+  ShieldCheck,
+  Trash2,
+  Undo2,
+  X,
+} from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import {
   errorMessage,
   type CloudAccountData,
+  type CloudPendingDecision,
+  type CloudPendingStatus,
+  type CloudPendingVM,
   type CloudSyncResult,
   type CredentialData,
   type GatewayData,
@@ -28,24 +46,27 @@ import {
   SaveButton,
   Tabs,
   Toggle,
+  LabelChips,
   formatDate,
   type NoticeData,
 } from "@/components/kit";
 import { RowsSkeleton, SettingsCard, StatusDot, TableSkeleton, Tip } from "@/components/auditUi";
 import { AuthModePicker, RowAction } from "@/components/AccountsSection";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type Tab = "zones" | "azure";
+type Tab = "zones" | "azure" | "pending";
+const TABS: Tab[] = ["zones", "azure", "pending"];
 
 export default function Infrastructure() {
   const { isAdmin, loading: userLoading } = useCurrentUser();
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get("tab") === "azure" ? "azure" : "zones";
+  const tab: Tab = TABS.find((t) => t === params.get("tab")) ?? "zones";
   const [zones, setZones] = useState<ZoneData[] | null>(null);
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [credentials, setCredentials] = useState<CredentialData[]>([]);
@@ -84,16 +105,17 @@ export default function Infrastructure() {
         tabs={[
           { id: "zones", label: "Zones et passerelles", icon: Route },
           { id: "azure", label: "Azure", icon: Cloud },
+          { id: "pending", label: "VM à valider", icon: CloudCog },
         ]}
         active={tab}
         onChange={(t) => setParams(t === "zones" ? {} : { tab: t }, { replace: true })}
       />
       <ErrorBox message={error} />
-      {tab === "zones" ? (
-        <ZonesPanel zones={zones} credentials={credentials} onChanged={loadZones} />
-      ) : (
-        <AzurePanel nodes={nodes} zones={zones || []} />
+      {tab === "zones" && <ZonesPanel zones={zones} credentials={credentials} onChanged={loadZones} />}
+      {tab === "azure" && (
+        <AzurePanel nodes={nodes} zones={zones || []} onShowPending={() => setParams({ tab: "pending" }, { replace: true })} />
       )}
+      {tab === "pending" && <PendingPanel />}
     </div>
   );
 }
@@ -569,11 +591,16 @@ const STAT_LABELS: Record<string, [string, string]> = {
   updated: ["mise à jour", "mises à jour"],
   missing: ["disparue", "disparues"],
   skipped: ["ignorée", "ignorées"],
+  pending: ["en attente de validation", "en attente de validation"],
+  new_pending: ["nouvelle à valider", "nouvelles à valider"],
 };
+
+/** Only shown when the account reviews new VMs (always 0 otherwise). */
+const REVIEW_STATS = new Set(["pending", "new_pending"]);
 
 function statsText(stats: Record<string, number | string>): string {
   return Object.entries(stats)
-    .filter(([k]) => k !== "error")
+    .filter(([k, v]) => k !== "error" && !(REVIEW_STATS.has(k) && Number(v) === 0))
     .map(([k, v]) => {
       const n = Number(v);
       const l = STAT_LABELS[k];
@@ -582,7 +609,15 @@ function statsText(stats: Record<string, number | string>): string {
     .join(", ");
 }
 
-function AzurePanel({ nodes, zones }: { nodes: NodeData[]; zones: ZoneData[] }) {
+function AzurePanel({
+  nodes,
+  zones,
+  onShowPending,
+}: {
+  nodes: NodeData[];
+  zones: ZoneData[];
+  onShowPending: () => void;
+}) {
   const [accounts, setAccounts] = useState<CloudAccountData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeData | null>(null);
@@ -629,6 +664,14 @@ function AzurePanel({ nodes, zones }: { nodes: NodeData[]; zones: ZoneData[] }) 
           text: (
             <>
               <strong>{a.name}</strong> synchronisé : {statsText(r.stats)}.
+              {Number(r.stats.pending) > 0 && (
+                <>
+                  {" "}
+                  <button type="button" onClick={onShowPending} className="font-medium underline underline-offset-4">
+                    Voir les VM à valider
+                  </button>
+                </>
+              )}
             </>
           ),
         });
@@ -731,6 +774,7 @@ function AzurePanel({ nodes, zones }: { nodes: NodeData[]; zones: ZoneData[] }) 
                         <p className="text-muted-foreground">
                           {a.config.use_public_ip ? "IP publique" : "IP privée"}
                           {a.config.only_running && ", VM démarrées"}
+                          {a.review_new && ", revue des nouvelles VM"}
                         </p>
                       </TableCell>
                       <TableCell className="text-xs">
@@ -834,6 +878,7 @@ function CloudAccountModal({
   const [zoneId, setZoneId] = useState(account?.zone_id || "");
   const [isActive, setIsActive] = useState(account?.is_active ?? true);
   const [interval, setIntervalMinutes] = useState(account?.sync_interval_minutes ?? 60);
+  const [reviewNew, setReviewNew] = useState(account?.review_new ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -875,6 +920,7 @@ function CloudAccountModal({
       zone_id: zoneId || null,
       is_active: isActive,
       sync_interval_minutes: interval,
+      review_new: reviewNew,
     };
     try {
       if (account) await api.patch(`/api/cloud-accounts/${account.id}`, body);
@@ -1011,7 +1057,255 @@ function CloudAccountModal({
         <Toggle checked={usePublicIp} onChange={setUsePublicIp} label="Utiliser l'IP publique des VM (sinon l'IP privée)" />
         <Toggle checked={onlyRunning} onChange={setOnlyRunning} label="Importer seulement les VM démarrées" />
         <Toggle checked={isActive} onChange={setIsActive} label="Synchronisation automatique active" />
+        <Toggle checked={reviewNew} onChange={setReviewNew} label="Revue des nouvelles VM" />
+        <p className="pl-11 text-xs text-muted-foreground">
+          Une nouvelle VM n'est pas importée : elle attend dans « VM à valider » et les admins sont prévenus.
+        </p>
       </div>
     </Modal>
+  );
+}
+
+// ── Cloud review queue ────────────────────────────────────
+
+type PendingAction = "import" | "ignore" | "restore";
+
+const PENDING_DONE: Record<PendingAction, [string, string]> = {
+  import: ["VM importée", "VM importées"],
+  ignore: ["VM ignorée", "VM ignorées"],
+  restore: ["VM remise à valider", "VM remises à valider"],
+};
+
+const POWER_LABELS: Record<string, string> = {
+  running: "Démarrée",
+  stopped: "Arrêtée",
+  deallocated: "Désallouée",
+  starting: "Démarrage",
+  stopping: "Arrêt en cours",
+  deallocating: "Désallocation",
+};
+
+function PendingPanel() {
+  const [status, setStatus] = useState<CloudPendingStatus>("pending");
+  const [rows, setRows] = useState<CloudPendingVM[] | null>(null);
+  const [accounts, setAccounts] = useState<CloudAccountData[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<PendingAction | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeData | null>(null);
+
+  const load = useCallback(() => {
+    api
+      .get<CloudPendingVM[]>(`/api/cloud-pending?status=${status}`)
+      .then((r) => {
+        setRows(r);
+        setError(null);
+        // Keep only the selected VMs still in the list
+        setSelected((sel) => new Set([...sel].filter((id) => r.some((x) => x.id === id))));
+      })
+      .catch((e) => {
+        setRows((r) => r ?? []);
+        setError(errorMessage(e));
+      });
+  }, [status]);
+
+  useEffect(load, [load]);
+  useEffect(() => {
+    api.get<CloudAccountData[]>("/api/cloud-accounts").then(setAccounts).catch(() => {});
+  }, []);
+
+  const switchStatus = (s: CloudPendingStatus) => {
+    setStatus(s);
+    setRows(null);
+    setSelected(new Set());
+  };
+
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "?";
+  const list = rows ?? [];
+  const allSelected = list.length > 0 && list.every((r) => selected.has(r.id));
+  const toggle = (id: string) =>
+    setSelected((sel) => {
+      const next = new Set(sel);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const decide = async (action: PendingAction) => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setBusy(action);
+    setNotice(null);
+    try {
+      const r = await api.post<CloudPendingDecision>("/api/cloud-pending/decide", { ids, action });
+      const label = PENDING_DONE[action][r.done > 1 ? 1 : 0];
+      if (r.errors.length) {
+        setNotice({
+          ok: false,
+          text: (
+            <>
+              {r.done > 0 && (
+                <p>
+                  {r.done} {label}.
+                </p>
+              )}
+              <p>
+                {r.errors.length} en erreur :
+              </p>
+              <ul className="list-disc pl-5">
+                {r.errors.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            </>
+          ),
+        });
+      } else {
+        toast.success(`${r.done} ${label}`);
+      }
+      setSelected(new Set());
+      load();
+    } catch (e) {
+      setNotice({ ok: false, text: errorMessage(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Nouvelles VM trouvées par les comptes Azure en « revue des nouvelles VM ». Importez celles qui doivent devenir
+          des serveurs Citadel, ignorez les autres : une VM ignorée le reste aux synchronisations suivantes.
+        </p>
+        <Select value={status} onValueChange={(v) => switchStatus(v as CloudPendingStatus)}>
+          <SelectTrigger className="h-8 w-auto min-w-40 gap-2">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="pending">À valider</SelectItem>
+            <SelectItem value="ignored">Ignorées</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <ErrorBox message={error} />
+      <Notice notice={notice} onClose={() => setNotice(null)} />
+
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+          <span className="tabular mr-auto">
+            {selected.size} VM sélectionnée{selected.size > 1 ? "s" : ""}
+          </span>
+          <Button size="sm" onClick={() => decide("import")} disabled={busy !== null}>
+            {busy === "import" ? <Loader2 className="animate-spin" /> : <Download />}
+            Importer
+          </Button>
+          {status === "pending" ? (
+            <Button variant="outline" size="sm" onClick={() => decide("ignore")} disabled={busy !== null}>
+              {busy === "ignore" ? <Loader2 className="animate-spin" /> : <EyeOff />}
+              Ignorer
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => decide("restore")} disabled={busy !== null}>
+              {busy === "restore" ? <Loader2 className="animate-spin" /> : <Undo2 />}
+              Remettre à valider
+            </Button>
+          )}
+        </div>
+      )}
+
+      {rows && rows.length === 0 && !error ? (
+        <EmptyState icon={CloudCog} title={status === "pending" ? "Aucune VM à valider" : "Aucune VM ignorée"}>
+          {status === "pending"
+            ? "Activez « Revue des nouvelles VM » sur un compte Azure pour valider chaque nouvelle VM avant son import."
+            : "Les VM que vous ignorez apparaissent ici. Vous pourrez les remettre à valider."}
+        </EmptyState>
+      ) : (
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-10 pl-4">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={(v) => setSelected(v === true ? new Set(list.map((r) => r.id)) : new Set())}
+                    aria-label="Tout sélectionner"
+                    disabled={list.length === 0}
+                  />
+                </TableHead>
+                <TableHead>VM</TableHead>
+                <TableHead>IP</TableHead>
+                <TableHead>Système</TableHead>
+                <TableHead>Compte et groupe de ressources</TableHead>
+                <TableHead>État</TableHead>
+                <TableHead>Étiquettes</TableHead>
+                <TableHead className="pr-4">Détection</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!rows ? (
+                <TableSkeleton rows={3} cols={8} />
+              ) : (
+                <AnimatePresence initial={false}>
+                  {rows.map((r) => (
+                    <motion.tr
+                      key={r.id}
+                      layout
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      data-state={selected.has(r.id) ? "selected" : undefined}
+                      className="border-b align-top transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                    >
+                      <TableCell className="pl-4">
+                        <Checkbox
+                          checked={selected.has(r.id)}
+                          onCheckedChange={() => toggle(r.id)}
+                          aria-label={`Sélectionner ${r.name}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <p className="font-mono text-xs font-medium">{r.name}</p>
+                        {r.computer_name && r.computer_name !== r.name && (
+                          <p className="font-mono text-xs text-muted-foreground">{r.computer_name}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs">{r.ip_address || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                        {r.os_type === "windows" ? "Windows" : r.os_type === "linux" ? "Linux" : r.os_type || "-"}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <p>{accountName(r.cloud_account_id)}</p>
+                        <p className="font-mono text-muted-foreground">
+                          {r.resource_group || "-"}
+                          {r.location && ` · ${r.location}`}
+                        </p>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {r.power_state ? (
+                          <Chip tone={r.power_state === "running" ? "green" : "default"}>
+                            {POWER_LABELS[r.power_state] ?? r.power_state}
+                          </Chip>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        <LabelChips tags={r.tags} />
+                      </TableCell>
+                      <TableCell className="tabular whitespace-nowrap pr-4 text-xs text-muted-foreground">
+                        <p>première : {formatDate(r.first_seen)}</p>
+                        <p>dernière : {formatDate(r.last_seen)}</p>
+                      </TableCell>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
   );
 }
