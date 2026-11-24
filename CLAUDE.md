@@ -120,10 +120,14 @@ frontend/
 ├── src/
 │   ├── main.tsx             # Entry Vite + init MSAL
 │   ├── App.tsx              # Routing (support dev mode bypass)
-│   ├── pages/               # Dashboard, Servers, ServerDetail, TerminalPage,
-│   │                        # Sessions, Updates, Audit, Settings
-│   ├── components/          # Layout (sidebar), LoginPage, Terminal (xterm.js),
-│   │                        # RdpViewer (Guacamole), Sparkline (SVG 24h)
+│   ├── pages/               # Dashboard, Servers, ServerDetail, TerminalPage, Sessions,
+│   │                        # Updates, Audit, Settings (coffre, notifications), Access
+│   │                        # (règles, groupes, accès effectifs, comptes découverts, ACL),
+│   │                        # Approvals (validations 4 yeux, demandes d'accès), MyAccount
+│   ├── components/          # Layout (sidebar + NotificationBell), LoginPage, Terminal,
+│   │                        # RdpViewer, NodeTree, ConnectDialog, AccountsSection,
+│   │                        # DiscoveredAccounts, SecretsVaultCard, AclRules,
+│   │                        # NotificationChannels, ui.tsx (briques communes)
 │   ├── services/            # authConfig.ts (MSAL), api.ts (fetch typé + Bearer)
 │   └── lib/                 # utils.ts
 ├── vite.config.ts

@@ -5,12 +5,14 @@ import { useCurrentUser } from "@/services/useCurrentUser";
 import {
   errorMessage,
   hasAction,
+  isReviewMessage,
   type CredentialData,
   type NodeData,
   type OSType,
   type ServerData,
 } from "@/services/types";
 import NodeTree from "@/components/NodeTree";
+import { GovernanceNotice } from "@/components/governanceUi";
 import {
   Chip,
   ErrorBox,
@@ -547,6 +549,8 @@ export default function Servers() {
   const [cmdServer, setCmdServer] = useState<ServerData | null>(null);
   const [cmdInput, setCmdInput] = useState("");
   const [cmdResult, setCmdResult] = useState<CommandResult | null>(null);
+  // 403 from the execute API (rights, command / connection ACL, review)
+  const [cmdDenied, setCmdDenied] = useState<string | null>(null);
   const [cmdLoading, setCmdLoading] = useState(false);
 
   // System info modal
@@ -736,6 +740,7 @@ export default function Servers() {
     if (!cmdServer || !cmdInput.trim()) return;
     setCmdLoading(true);
     setCmdResult(null);
+    setCmdDenied(null);
     try {
       const result = await api.post<CommandResult>(`/api/servers/${cmdServer.id}/execute`, {
         command: cmdInput,
@@ -743,7 +748,9 @@ export default function Servers() {
       });
       setCmdResult(result);
     } catch (e: unknown) {
-      setCmdResult({ exit_code: -1, stdout: "", stderr: errorMessage(e, "Unknown error") });
+      const msg = errorMessage(e, "Unknown error");
+      if (isReviewMessage(msg) || /refusée par la règle/i.test(msg)) setCmdDenied(msg);
+      else setCmdResult({ exit_code: -1, stdout: "", stderr: msg });
     } finally {
       setCmdLoading(false);
     }
@@ -1081,6 +1088,7 @@ export default function Servers() {
                                   setCmdServer(srv);
                                   setCmdInput("");
                                   setCmdResult(null);
+                                  setCmdDenied(null);
                                 }}
                                 className={iconBtn}
                                 title="Exécuter une commande"
@@ -1153,6 +1161,7 @@ export default function Servers() {
               {cmdLoading ? <Loader2 size={16} className="animate-spin" /> : "Exécuter"}
             </button>
           </div>
+          {cmdDenied && <GovernanceNotice message={cmdDenied} />}
           {cmdResult && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs">

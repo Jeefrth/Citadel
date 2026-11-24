@@ -295,3 +295,201 @@ export function hasAction(server: Pick<ServerData, "actions">, action: ServerAct
 export function errorMessage(e: unknown, fallback = "Erreur inconnue"): string {
   return e instanceof Error ? e.message : fallback;
 }
+
+// ── Governance (lot 3): ACLs, approvals, notifications ──────
+
+export interface TimeWindow {
+  /** 0 = Monday ... 6 = Sunday. */
+  days: number[];
+  /** "HH:MM"; an end before the start spans midnight. */
+  start: string;
+  end: string;
+}
+
+export type RuleScope = "login" | "connect";
+export type ConnectRuleAction = "allow" | "deny" | "review";
+export type CommandRuleAction = "allow" | "deny" | "alert" | "review";
+
+interface RuleReadBase {
+  id: string;
+  name: string;
+  description: string | null;
+  priority: number;
+  is_active: boolean;
+  users: Ref[];
+  groups: Ref[];
+  servers: Ref[];
+  nodes: Ref[];
+  labels: string[];
+  accounts: string[];
+  approver_groups: Ref[];
+  created_at: string;
+}
+
+export interface ConnectionRuleData extends RuleReadBase {
+  scope: RuleScope;
+  action: ConnectRuleAction;
+  source_ips: string[];
+  time_windows: TimeWindow[];
+}
+
+export interface CommandRuleData extends RuleReadBase {
+  action: CommandRuleAction;
+  patterns: string[];
+}
+
+interface RuleTargetsIn {
+  name: string;
+  description: string | null;
+  priority: number;
+  is_active: boolean;
+  user_ids: string[];
+  group_ids: string[];
+  server_ids: string[];
+  node_ids: string[];
+  labels: string[];
+  accounts: string[];
+  approver_group_ids: string[];
+}
+
+export interface ConnectionRuleIn extends RuleTargetsIn {
+  scope: RuleScope;
+  action: ConnectRuleAction;
+  source_ips: string[];
+  time_windows: TimeWindow[];
+}
+
+export interface CommandRuleIn extends RuleTargetsIn {
+  action: CommandRuleAction;
+  patterns: string[];
+}
+
+export interface CommandTestIn {
+  command: string;
+  server_id: string;
+  user_id?: string | null;
+  account?: string | null;
+}
+
+/** Result of the command dry run. */
+export interface RuleDecision {
+  action: CommandRuleAction;
+  rule: string | null;
+  reason: string | null;
+}
+
+export type ApprovalKind = "access" | "connect" | "command";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "cancelled" | "expired" | "used";
+export type ApprovalScope = "todo" | "mine" | "all";
+
+/** Payload of an "access" request. */
+export interface AccessRequestPayload {
+  server_ids?: string[];
+  node_ids?: string[];
+  actions?: string[];
+  accounts?: string[];
+  duration_hours?: number;
+}
+
+export interface ApprovalData {
+  id: string;
+  number: number;
+  kind: ApprovalKind;
+  status: ApprovalStatus;
+  requester: Ref;
+  server: Ref | null;
+  account_username: string | null;
+  command: string | null;
+  reason: string | null;
+  payload: AccessRequestPayload;
+  rule_name: string | null;
+  decided_by: Ref | null;
+  decided_at: string | null;
+  decision_comment: string | null;
+  /** Deadline for a decision. */
+  expires_at: string;
+  /** Validity of an approved request (connect / command grant, temporary access). */
+  grant_until: string | null;
+  used_at: string | null;
+  policy_id: string | null;
+  created_at: string;
+  can_decide: boolean;
+  /** Approvers other than the requester; 0 = nobody can approve. */
+  approvers_available: number;
+}
+
+export interface AccessRequestIn {
+  server_ids: string[];
+  node_ids: string[];
+  actions: ServerAction[];
+  accounts: string[];
+  duration_hours: number;
+  reason: string;
+}
+
+export interface CountResponse {
+  count: number;
+}
+
+export type NotificationLevel = "info" | "warning" | "critical";
+
+export interface NotificationData {
+  id: string;
+  event: string;
+  level: NotificationLevel;
+  title: string;
+  body: string | null;
+  /** App path, e.g. "/approvals?id=<uuid>" or "/servers/<id>". */
+  link: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationEvent {
+  event: string;
+  label: string;
+}
+
+export type ChannelType = "email" | "teams" | "webhook";
+
+export interface EmailChannelConfig {
+  host?: string;
+  port?: number;
+  starttls?: boolean;
+  username?: string;
+  sender?: string;
+  to?: string[];
+  /** Also mail the users concerned by the event. */
+  to_recipients?: boolean;
+}
+
+export interface NotificationChannelData {
+  id: string;
+  name: string;
+  type: ChannelType;
+  is_active: boolean;
+  config: EmailChannelConfig & Record<string, unknown>;
+  has_secret: boolean;
+  /** Empty = all events. */
+  events: string[];
+  min_level: NotificationLevel;
+  last_sent_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface NotificationChannelIn {
+  name: string;
+  type: ChannelType;
+  is_active: boolean;
+  config: EmailChannelConfig;
+  /** Write-only; omitted on update = unchanged. */
+  secret?: string;
+  events: string[];
+  min_level: NotificationLevel;
+}
+
+/** True when a backend refusal means "put under review" rather than a plain deny. */
+export function isReviewMessage(msg: string | null | undefined): boolean {
+  return !!msg && /soumise? à validation/i.test(msg);
+}

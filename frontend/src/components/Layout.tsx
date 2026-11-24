@@ -13,7 +13,9 @@ import {
   User,
   KeyRound,
   UserCog,
+  ClipboardCheck,
 } from "lucide-react";
+import NotificationBell, { CountBadge, usePolledCount } from "@/components/NotificationBell";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard", adminOnly: false },
@@ -21,6 +23,7 @@ const navItems = [
   { to: "/terminal", icon: Terminal, label: "Terminal", adminOnly: false },
   { to: "/sessions", icon: Film, label: "Sessions", adminOnly: false },
   { to: "/updates", icon: RefreshCw, label: "Mises à jour", adminOnly: false },
+  { to: "/approvals", icon: ClipboardCheck, label: "Validations", adminOnly: false },
   { to: "/access", icon: KeyRound, label: "Accès", adminOnly: true },
   { to: "/audit", icon: Shield, label: "Audit", adminOnly: false },
   { to: "/settings", icon: Settings, label: "Paramètres", adminOnly: true },
@@ -31,6 +34,7 @@ export default function Layout() {
   const { instance, accounts } = useMsal();
   const account = accounts[0];
   const { user, isAdmin } = useCurrentUser();
+  const [pendingApprovals] = usePolledCount("/api/approvals/pending-count");
 
   const handleLogout = () => {
     instance.logoutRedirect();
@@ -40,11 +44,14 @@ export default function Layout() {
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
       <aside className="w-64 border-r bg-card flex flex-col">
-        <div className="p-6 border-b">
-          <h1 className="text-xl font-bold text-primary">Citadel</h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Gestion de serveurs
-          </p>
+        <div className="p-6 border-b flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-bold text-primary">Citadel</h1>
+            <p className="text-xs text-muted-foreground mt-1">
+              Gestion de serveurs
+            </p>
+          </div>
+          <NotificationBell />
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
@@ -63,7 +70,8 @@ export default function Layout() {
               }
             >
               <Icon size={18} />
-              {label}
+              <span className="flex-1">{label}</span>
+              {to === "/approvals" && <CountBadge count={pendingApprovals} />}
             </NavLink>
           ))}
         </nav>

@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Guacamole from "guacamole-common-js";
 import { api } from "@/services/api";
-import type { ConnectionChoice, ConnectTicketResponse } from "@/services/types";
+import { isReviewMessage, type ConnectionChoice, type ConnectTicketResponse } from "@/services/types";
+import { GovernanceNotice } from "@/components/governanceUi";
 
 interface RdpViewerProps {
   serverId: string;
@@ -17,6 +18,8 @@ export default function RdpViewer({
 }: RdpViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const clientRef = useRef<Guacamole.Client | null>(null);
+  // connect-ticket refusal (rights, connection ACL deny or review)
+  const [ticketError, setTicketError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -38,13 +41,7 @@ export default function RdpViewer({
         });
         ticket = res.ticket;
       } catch (e) {
-        if (!cancelled && containerRef.current) {
-          const msg = document.createElement("p");
-          msg.className = "text-red-400 text-sm p-4";
-          msg.textContent = `Connexion RDP impossible : ${e instanceof Error ? e.message : "erreur"}`;
-          containerRef.current.innerHTML = "";
-          containerRef.current.appendChild(msg);
-        }
+        if (!cancelled) setTicketError(e instanceof Error ? e.message : "erreur");
         onDisconnected?.();
         return;
       }
@@ -206,6 +203,15 @@ export default function RdpViewer({
           Ctrl+Alt+Del
         </button>
       </div>
+      {ticketError && (
+        <div className="p-3 bg-zinc-900">
+          {isReviewMessage(ticketError) || /refusée par la règle/i.test(ticketError) ? (
+            <GovernanceNotice message={ticketError} />
+          ) : (
+            <p className="text-red-400 text-sm">Connexion RDP impossible : {ticketError}</p>
+          )}
+        </div>
+      )}
       <div
         ref={containerRef}
         className="flex-1 bg-black rounded-b-md overflow-hidden relative cursor-none"

@@ -18,6 +18,7 @@ import Sessions from "@/pages/Sessions";
 import SettingsPage from "@/pages/Settings";
 import Access from "@/pages/Access";
 import MyAccount from "@/pages/MyAccount";
+import Approvals from "@/pages/Approvals";
 
 // DEV MODE: bypass Entra ID auth for local testing
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
@@ -36,6 +37,7 @@ function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/access" element={<Access />} />
         <Route path="/account" element={<MyAccount />} />
+        <Route path="/approvals" element={<Approvals />} />
       </Route>
     </Routes>
   );

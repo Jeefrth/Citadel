@@ -1,9 +1,15 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import type { ConnectionChoice } from "@/services/types";
+import { isReviewMessage, type ConnectionChoice } from "@/services/types";
+import { GovernanceNotice } from "@/components/governanceUi";
+
+/** Refusals from the connection ACL (deny or review) get a banner above the terminal. */
+function isGovernanceMessage(msg: string): boolean {
+  return isReviewMessage(msg) || /refusée par la règle/i.test(msg);
+}
 
 interface TerminalProps {
   serverId: string;
@@ -28,6 +34,7 @@ export default function Terminal({
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const [govMessage, setGovMessage] = useState<string | null>(null);
 
   const connect = useCallback(async () => {
     if (!containerRef.current) return;
@@ -129,6 +136,9 @@ export default function Terminal({
 
         case "error":
           xterm.writeln(`\r\n\x1b[1;31mError: ${msg.message}\x1b[0m`);
+          if (typeof msg.message === "string" && isGovernanceMessage(msg.message)) {
+            setGovMessage(msg.message);
+          }
           break;
 
         case "disconnected":
@@ -203,10 +213,13 @@ export default function Terminal({
   }, [connect]);
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full min-h-[400px] rounded-md overflow-hidden"
-      style={{ backgroundColor: "#1a1b26" }}
-    />
+    <div className="w-full h-full min-h-[400px] flex flex-col gap-2">
+      {govMessage && <GovernanceNotice message={govMessage} />}
+      <div
+        ref={containerRef}
+        className="w-full flex-1 min-h-[400px] rounded-md overflow-hidden"
+        style={{ backgroundColor: "#1a1b26" }}
+      />
+    </div>
   );
 }

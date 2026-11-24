@@ -394,9 +394,6 @@ def _check_channel(type_: str, config: dict, secret: str | None, has_secret: boo
             raise HTTPException(status_code=400, detail="Webhook URL is required")
     if type_ == "email" and not (config or {}).get("host"):
         raise HTTPException(status_code=400, detail="SMTP host is required")
-    unknown = [e for e in (config or {}).get("events", []) if e not in EVENTS]
-    if unknown:
-        raise HTTPException(status_code=400, detail=f"Unknown events: {unknown}")
 
 
 @router.get("/notification-channels", response_model=list[ChannelRead])

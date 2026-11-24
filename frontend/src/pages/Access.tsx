@@ -8,7 +8,9 @@ import {
   Plus,
   Power,
   Radar,
+  ShieldBan,
   ShieldCheck,
+  TerminalSquare,
   Trash2,
   Users,
 } from "lucide-react";
@@ -44,8 +46,9 @@ import {
   type Option,
 } from "@/components/ui";
 import { DiscoveredAccountsPanel } from "@/components/DiscoveredAccounts";
+import { CommandRulesPanel, ConnectionRulesPanel } from "@/components/AclRules";
 
-type Tab = "policies" | "groups" | "effective" | "discovered";
+type Tab = "policies" | "groups" | "effective" | "discovered" | "acl-connection" | "acl-command";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -728,6 +731,8 @@ export default function Access() {
           { id: "groups", label: "Groupes d'utilisateurs", icon: Users },
           { id: "effective", label: "Accès effectifs", icon: Eye },
           { id: "discovered", label: "Comptes découverts", icon: Radar },
+          { id: "acl-connection", label: "ACL de connexion", icon: ShieldBan },
+          { id: "acl-command", label: "ACL de commandes", icon: TerminalSquare },
         ]}
         active={tab}
         onChange={setTab}
@@ -967,6 +972,10 @@ export default function Access() {
 
       {/* Discovered accounts (all servers) */}
       {!loading && tab === "discovered" && <DiscoveredAccountsPanel servers={refs.servers} />}
+
+      {/* Connection / command ACLs (lot 3) */}
+      {!loading && tab === "acl-connection" && <ConnectionRulesPanel refs={refs} />}
+      {!loading && tab === "acl-command" && <CommandRulesPanel refs={refs} />}
 
       {editPolicy !== undefined && (
         <PolicyModal

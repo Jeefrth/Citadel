@@ -82,7 +82,7 @@ export function SaveButton({
   );
 }
 
-export type ChipTone = "default" | "primary" | "amber" | "blue" | "green" | "red";
+export type ChipTone = "default" | "primary" | "amber" | "blue" | "green" | "red" | "orange";
 
 export function Chip({
   children,
@@ -102,6 +102,7 @@ export function Chip({
     blue: "bg-blue-100 text-blue-800",
     green: "bg-green-100 text-green-800",
     red: "bg-red-100 text-red-800",
+    orange: "bg-orange-100 text-orange-800",
   };
   return (
     <span
@@ -304,7 +305,7 @@ export function Tabs<T extends string>({
   onChange: (t: T) => void;
 }) {
   return (
-    <div className="flex gap-1 border-b mb-6">
+    <div className="flex flex-wrap gap-1 border-b mb-6">
       {tabs.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
