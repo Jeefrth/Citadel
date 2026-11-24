@@ -1,17 +1,18 @@
 import { useEffect, useRef } from "react";
 import Guacamole from "guacamole-common-js";
+import { api } from "@/services/api";
+import type { ConnectionChoice, ConnectTicketResponse } from "@/services/types";
 
 interface RdpViewerProps {
   serverId: string;
   serverName: string;
-  getToken: () => Promise<string>;
+  connection?: ConnectionChoice; // account picked before connecting (default account otherwise)
   onDisconnected?: () => void;
 }
 
 export default function RdpViewer({
   serverId,
-  serverName,
-  getToken,
+  connection,
   onDisconnected,
 }: RdpViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -24,10 +25,27 @@ export default function RdpViewer({
     let resizeObserver: ResizeObserver | null = null;
 
     (async () => {
-      let token: string;
+      // 1) One-time ticket (60 s): rights are checked and the account resolved server-side,
+      //    so neither the bearer token nor any password ends up in the WebSocket URL.
+      let ticket: string;
       try {
-        token = await getToken();
-      } catch {
+        const res = await api.post<ConnectTicketResponse>(`/api/servers/${serverId}/connect-ticket`, {
+          protocol: "rdp",
+          account_id: connection?.account_id,
+          virtual_account: connection?.virtual_account,
+          input_username: connection?.input_username,
+          input_password: connection?.input_password,
+        });
+        ticket = res.ticket;
+      } catch (e) {
+        if (!cancelled && containerRef.current) {
+          const msg = document.createElement("p");
+          msg.className = "text-red-400 text-sm p-4";
+          msg.textContent = `Connexion RDP impossible : ${e instanceof Error ? e.message : "erreur"}`;
+          containerRef.current.innerHTML = "";
+          containerRef.current.appendChild(msg);
+        }
+        onDisconnected?.();
         return;
       }
       if (cancelled) return;
@@ -38,7 +56,7 @@ export default function RdpViewer({
       const height = Math.min(Math.round(rect.height) || 768, 1080);
 
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${wsProtocol}//${window.location.host}/ws/rdp/${serverId}?token=${encodeURIComponent(token)}&width=${width}&height=${height}`;
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws/rdp/${serverId}?ticket=${encodeURIComponent(ticket)}&width=${width}&height=${height}`;
 
       const tunnel = new Guacamole.WebSocketTunnel(wsUrl);
       client = new Guacamole.Client(tunnel);
@@ -75,7 +93,7 @@ export default function RdpViewer({
       resizeObserver = new ResizeObserver(() => scaleDisplay());
       resizeObserver.observe(container);
 
-      // Mouse input on CONTAINER — calculate display coordinates manually
+      // Mouse input on CONTAINER: calculate display coordinates manually
       const mouseState = { x: 0, y: 0, left: false, middle: false, right: false, up: false, down: false };
 
       const toDisplayCoords = (clientX: number, clientY: number) => {

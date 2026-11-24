@@ -1,5 +1,6 @@
 import { Outlet, NavLink } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
+import { useCurrentUser } from "@/services/useCurrentUser";
 import {
   Server,
   Terminal,
@@ -10,21 +11,26 @@ import {
   Settings,
   LogOut,
   User,
+  KeyRound,
+  UserCog,
 } from "lucide-react";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/servers", icon: Server, label: "Serveurs" },
-  { to: "/terminal", icon: Terminal, label: "Terminal" },
-  { to: "/sessions", icon: Film, label: "Sessions" },
-  { to: "/updates", icon: RefreshCw, label: "Mises à jour" },
-  { to: "/audit", icon: Shield, label: "Audit" },
-  { to: "/settings", icon: Settings, label: "Paramètres" },
+  { to: "/", icon: LayoutDashboard, label: "Dashboard", adminOnly: false },
+  { to: "/servers", icon: Server, label: "Serveurs", adminOnly: false },
+  { to: "/terminal", icon: Terminal, label: "Terminal", adminOnly: false },
+  { to: "/sessions", icon: Film, label: "Sessions", adminOnly: false },
+  { to: "/updates", icon: RefreshCw, label: "Mises à jour", adminOnly: false },
+  { to: "/access", icon: KeyRound, label: "Accès", adminOnly: true },
+  { to: "/audit", icon: Shield, label: "Audit", adminOnly: false },
+  { to: "/settings", icon: Settings, label: "Paramètres", adminOnly: true },
+  { to: "/account", icon: UserCog, label: "Mon compte", adminOnly: false },
 ];
 
 export default function Layout() {
   const { instance, accounts } = useMsal();
   const account = accounts[0];
+  const { user, isAdmin } = useCurrentUser();
 
   const handleLogout = () => {
     instance.logoutRedirect();
@@ -42,7 +48,9 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {navItems
+            .filter((item) => isAdmin || !item.adminOnly)
+            .map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -68,10 +76,10 @@ export default function Layout() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">
-                {account?.name || "Utilisateur"}
+                {account?.name || user?.display_name || "Utilisateur"}
               </p>
               <p className="text-xs text-muted-foreground truncate">
-                {account?.username || ""}
+                {account?.username || user?.email || ""}
               </p>
             </div>
             <button

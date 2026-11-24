@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "@/services/api";
+import { hasAction, type ServerData } from "@/services/types";
 import {
   RefreshCw,
   Shield,
@@ -12,15 +13,6 @@ import {
   ChevronUp,
   AlertTriangle,
 } from "lucide-react";
-
-interface ServerData {
-  id: string;
-  name: string;
-  hostname: string;
-  ip_address: string;
-  os_type: "linux" | "windows";
-  credential_id: string | null;
-}
 
 interface PackageUpdate {
   name: string;
@@ -66,7 +58,8 @@ export default function Updates() {
       api.get<UpdateJob[]>("/api/servers/updates/jobs").catch(() => []),
     ])
       .then(([srvs, jbs]) => {
-        setServers(srvs.filter((s) => s.credential_id));
+        // Scans and updates run with the server's default account
+        setServers(srvs.filter((s) => s.default_account));
         setJobs(jbs);
       })
       .finally(() => setLoading(false));
@@ -170,7 +163,7 @@ export default function Updates() {
           <div>
             <p className="text-xl font-bold">
               {scannedCount === 0
-                ? "—"
+                ? "-"
                 : totalUpdates === 0
                   ? "OK"
                   : `${Math.round(((servers.length - Object.values(scans).filter((s) => s.total_updates > 0).length) / servers.length) * 100)}%`}
@@ -186,7 +179,7 @@ export default function Updates() {
         <div className="bg-card border rounded-lg p-12 text-center">
           <RefreshCw size={48} className="mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">
-            Aucun serveur avec credential configuré.
+            Aucun serveur avec un compte par défaut configuré.
           </p>
         </div>
       )}
@@ -208,7 +201,7 @@ export default function Updates() {
                   <div className="flex-1 min-w-0">
                     <p className="font-medium">{srv.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {srv.ip_address} — {srv.os_type}
+                      {srv.ip_address} · {srv.os_type}
                     </p>
                   </div>
 
@@ -253,7 +246,7 @@ export default function Updates() {
                         <RefreshCw size={16} />
                       )}
                     </button>
-                    {scan && scan.total_updates > 0 && (
+                    {scan && scan.total_updates > 0 && hasAction(srv, "execute") && (
                       <button
                         onClick={() => handleApply(srv)}
                         disabled={applyingId === srv.id}

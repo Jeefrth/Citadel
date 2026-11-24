@@ -13,6 +13,9 @@ declare module "guacamole-common-js" {
   export class Display {
     getElement(): HTMLElement;
     scale(scale: number): void;
+    getWidth(): number;
+    getHeight(): number;
+    onresize: ((width: number, height: number) => void) | null;
   }
 
   export class Tunnel {
@@ -28,7 +31,16 @@ declare module "guacamole-common-js" {
   }
 
   export namespace Mouse {
-    interface State {
+    class State {
+      constructor(
+        x: number,
+        y: number,
+        left: boolean,
+        middle: boolean,
+        right: boolean,
+        up: boolean,
+        down: boolean
+      );
       x: number;
       y: number;
       left: boolean;

@@ -16,7 +16,7 @@ export default function Sparkline({
   if (data.length < 2) {
     return (
       <div style={{ width, height }} className="flex items-center justify-center">
-        <span className="text-xs text-muted-foreground">—</span>
+        <span className="text-xs text-muted-foreground">-</span>
       </div>
     );
   }

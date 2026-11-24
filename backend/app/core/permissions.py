@@ -19,7 +19,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import encrypt_value
-from app.models.base import CredentialType, UserRole
+from app.models.base import CredentialType, OSType, UserRole
 from app.models.pam import (
     ACCOUNT_ALL, ACCOUNT_INPUT, ACCOUNT_USER, VIRTUAL_ACCOUNTS,
     AccessPolicy, Account, Node, PolicyAction, policy_groups, policy_users,
@@ -246,15 +246,35 @@ def resolve_for_user(
     return account_to_resolved(account)
 
 
+def account_auth(account: Account) -> str:
+    cred = account.credential
+    if account.use_cert or (cred is not None and cred.type == CredentialType.EPHEMERAL_CERT):
+        return "cert"
+    if cred is None:
+        return "none"
+    return "ssh_key" if cred.encrypted_ssh_key else "password"
+
+
 def connectable_accounts(server: Server, grant: ServerGrant) -> list[dict]:
-    """Accounts (real and virtual) the user may pick when connecting."""
-    items = [
-        {"id": str(a.id), "username": a.username, "privileged": a.privileged,
-         "is_default": a.is_default, "virtual": None}
-        for a in server.accounts if a.is_active and grant.allows_account(a.username)
-    ]
-    for alias in (ACCOUNT_USER, ACCOUNT_INPUT):
-        if alias in grant.accounts:
-            items.append({"id": None, "username": alias, "privileged": False,
-                          "is_default": False, "virtual": alias})
+    """Accounts (real and virtual) the user may pick for this server's protocol.
+
+    Windows (RDP) only works with password accounts, so certificate / key
+    accounts and @USER are not offered there.
+    """
+    windows = server.os_type == OSType.WINDOWS
+    items = []
+    for a in server.accounts:
+        if not a.is_active or not grant.allows_account(a.username):
+            continue
+        auth = account_auth(a)
+        if auth == "none" or (windows and auth != "password"):
+            continue
+        items.append({"id": str(a.id), "username": a.username, "privileged": a.privileged,
+                      "is_default": a.is_default, "virtual": None, "auth": auth})
+    if ACCOUNT_USER in grant.accounts and not windows:
+        items.append({"id": None, "username": ACCOUNT_USER, "privileged": False,
+                      "is_default": False, "virtual": ACCOUNT_USER, "auth": "cert"})
+    if ACCOUNT_INPUT in grant.accounts:
+        items.append({"id": None, "username": ACCOUNT_INPUT, "privileged": False,
+                      "is_default": False, "virtual": ACCOUNT_INPUT, "auth": "password"})
     return items

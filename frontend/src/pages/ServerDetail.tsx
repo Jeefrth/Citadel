@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "@/services/api";
+import { useCurrentUser } from "@/services/useCurrentUser";
+import { hasAction, type ServerData } from "@/services/types";
 import Sparkline from "@/components/Sparkline";
+import AccountsSection from "@/components/AccountsSection";
+import { LabelChips } from "@/components/ui";
 import {
   ArrowLeft,
   Cpu,
@@ -14,22 +18,11 @@ import {
   RefreshCw,
   Loader2,
   Wifi,
-  Play,
+  Star,
+  Monitor,
+  Terminal as TerminalIcon,
+  type LucideIcon,
 } from "lucide-react";
-
-interface ServerData {
-  id: string;
-  name: string;
-  hostname: string;
-  ip_address: string;
-  os_type: "linux" | "windows";
-  os_version: string | null;
-  ssh_port: number;
-  winrm_port: number;
-  status: string;
-  last_seen: string | null;
-  tags: Record<string, string> | null;
-}
 
 interface MetricsData {
   cpu_percent: number;
@@ -79,7 +72,7 @@ function MetricCard({
   history,
   sparkColor,
 }: {
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: LucideIcon;
   label: string;
   value: string;
   subValue?: string;
@@ -124,6 +117,9 @@ export default function ServerDetail() {
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [collecting, setCollecting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const { isAdmin } = useCurrentUser();
 
   useEffect(() => {
     if (!serverId) return;
@@ -159,6 +155,41 @@ export default function ServerDetail() {
     }
   };
 
+  const handleTest = async () => {
+    if (!serverId) return;
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const r = await api.post<{ success: boolean; message: string; latency_ms: number | null }>(
+        `/api/servers/${serverId}/test-connection`,
+        {}
+      );
+      setTestMsg({ ok: r.success, text: r.message + (r.latency_ms ? ` (${r.latency_ms}ms)` : "") });
+      setServer((s) => (s ? { ...s, status: r.success ? "online" : "offline" } : s));
+    } catch (e) {
+      setTestMsg({ ok: false, text: e instanceof Error ? e.message : "Erreur" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const toggleFavorite = async () => {
+    if (!server) return;
+    const next = !server.is_favorite;
+    setServer({ ...server, is_favorite: next });
+    try {
+      if (next) await api.put(`/api/servers/${server.id}/favorite`, {});
+      else await api.delete(`/api/servers/${server.id}/favorite`);
+    } catch {
+      setServer((s) => (s ? { ...s, is_favorite: !next } : s));
+    }
+  };
+
+  const reloadServer = () => {
+    if (!serverId) return;
+    api.get<ServerData>(`/api/servers/${serverId}`).then(setServer).catch(() => {});
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -189,11 +220,26 @@ export default function ServerDetail() {
             className={server.os_type === "linux" ? "text-green-500" : "text-blue-500"}
           />
           <div>
-            <h2 className="text-2xl font-bold">{server.name}</h2>
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              {server.name}
+              <button
+                onClick={toggleFavorite}
+                title={server.is_favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
+                className="text-muted-foreground hover:text-amber-500"
+              >
+                <Star size={18} className={server.is_favorite ? "fill-amber-400 text-amber-500" : ""} />
+              </button>
+            </h2>
             <p className="text-sm text-muted-foreground">
               {server.ip_address} · {server.hostname} · {server.os_type}
               {server.os_version && ` · ${server.os_version}`}
+              {server.node_path && ` · ${server.node_path}`}
             </p>
+            {server.tags && Object.keys(server.tags).length > 0 && (
+              <div className="mt-1">
+                <LabelChips tags={server.tags} />
+              </div>
+            )}
           </div>
           <span
             className={`ml-3 px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -224,16 +270,33 @@ export default function ServerDetail() {
       </div>
 
       {/* Quick actions */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex flex-wrap items-center gap-2 mb-6">
         <button
-          onClick={() => navigate("/terminal")}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm hover:bg-accent"
+          onClick={() => navigate(`/terminal?server=${server.id}`)}
+          disabled={!hasAction(server, "connect")}
+          title={hasAction(server, "connect") ? undefined : "Connexion non autorisée"}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
         >
-          <Play size={14} /> Terminal
+          {server.os_type === "windows" ? <Monitor size={14} /> : <TerminalIcon size={14} />}
+          {server.os_type === "windows" ? "Session RDP" : "Terminal"}
         </button>
-        <button className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm hover:bg-accent">
-          <Wifi size={14} /> Test connexion
+        <button
+          onClick={handleTest}
+          disabled={testing}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm hover:bg-accent disabled:opacity-50"
+        >
+          {testing ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />} Test connexion
         </button>
+        {server.default_account && (
+          <span className="text-xs text-muted-foreground ml-2">
+            Compte par défaut : <span className="font-mono">{server.default_account.username}</span>
+          </span>
+        )}
+        {testMsg && (
+          <span className={`text-xs ml-2 ${testMsg.ok ? "text-green-700" : "text-red-700"}`}>
+            {testMsg.text}
+          </span>
+        )}
       </div>
 
       {/* Metrics cards */}
@@ -326,6 +389,10 @@ export default function ServerDetail() {
             </dl>
           </div>
         </div>
+      )}
+
+      {isAdmin && (
+        <AccountsSection server={server} onChanged={reloadServer} />
       )}
     </div>
   );

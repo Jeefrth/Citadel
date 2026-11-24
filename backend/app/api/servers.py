@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import get_current_user, require_role
 from app.core.database import get_db
 from app.core.permissions import (
-    ServerGrant, compute_grants, connectable_accounts, node_descendants,
+    ServerGrant, account_auth, compute_grants, connectable_accounts, node_descendants,
     require_server, resolve_for_user, ADMIN_GRANT,
 )
 from app.core.security import encrypt_value
@@ -31,17 +31,6 @@ router = APIRouter()
 
 
 # ── Helpers ──────────────────────────────────────────────
-
-
-def account_auth(account: Account) -> str:
-    cred = account.credential
-    if account.use_cert or (cred is not None and cred.type == CredentialType.EPHEMERAL_CERT):
-        return "cert"
-    if cred is None:
-        return "none"
-    if cred.encrypted_ssh_key:
-        return "ssh_key"
-    return "password"
 
 
 def account_read(account: Account) -> AccountRead:
@@ -354,8 +343,17 @@ async def update_account(
     changes = data.model_dump(exclude_unset=True)
     if "credential_id" in changes:
         await _check_credential(db, changes["credential_id"])
+    new_name = changes.get("username")
+    if new_name and new_name != account.username:
+        clash = (await db.execute(select(Account.id).where(
+            Account.server_id == server_id, Account.username == new_name, Account.id != account_id,
+        ))).first()
+        if clash:
+            raise HTTPException(status_code=409, detail="An account with this username already exists on this server")
     for field, value in changes.items():
         setattr(account, field, value)
+    if changes.get("is_active") is False:
+        account.is_default = False  # an inactive account cannot drive automation
     if not account.use_cert and not account.credential_id:
         raise HTTPException(status_code=400, detail="Choose a credential or the ephemeral certificate")
     if changes.get("is_default"):
@@ -394,8 +392,10 @@ async def list_connectable_accounts(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Accounts (real and virtual) the current user may connect with."""
-    server, grant = await require_server(db, user, server_id, PolicyAction.CONNECT.value)
+    """Accounts (real and virtual) the current user may use (needs connect or execute)."""
+    server, grant = await require_server(db, user, server_id)
+    if not grant.actions & {PolicyAction.CONNECT.value, PolicyAction.EXECUTE.value}:
+        raise HTTPException(status_code=403, detail="Neither 'connect' nor 'execute' granted on this server")
     return connectable_accounts(server, grant)
 
 

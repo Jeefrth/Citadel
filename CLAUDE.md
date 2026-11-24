@@ -45,6 +45,7 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **Sprint PAM-1** (11/2026, inspiré de JumpServer, réimplémenté) : règles d'accès (C1), comptes par serveur (B1), comptes virtuels @ALL/@USER/@INPUT (B9), arborescence de nœuds (A1), étiquettes (A2), favoris (A5), clés API personnelles (F4), tickets RDP à usage unique
 
 ## Conventions
 
@@ -66,30 +67,35 @@ backend/
 ├── app/
 │   ├── main.py              # FastAPI app, middleware stack, registration des routers
 │   ├── api/                 # Routers REST (auth, servers, commands, updates, monitoring,
-│   │                        #               sessions, users, ca, admin)
-│   ├── models/              # Entités SQLAlchemy (User, Server, ServerGroup, Credential,
-│   │                        #                     AuditLog, UpdateJob, ServerMetric,
-│   │                        #                     AlertRule, SessionRecording, AppSetting)
+│   │                        #               sessions, users, ca, admin, pam)
+│   ├── models/              # Entités SQLAlchemy (User, Server, Credential, AuditLog,
+│   │                        #   UpdateJob, ServerMetric, AlertRule, SessionRecording,
+│   │                        #   AppSetting) + pam.py (Node, Account, UserGroup,
+│   │                        #   AccessPolicy, UserFavorite, AccessKey)
 │   ├── schemas/             # Pydantic request/response
-│   ├── services/            # Business logic (ssh_service, winrm_service,
+│   ├── services/            # Business logic (ssh_service, winrm_service, tickets (Redis),
 │   │                        #                 monitoring_service, update_service,
 │   │                        #                 ca_service, settings_service,
 │   │                        #                 connection_manager)
-│   ├── core/                # config, database, auth (JWT/JWKS), security (AES-256-GCM),
+│   ├── core/                # config, database, auth (JWT/JWKS + clés ctk_), security (AES-256-GCM),
+│   │                        # permissions (évaluation des règles d'accès, résolution des comptes),
 │   │                        # middleware (security headers, rate limit, logging),
 │   │                        # command_filter (regex blocklist)
 │   └── websocket/           # terminal (SSH WebSocket + recorder), rdp (Guacamole),
 │                            # session_manager
 ├── alembic/versions/        # Migrations DB (initial, ephemeral cert, recordings,
 │                            # cert auth fields, validity_minutes, app_settings,
-│                            # email unique constraint)
+│                            # email unique constraint, pam_core)
 ├── tests/
 └── requirements.txt
 ```
 
 **Endpoints principaux** :
 - `/api/auth/me` — utilisateur courant (JWT)
-- `/api/servers` — CRUD serveurs, groupes, credentials
+- `/api/servers` — CRUD serveurs (filtres node/label/q/favoris), comptes, favoris, credentials
+- `/api/servers/{id}/connectable-accounts`, `/connect-ticket` — choix du compte, ticket RDP 60 s
+- `/api/nodes`, `/api/user-groups`, `/api/access-policies` — administration PAM
+- `/api/me/access`, `/api/users/{id}/access` — accès effectifs ; `/api/access-keys` — clés API
 - `/api/servers/{id}/test`, `/execute`, `/system-info` — connectivité
 - `/api/servers/{id}/updates/scan|apply` + `/api/servers/updates/jobs` — patch management
 - `/api/monitoring/*` — métriques + alertes + dashboard
@@ -101,7 +107,7 @@ backend/
 
 **Middleware stack (ordre d'exécution)** : SecurityHeaders → RequestLogging → RateLimit (200 req/min) → CORS
 
-**Énumérations clés** : UserRole (admin/operator/viewer), OSType, CredentialType (ssh_password / ssh_key / winrm / ephemeral_cert), ServerStatus, JobStatus
+**Énumérations clés** : UserRole (admin/operator/viewer), OSType, CredentialType (ssh_password / ssh_key / winrm / ephemeral_cert), ServerStatus, JobStatus, PolicyAction (connect / execute / copy / paste)
 
 ### Frontend (`frontend/`)
 
@@ -126,7 +132,7 @@ frontend/
 
 ### Docker (`docker-compose.yml`)
 
-Services dev : `db` (Postgres 16, 5432), `redis` (7, 6379), `backend` (FastAPI, 8000), `guacd` (Guacamole, 4822), `frontend` (Vite, 5173). Prod : `docker-compose.prod.yml` avec nginx en reverse proxy, pas d'exposition DB/Redis.
+Services dev : `db` (Postgres 16, 5432), `redis` (7, 6379), `backend` (FastAPI, port hôte `BACKEND_PORT`, 8000 par défaut ; 8010 sur le Mac de JF car 8000 est pris par un serveur LLM local), `guacd` (Guacamole, 4822), `frontend` (Vite, 5173, proxy vers `backend:8000`). Clé de la CA montée depuis `./data/ca`. Prod : `docker-compose.prod.yml` avec nginx en reverse proxy, pas d'exposition DB/Redis.
 
 ### Décisions architecturales clés
 
@@ -135,9 +141,12 @@ Services dev : `db` (Postgres 16, 5432), `redis` (7, 6379), `backend` (FastAPI, 
 3. **MFA par session terminal** : popup Entra forcé avant chaque ouverture WebSocket.
 4. **Chiffrement credentials** : AES-256-GCM + nonce, clé `CREDENTIAL_ENCRYPTION_KEY` dans `.env`.
 5. **Command filter** : blocklist regex (rm -rf, mkfs, dd, fork bomb, shutdown, curl|sh…).
-6. **RBAC** : 3 rôles (admin / operator / viewer) vérifiés via claims JWT.
+6. **RBAC + règles d'accès** : 3 rôles (admin / operator / viewer). L'admin voit tout ; les autres ne voient que les serveurs accordés par une `AccessPolicy` (utilisateurs ou groupes × serveurs, nœuds avec sous-nœuds ou étiquettes × comptes × actions, fenêtre de validité). Le rôle sert de plafond (viewer : jamais `execute`). Un serveur invisible renvoie 404.
 7. **Async** : FastAPI + asyncio + asyncssh + asyncpg pour haute concurrence.
 8. **Timeout terminal** : 30 minutes d'inactivité.
+9. **Comptes** : un serveur a N comptes (`Account`) dont un « par défaut » utilisé par l'automatisation (monitoring, mises à jour, commandes). Secret = `Credential` référencé ou certificat éphémère. Comptes virtuels dans les règles : `@ALL`, `@USER` (partie locale de l'UPN + certificat), `@INPUT` (saisi à la connexion, jamais stocké).
+10. **RDP par ticket** : `POST /connect-ticket` contrôle les droits et résout le compte, puis le WebSocket n'accepte qu'un ticket Redis à usage unique (60 s). Aucun jeton ni mot de passe dans les URL (uvicorn journalise les query strings).
+11. **Clés API** : `ctk_<prefix>_<secret>`, seul le SHA-256 est stocké, héritent des droits de l'utilisateur, ne peuvent pas créer d'autres clés.
 
 ## Commandes utiles
 
@@ -157,8 +166,11 @@ cd backend && .venv/bin/python -m alembic upgrade head
 python3 -c "from cryptography.hazmat.primitives.ciphers.aead import AESGCM; import base64; print(base64.b64encode(AESGCM.generate_key(bit_length=256)).decode())"
 
 # Clé publique CA (pour setup serveurs)
-curl http://localhost:8000/api/ca/public-key
+curl http://localhost:8010/api/ca/public-key   # BACKEND_PORT
 
 # Health check
-curl http://localhost:8000/api/health
+curl http://localhost:8010/api/health
+
+# Tests backend
+docker compose exec -T backend python -m pytest -q
 ```

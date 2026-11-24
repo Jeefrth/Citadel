@@ -10,7 +10,7 @@ from app.core.permissions import (
     ADMIN_GRANT, ServerGrant, _label_matches, _role_ceiling, connectable_accounts,
     node_descendants, resolve_for_user, user_login_name,
 )
-from app.models.base import CredentialType, UserRole
+from app.models.base import CredentialType, OSType, UserRole
 
 
 def _cred(**kw):
@@ -25,8 +25,8 @@ def _acc(username, cred=None, use_cert=False, is_default=False, active=True):
                            is_default=is_default, is_active=active, privileged=False)
 
 
-def _server(*accounts):
-    return SimpleNamespace(accounts=list(accounts))
+def _server(*accounts, os_type=OSType.LINUX):
+    return SimpleNamespace(accounts=list(accounts), os_type=os_type)
 
 
 USER = SimpleNamespace(email="Jean.Dupont@example.test", role=UserRole.OPERATOR)
@@ -119,3 +119,11 @@ def test_connectable_accounts_lists_real_and_virtual():
     names = [a["username"] for a in connectable_accounts(_server(root, jf), grant)]
     assert names == ["jf", "@INPUT"]
     assert {a["username"] for a in connectable_accounts(_server(root, jf), ADMIN_GRANT)} == {"root", "jf", "@USER", "@INPUT"}
+
+
+def test_connectable_accounts_on_windows_only_offers_passwords():
+    admin_pw = _acc("Administrator", _cred(), is_default=True)
+    keyed = _acc("svc", _cred(encrypted_password=None, encrypted_ssh_key=b"k"))
+    cert = _acc("jf", use_cert=True)
+    items = connectable_accounts(_server(admin_pw, keyed, cert, os_type=OSType.WINDOWS), ADMIN_GRANT)
+    assert [(a["username"], a["auth"]) for a in items] == [("Administrator", "password"), ("@INPUT", "password")]

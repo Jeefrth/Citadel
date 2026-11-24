@@ -9,7 +9,6 @@ import {
   Activity,
   AlertTriangle,
   Wifi,
-  WifiOff,
   HelpCircle,
   RefreshCw,
   Loader2,
@@ -118,10 +117,10 @@ export default function Dashboard() {
         <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Serveurs", icon: Server, color: "text-blue-500", value: "—" },
-            { label: "En ligne", icon: Wifi, color: "text-green-500", value: "—" },
-            { label: "Alertes", icon: AlertTriangle, color: "text-amber-500", value: "—" },
-            { label: "CPU moyen", icon: Cpu, color: "text-purple-500", value: "—" },
+            { label: "Serveurs", icon: Server, color: "text-blue-500", value: "-" },
+            { label: "En ligne", icon: Wifi, color: "text-green-500", value: "-" },
+            { label: "Alertes", icon: AlertTriangle, color: "text-amber-500", value: "-" },
+            { label: "CPU moyen", icon: Cpu, color: "text-purple-500", value: "-" },
           ].map(({ label, icon: Icon, color, value }) => (
             <div key={label} className="bg-card border rounded-lg p-5 flex items-center gap-4">
               <Icon size={22} className={color} />

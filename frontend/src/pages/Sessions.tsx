@@ -187,7 +187,7 @@ function SessionPlayer({
             <div>
               <p className="font-semibold text-sm">{session.server_name}</p>
               <p className="text-xs text-muted-foreground">
-                {session.user_name} —{" "}
+                {session.user_name} ·{" "}
                 {new Date(session.started_at).toLocaleString("fr-FR")}
               </p>
             </div>

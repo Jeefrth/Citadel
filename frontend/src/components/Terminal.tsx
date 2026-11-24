@@ -3,12 +3,14 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import type { ConnectionChoice } from "@/services/types";
 
 interface TerminalProps {
   serverId: string;
   serverName: string;
   getToken: () => Promise<string>;
   certDuration?: number; // minutes, passed to backend for cert signing
+  connection?: ConnectionChoice; // account picked before connecting (default account otherwise)
   wsBaseUrl?: string;
   onDisconnected?: () => void;
 }
@@ -18,6 +20,7 @@ export default function Terminal({
   serverName,
   getToken,
   certDuration,
+  connection,
   wsBaseUrl,
   onDisconnected,
 }: TerminalProps) {
@@ -96,6 +99,15 @@ export default function Terminal({
       };
       if (certDuration) {
         authMsg.cert_duration = certDuration;
+      }
+      if (connection?.account_id) {
+        authMsg.account_id = connection.account_id;
+      } else if (connection?.virtual_account) {
+        authMsg.virtual_account = connection.virtual_account;
+        if (connection.virtual_account === "@INPUT") {
+          authMsg.input_username = connection.input_username;
+          authMsg.input_password = connection.input_password;
+        }
       }
       ws.send(JSON.stringify(authMsg));
     };
@@ -178,7 +190,7 @@ export default function Terminal({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [serverId, serverName, getToken, wsBaseUrl, onDisconnected]);
+  }, [serverId, serverName, getToken, certDuration, connection, wsBaseUrl, onDisconnected]);
 
   useEffect(() => {
     const cleanup = connect();

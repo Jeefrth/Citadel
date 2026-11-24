@@ -1,29 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "@/services/authConfig";
 import { api } from "@/services/api";
+import { hasAction, type ConnectionChoice, type ServerData } from "@/services/types";
 import Terminal from "@/components/Terminal";
 import RdpViewer from "@/components/RdpViewer";
+import ConnectDialog from "@/components/ConnectDialog";
 import {
   Terminal as TerminalIcon,
   Plus,
   X,
   Server,
   Monitor,
-  Loader2,
 } from "lucide-react";
-
-interface ServerData {
-  id: string;
-  name: string;
-  hostname: string;
-  ip_address: string;
-  os_type: "linux" | "windows";
-  status: string;
-  credential_id: string | null;
-  cert_auth_enabled: boolean;
-  ssh_username: string | null;
-}
 
 interface Tab {
   id: string;
@@ -31,6 +21,7 @@ interface Tab {
   serverName: string;
   protocol: "ssh" | "rdp";
   certDuration?: number;
+  connection: ConnectionChoice;
   osType: string;
   connected: boolean;
 }
@@ -39,22 +30,30 @@ let tabCounter = 0;
 
 export default function TerminalPage() {
   const { instance, accounts } = useMsal();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [servers, setServers] = useState<ServerData[]>([]);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [showServerPicker, setShowServerPicker] = useState(false);
 
-  // MFA confirmation before terminal
+  // Account choice + MFA confirmation before opening a session
   const [pendingServer, setPendingServer] = useState<ServerData | null>(null);
-  const [certDuration, setCertDuration] = useState(480);
-  const [mfaLoading, setMfaLoading] = useState(false);
-  const [mfaError, setMfaError] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .get<ServerData[]>("/api/servers/")
-      .then(setServers)
+      .then((list) => {
+        setServers(list);
+        // Deep link from the Servers / ServerDetail pages: /terminal?server=<id>
+        const wanted = searchParams.get("server");
+        if (wanted) {
+          const srv = list.find((s) => s.id === wanted);
+          if (srv && hasAction(srv, "connect")) setPendingServer(srv);
+          setSearchParams({}, { replace: true });
+        }
+      })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const getToken = useCallback(async (): Promise<string> => {
@@ -69,62 +68,37 @@ export default function TerminalPage() {
 
   const requestTerminal = (srv: ServerData) => {
     setPendingServer(srv);
-    setCertDuration(480); // default 8h
-    setMfaError(null);
     setShowServerPicker(false);
   };
 
-  const confirmMfaAndOpen = async () => {
+  // Called by ConnectDialog; throwing keeps the dialog open with the error shown
+  const confirmMfaAndOpen = async (connection: ConnectionChoice, certDuration?: number) => {
     if (!pendingServer) return;
     const account = accounts[0];
-    if (!account) return;
+    if (!account) throw new Error("Not authenticated");
 
-    setMfaLoading(true);
-    setMfaError(null);
+    // Force full re-auth via popup -> triggers MFA (Conditional Access)
+    await instance.acquireTokenPopup({
+      ...loginRequest,
+      account,
+      prompt: "login",
+    });
 
-    try {
-      // Force full re-auth via popup → triggers MFA (Conditional Access)
-      await instance.acquireTokenPopup({
-        ...loginRequest,
-        account,
-        prompt: "login",
-      });
-
-      // MFA passed — open the terminal
-      const id = `tab-${++tabCounter}`;
-      const needsCert = pendingServer.cert_auth_enabled && !pendingServer.credential_id;
-      const tab: Tab = {
-        id,
-        serverId: pendingServer.id,
-        serverName: pendingServer.name,
-        protocol: pendingServer.os_type === "windows" ? "rdp" : "ssh",
-        osType: pendingServer.os_type,
-        certDuration: needsCert ? certDuration : undefined,
-        connected: true,
-      };
-      setTabs((prev) => [...prev, tab]);
-      setActiveTab(id);
-      setPendingServer(null);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "MFA failed";
-      setMfaError(msg);
-    } finally {
-      setMfaLoading(false);
-    }
-  };
-
-  const openTab = (srv: ServerData) => {
+    // MFA passed: open the session
     const id = `tab-${++tabCounter}`;
     const tab: Tab = {
       id,
-      serverId: srv.id,
-      serverName: srv.name,
-      osType: srv.os_type,
+      serverId: pendingServer.id,
+      serverName: `${pendingServer.name} (${connection.label})`,
+      protocol: pendingServer.os_type === "windows" ? "rdp" : "ssh",
+      osType: pendingServer.os_type,
+      certDuration,
+      connection,
       connected: true,
     };
     setTabs((prev) => [...prev, tab]);
     setActiveTab(id);
-    setShowServerPicker(false);
+    setPendingServer(null);
   };
 
   const closeTab = (tabId: string) => {
@@ -143,12 +117,9 @@ export default function TerminalPage() {
     );
   };
 
-  const linuxServers = servers.filter(
-    (s) => s.os_type === "linux" && (s.credential_id || s.cert_auth_enabled)
-  );
-  const windowsServers = servers.filter(
-    (s) => s.os_type === "windows" && s.credential_id
-  );
+  // Only servers on which the user holds the "connect" action
+  const linuxServers = servers.filter((s) => s.os_type === "linux" && hasAction(s, "connect"));
+  const windowsServers = servers.filter((s) => s.os_type === "windows" && hasAction(s, "connect"));
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -212,8 +183,7 @@ export default function TerminalPage() {
             </button>
             {servers.length === 0 && (
               <p className="text-xs text-muted-foreground mt-4">
-                Ajoutez d'abord des serveurs avec des credentials dans la
-                section Serveurs.
+                Aucun serveur accessible. Demandez un accès à un administrateur.
               </p>
             )}
           </div>
@@ -230,7 +200,7 @@ export default function TerminalPage() {
               <RdpViewer
                 serverId={tab.serverId}
                 serverName={tab.serverName}
-                getToken={getToken}
+                connection={tab.connection}
                 onDisconnected={() => handleDisconnected(tab.id)}
               />
             ) : (
@@ -239,6 +209,7 @@ export default function TerminalPage() {
                 serverName={tab.serverName}
                 getToken={getToken}
                 certDuration={tab.certDuration}
+                connection={tab.connection}
                 onDisconnected={() => handleDisconnected(tab.id)}
               />
             )}
@@ -259,7 +230,7 @@ export default function TerminalPage() {
             <div className="p-4 space-y-4 max-h-96 overflow-auto">
               {linuxServers.length === 0 && windowsServers.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  Aucun serveur avec credential configuré.
+                  Aucun serveur sur lequel vous pouvez vous connecter.
                 </p>
               )}
 
@@ -279,7 +250,7 @@ export default function TerminalPage() {
                         <div>
                           <p className="font-medium">{srv.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {srv.ip_address} — {srv.hostname}
+                            {srv.ip_address} · {srv.node_path || srv.hostname}
                           </p>
                         </div>
                       </button>
@@ -304,7 +275,7 @@ export default function TerminalPage() {
                         <div>
                           <p className="font-medium">{srv.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {srv.ip_address} — {srv.hostname}
+                            {srv.ip_address} · {srv.node_path || srv.hostname}
                           </p>
                         </div>
                         <span className="ml-auto text-xs text-blue-500 font-medium">
@@ -320,75 +291,13 @@ export default function TerminalPage() {
         </div>
       )}
 
-      {/* MFA confirmation modal */}
+      {/* Account choice + MFA confirmation */}
       {pendingServer && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card border rounded-lg shadow-lg w-full max-w-sm mx-4 p-6">
-            <div className="text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
-                <Server size={24} className="text-amber-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-lg">Vérification d'identité</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  L'ouverture d'un terminal vers <strong>{pendingServer.name}</strong> nécessite
-                  une authentification renforcée.
-                </p>
-              </div>
-
-              {/* Duration picker for cert-enabled servers */}
-              {pendingServer.cert_auth_enabled && !pendingServer.credential_id && (
-                <div>
-                  <label className="block text-sm font-medium mb-1">Durée de la session</label>
-                  <select
-                    value={certDuration}
-                    onChange={(e) => setCertDuration(parseInt(e.target.value))}
-                    className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value={5}>5 minutes</option>
-                    <option value={15}>15 minutes</option>
-                    <option value={30}>30 minutes</option>
-                    <option value={60}>1 heure</option>
-                    <option value={120}>2 heures</option>
-                    <option value={240}>4 heures</option>
-                    <option value={480}>8 heures</option>
-                    <option value={720}>12 heures</option>
-                    <option value={1440}>24 heures</option>
-                  </select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Un certificat SSH sera généré pour cette durée.
-                  </p>
-                </div>
-              )}
-
-              {mfaError && (
-                <div className="p-2 rounded bg-red-50 text-red-700 text-sm">
-                  {mfaError}
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPendingServer(null)}
-                  className="flex-1 px-4 py-2 rounded-md border text-sm hover:bg-accent"
-                >
-                  Annuler
-                </button>
-                <button
-                  onClick={confirmMfaAndOpen}
-                  disabled={mfaLoading}
-                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {mfaLoading ? (
-                    <Loader2 size={16} className="animate-spin mx-auto" />
-                  ) : (
-                    "Confirmer (MFA)"
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConnectDialog
+          server={pendingServer}
+          onCancel={() => setPendingServer(null)}
+          onConfirm={confirmMfaAndOpen}
+        />
       )}
     </div>
   );

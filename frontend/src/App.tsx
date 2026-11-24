@@ -16,6 +16,8 @@ import Audit from "@/pages/Audit";
 import ServerDetail from "@/pages/ServerDetail";
 import Sessions from "@/pages/Sessions";
 import SettingsPage from "@/pages/Settings";
+import Access from "@/pages/Access";
+import MyAccount from "@/pages/MyAccount";
 
 // DEV MODE: bypass Entra ID auth for local testing
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
@@ -26,12 +28,14 @@ function AppRoutes() {
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/servers" element={<Servers />} />
-            <Route path="/servers/:serverId" element={<ServerDetail />} />
+        <Route path="/servers/:serverId" element={<ServerDetail />} />
         <Route path="/terminal" element={<TerminalPage />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/updates" element={<Updates />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/access" element={<Access />} />
+        <Route path="/account" element={<MyAccount />} />
       </Route>
     </Routes>
   );

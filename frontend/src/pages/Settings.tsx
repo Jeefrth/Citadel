@@ -549,7 +549,7 @@ sudo systemctl restart sshd`}
                   {users.map((u) => (
                     <tr key={u.id} className="border-b">
                       <td className="p-3 font-medium">{u.display_name}</td>
-                      <td className="p-3 text-muted-foreground text-xs">{u.email || "—"}</td>
+                      <td className="p-3 text-muted-foreground text-xs">{u.email || "-"}</td>
                       <td className="p-3">
                         <select
                           value={u.role}

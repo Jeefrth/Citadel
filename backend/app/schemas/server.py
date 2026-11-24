@@ -78,6 +78,7 @@ class ConnectableAccount(BaseModel):
     privileged: bool
     is_default: bool
     virtual: str | None
+    auth: str  # "password" | "ssh_key" | "cert"
 
 
 class ConnectTicketRequest(BaseModel):

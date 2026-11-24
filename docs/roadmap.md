@@ -6,6 +6,28 @@
 - **Sprint A** : session recording (replay xterm.js).
 - **Sprint B** : Mini-CA Ed25519, certificats SSH éphémères.
 - **Sprint C** : MFA par session, command filter, timeout 30 min, CA persistante.
+- **Sprint PAM-1** (11/2026) : règles d'accès, comptes par serveur, comptes virtuels, arborescence de nœuds, étiquettes, favoris, clés API, tickets RDP.
+
+## Fonctionnalités inspirées de JumpServer
+
+Analyse du 24/11/2026 de `jumpserver/jumpserver` (v5.2.1). JumpServer est sous **GPLv3** et Citadel sous MIT : on reprend des idées de fonctionnalités, jamais du code.
+
+| Lot | Contenu | Statut |
+|-----|---------|--------|
+| 1. Socle PAM | C1 règles d'accès, B1 comptes par actif, B9 comptes virtuels, A1 nœuds, A2 étiquettes, A5 favoris, F4 clés API | ✅ Sprint PAM-1 |
+| 2. Secrets | B10 coffre externe (= D1), B3 rotation automatique, B5 collecte des comptes, B6 vérification des comptes | À choisir |
+| 3. Gouvernance | C3 ACL de connexion (IP, horaires), C5 ACL de commandes (refuser / alerter / valider), G1 demandes d'accès, G2 validation (= D2), G4 notifications | À choisir |
+| 4. Audit | D2 enregistrement RDP, D3 journal des commandes indexé, D4 supervision en direct, D5 coupure de session, D8 stockage externe, D9 SIEM (= E1) | À choisir |
+| 5. Opérations | E1 SFTP web, E2 commandes multi-serveurs, E3 playbooks Ansible, A4 passerelles et zones, A8 synchro cloud | À choisir |
+| Écartés pour l'instant | A9 à A11 (bases, Kubernetes, web), A14 RemoteApp, C7 masquage SQL, C9 multi-organisations, H2 haute dispo | Plus tard |
+
+### Points relevés pendant PAM-1
+
+- `auth.py` : le repli de validation sans vérification de l'émetteur reste à remplacer par une liste explicite des deux émetteurs du tenant (v1 `sts.windows.net/<tenant>/`, v2 `login.microsoftonline.com/<tenant>/v2.0`). À traiter avec D1.
+- `main.py` : CORS `allow_origin_regex=".*"` avec `allow_credentials=True` accepte n'importe quelle origine. À restreindre aux origines configurées.
+- Monitoring et mises à jour ne savent pas encore utiliser un compte en certificat éphémère (mot de passe ou clé requis).
+- `docker-compose.prod.yml` n'a pas de service `guacd` : le RDP ne fonctionne pas en prod.
+- Suppression d'un serveur : les enregistrements de session et les règles d'alerte qui le référencent bloquent la suppression (clés étrangères sans cascade).
 
 ## Priorité : axe sécurité
 
