@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 import uuid
 import socket
@@ -24,7 +25,7 @@ from app.models.server import Server
 from app.core.config import settings
 from app.models.session_recording import SessionRecording
 from app.models.user import User
-from app.services import live, recording_storage
+from app.services import live, recording_storage, routing
 from app.services.tickets import consume_ticket
 from app.models.audit import AuditLog
 
@@ -229,6 +230,16 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
                                 client_ip=ip, events=None))
         await db.commit()
 
+    # Through the zone's gateway if any: local forward reachable by the guacd container
+    route_stack = AsyncExitStack()
+    try:
+        await route_stack.enter_async_context(routing.via(server))
+        rdp_host, rdp_port = await routing.tcp_endpoint(rdp_host, rdp_port, for_other_container=True)
+    except Exception as e:
+        await route_stack.aclose()
+        await websocket.close(code=4005, reason=f"Gateway unreachable: {e}"[:120])
+        return
+
     # Connect to guacd
     try:
         sock = await asyncio.get_event_loop().run_in_executor(
@@ -240,6 +251,7 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
         sock, guac_conn_id = sock
     except Exception as e:
         logger.error("guacd connection failed: %s", e)
+        await route_stack.aclose()
         await websocket.close(code=4005, reason=f"RDP connection failed: {e}")
         return
 
@@ -360,6 +372,7 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
             await live.unregister(sid)
         except Exception:  # noqa: BLE001
             pass
+        await route_stack.aclose()
         await _store_rdp_recording(sid, user_id, srv_id, started, terminated)
 
 

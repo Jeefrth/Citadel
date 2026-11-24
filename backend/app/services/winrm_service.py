@@ -66,6 +66,8 @@ async def test_connection(
 ) -> tuple[bool, str]:
     """Test WinRM connectivity. Returns (success, message)."""
     try:
+        from app.services import routing
+        host, port = await routing.tcp_endpoint(host, port)
         session = _create_session(host, port, username, password)
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
@@ -93,6 +95,8 @@ async def execute_command(
     timeout: int = 30,
 ) -> CommandResult:
     """Execute a PowerShell command over WinRM and return the result."""
+    from app.services import routing
+    host, port = await routing.tcp_endpoint(host, port)
     session = _create_session(host, port, username, password)
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
@@ -126,6 +130,8 @@ $info = @{
 }
 $info | ConvertTo-Json
 """
+    from app.services import routing
+    host, port = await routing.tcp_endpoint(host, port)
     session = _create_session(host, port, username, password)
     loop = asyncio.get_event_loop()
     result = await asyncio.wait_for(

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permissions import ResolvedAccount
 from app.models.server import Server
 from app.models.base import OSType, ServerStatus
-from app.services import ssh_service, winrm_service
+from app.services import routing, ssh_service, winrm_service
 
 
 @dataclass
@@ -89,12 +89,13 @@ async def test_connection(
     port = _get_port(server)
 
     start = asyncio.get_event_loop().time()
-    success, message = await service.test_connection(
-        host=server.ip_address,
-        port=port,
-        username=account.username,
-        **auth_kwargs,
-    )
+    async with routing.via(server):
+        success, message = await service.test_connection(
+            host=server.ip_address,
+            port=port,
+            username=account.username,
+            **auth_kwargs,
+        )
     elapsed = (asyncio.get_event_loop().time() - start) * 1000
 
     server.status = ServerStatus.ONLINE if success else ServerStatus.OFFLINE
@@ -115,25 +116,27 @@ async def execute_command(
     server: Server, account: ResolvedAccount, command: str, timeout: int = 30
 ) -> CommandResult:
     """Execute a command on a remote server with the given account."""
-    result = await _get_service(server).execute_command(
-        host=server.ip_address,
-        port=_get_port(server),
-        username=account.username,
-        command=command,
-        timeout=timeout,
-        **_auth_kwargs(server, account),
-    )
+    async with routing.via(server):
+        result = await _get_service(server).execute_command(
+            host=server.ip_address,
+            port=_get_port(server),
+            username=account.username,
+            command=command,
+            timeout=timeout,
+            **_auth_kwargs(server, account),
+        )
     return CommandResult(exit_code=result.exit_code, stdout=result.stdout, stderr=result.stderr)
 
 
 async def get_system_info(server: Server, account: ResolvedAccount) -> SystemInfo:
     """Get system information from a remote server."""
-    info = await _get_service(server).get_system_info(
-        host=server.ip_address,
-        port=_get_port(server),
-        username=account.username,
-        **_auth_kwargs(server, account),
-    )
+    async with routing.via(server):
+        info = await _get_service(server).get_system_info(
+            host=server.ip_address,
+            port=_get_port(server),
+            username=account.username,
+            **_auth_kwargs(server, account),
+        )
     return SystemInfo(
         hostname=info.hostname,
         os=info.os,

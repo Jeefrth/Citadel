@@ -35,3 +35,8 @@ httpx==0.28.1
 
 # Recording storage (S3-compatible)
 minio==7.2.18
+
+# File upload (SFTP transfers)
+python-multipart==0.0.33
+# Playbooks (lot 5)
+ansible-core==2.20.11

@@ -72,6 +72,11 @@ class SessionManager:
         else:
             raise ValueError("No password, SSH key, or ephemeral cert configured")
 
+        from app.services import routing
+        tunnel = await routing.tunnel_for(host)
+        if tunnel is not None:
+            connect_kwargs["tunnel"] = tunnel  # jump through the zone's gateway
+
         try:
             conn = await asyncio.wait_for(asyncssh.connect(**connect_kwargs), timeout=10)
         finally:

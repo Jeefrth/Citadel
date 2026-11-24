@@ -25,6 +25,8 @@ class PolicyAction(str, enum.Enum):
     EXECUTE = "execute"   # one-shot commands, update apply
     COPY = "copy"         # RDP clipboard: remote -> local
     PASTE = "paste"       # RDP clipboard: local -> remote
+    UPLOAD = "upload"     # file transfer to the server (SFTP)
+    DOWNLOAD = "download" # file transfer from the server (SFTP)
 
 
 # Virtual account aliases usable in AccessPolicy.accounts (B9)

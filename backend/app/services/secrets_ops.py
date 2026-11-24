@@ -29,7 +29,7 @@ from app.models.base import CredentialType, OSType
 from app.models.credential import Credential
 from app.models.pam import Account, DiscoveredAccount, SecretHistory, SecretStatus
 from app.models.server import Server
-from app.services import ssh_service, winrm_service
+from app.services import routing, ssh_service, winrm_service
 
 logger = logging.getLogger("citadel.secrets")
 
@@ -77,6 +77,11 @@ def _auth_kwargs(server: Server, acc: ResolvedAccount) -> dict:
 
 
 async def _test_login(server: Server, acc: ResolvedAccount) -> tuple[bool, str]:
+    async with routing.via(server):
+        return await _test_login_direct(server, acc)
+
+
+async def _test_login_direct(server: Server, acc: ResolvedAccount) -> tuple[bool, str]:
     if server.os_type == OSType.LINUX:
         return await ssh_service.test_connection(
             host=server.ip_address, port=server.ssh_port, username=acc.username, **_auth_kwargs(server, acc))
@@ -87,6 +92,11 @@ async def _test_login(server: Server, acc: ResolvedAccount) -> tuple[bool, str]:
 
 
 async def _run(server: Server, executor: ResolvedAccount, command: str, stdin: str | None = None, timeout: int = 60):
+    async with routing.via(server):
+        return await _run_direct(server, executor, command, stdin, timeout)
+
+
+async def _run_direct(server: Server, executor: ResolvedAccount, command: str, stdin: str | None, timeout: int):
     if server.os_type == OSType.LINUX:
         return await ssh_service.execute_command(
             host=server.ip_address, port=server.ssh_port, username=executor.username,

@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import time
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -17,7 +18,7 @@ from app.models.server import Server
 from app.models.user import User
 from sqlalchemy import select
 
-from app.services import live, recording_storage
+from app.services import live, recording_storage, routing
 from app.services.command_log import log_command
 from app.services.enforcement import GovernanceDenied, check_command, enforce_connect
 from app.websocket.line_tracker import KILL_LINE, LineTracker
@@ -74,6 +75,7 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
     - Server sends JSON: {"type": "disconnected"}
     """
     await websocket.accept()
+    route_stack = AsyncExitStack()
 
     # Step 1: Authenticate (longer timeout for forceRefresh token acquisition)
     try:
@@ -161,6 +163,8 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         cert_minutes = requested_duration or account.cert_minutes or 480
 
         try:
+            # Through the zone's gateway if any; kept open for the whole session
+            await route_stack.enter_async_context(routing.via(server))
             session = await session_manager.create_ssh_session(
                 server_id=str(server.id),
                 user_id=str(user.id),
@@ -175,6 +179,7 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
                 rows=rows,
             )
         except Exception as e:
+            await route_stack.aclose()
             await websocket.send_json({"type": "error", "message": f"Connection failed: {e}"})
             await websocket.close()
             return
@@ -415,6 +420,7 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             t.cancel()
 
         await session_manager.close(session.session_id)
+        await route_stack.aclose()
 
         try:
             await live.unregister(sid)

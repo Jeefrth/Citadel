@@ -25,6 +25,7 @@ class ServerCreate(BaseModel):
     rdp_port: int = 3389
     tags: dict[str, str] | None = None
     node_id: uuid.UUID | None = None
+    zone_id: uuid.UUID | None = None
     default_account: DefaultAccountInput | None = None
 
 
@@ -39,6 +40,7 @@ class ServerUpdate(BaseModel):
     rdp_port: int | None = None
     tags: dict[str, str] | None = None
     node_id: uuid.UUID | None = None
+    zone_id: uuid.UUID | None = None
 
 
 class AccountSummary(BaseModel):
@@ -64,6 +66,10 @@ class ServerRead(BaseModel):
     tags: dict | None
     node_id: uuid.UUID | None
     node_path: str | None = None
+    zone_id: uuid.UUID | None = None
+    zone_name: str | None = None
+    cloud_ref: str | None = None
+    cloud_state: str | None = None
     created_at: datetime
     default_account: AccountSummary | None = None
     accounts_count: int = 0

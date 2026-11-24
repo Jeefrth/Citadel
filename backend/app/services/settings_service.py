@@ -94,6 +94,10 @@ DEFAULTS = {
         "value": "0",
         "description": "Les entrées plus anciennes du journal sont supprimées. 0 : conservation illimitée.",
     },
+    "max_transfer_mb": {
+        "value": "500",
+        "description": "Taille maximale d'un fichier transféré par le navigateur (Mo).",
+    },
     "notify_user_on_monitor": {
         "value": "true",
         "description": "Prévient l'utilisateur quand un administrateur observe sa session.",

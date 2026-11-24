@@ -33,6 +33,16 @@ async def run_cycle() -> dict:
         # 0b. Retention of recordings and command journal (D8)
         stats.update(await apply_retention(db))
 
+        # 0c. Cloud inventory sync (A8)
+        from app.models.operations import CloudAccount
+        from app.services.cloud_sync import sync_account
+        clouds = (await db.execute(select(CloudAccount).where(CloudAccount.is_active.is_(True)))).scalars().all()
+        stats["cloud_synced"] = 0
+        for acc in clouds:
+            if acc.last_sync_at is None or acc.last_sync_at + timedelta(minutes=acc.sync_interval_minutes) <= now:
+                await sync_account(db, acc)
+                stats["cloud_synced"] += 1
+
         # 1. Due rotations
         accounts = (await db.execute(
             select(Account).where(Account.is_active.is_(True), Account.rotation_enabled.is_(True))

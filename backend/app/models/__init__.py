@@ -11,6 +11,7 @@ from app.models.update_job import UpdateJob
 from app.models.metric import ServerMetric, AlertRule
 from app.models.session_recording import SessionRecording
 from app.models.settings import AppSetting
+from app.models.operations import Zone, Gateway, Playbook, Job, JobTarget, CloudAccount
 from app.models.audit_trail import CommandLog, RecordingStorage, SiemTarget
 from app.models.governance import (
     ConnectionRule, CommandRule, ApprovalRequest, Notification, NotificationChannel,
@@ -38,6 +39,12 @@ __all__ = [
     "AppSetting",
     "ConnectionRule",
     "CommandLog",
+    "Zone",
+    "Gateway",
+    "Playbook",
+    "Job",
+    "JobTarget",
+    "CloudAccount",
     "RecordingStorage",
     "SiemTarget",
     "CommandRule",

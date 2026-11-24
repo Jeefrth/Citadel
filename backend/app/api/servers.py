@@ -105,6 +105,10 @@ def to_read(
         tags=server.tags,
         node_id=server.node_id,
         node_path=paths.get(server.node_id) if server.node_id else None,
+        zone_id=server.zone_id,
+        zone_name=server.zone.name if server.zone else None,
+        cloud_ref=server.cloud_ref,
+        cloud_state=server.cloud_state,
         created_at=server.created_at,
         default_account=AccountSummary(
             id=default.id, username=default.username, auth=account_auth(default),

@@ -34,6 +34,8 @@
 - Coffre de secrets (OpenBao) et cycle de vie des comptes : `docs/vault.md`
 - Gouvernance (ACL, validations, notifications) : `docs/governance.md`
 - Audit (enregistrements, journal, direct, SIEM) : `docs/audit.md`
+- Opérations (fichiers, tâches, passerelles, Azure) : `docs/operations.md`
+- Design de l'interface : `docs/design.md`
 - README complet : `README.md`
 
 ## Historique des phases
@@ -48,6 +50,7 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **Sprint PAM-5** (11/2026) : opérations : SFTP web, tâches (commandes, playbooks Ansible), zones et passerelles, import Azure. Voir `docs/operations.md`
 - **Sprint PAM-4** (11/2026) : audit : enregistrement RDP, journal des commandes, sessions en direct (observer, terminer), stockage local/S3/Azure + SHA-256 + rétention, export SIEM. Voir `docs/audit.md`
 - **Sprint PAM-3** (11/2026) : ACL de connexion et de commandes (API + terminal, `websocket/line_tracker.py`), validation à 4 yeux, demandes d'accès, notifications. Voir `docs/governance.md`
 - **Sprint PAM-2** (11/2026) : coffre OpenBao (Transit, CA SSH, AppRole, bootstrap idempotent), migration local → coffre et rotation de clé, rotation des mots de passe, vérification et collecte des comptes, planificateur (verrou Redis). Voir `docs/vault.md`
@@ -159,6 +162,7 @@ Services dev : `guacd` (1.6.0, non publié, enregistre dans `data/recordings/raw
 11. **Clés API** : `ctk_<prefix>_<secret>`, seul le SHA-256 est stocké, héritent des droits de l'utilisateur, ne peuvent pas créer d'autres clés.
 12. **Gouvernance** : point de contrôle unique `services/enforcement.py` (terminal, ticket RDP, execute). Règles ordonnées par priorité, première correspondance gagnante, aucune = autorisé. 4 yeux strict (jamais sa propre demande). IP client via `core/governance.client_ip` (X-Forwarded-For seulement depuis `TRUSTED_PROXIES`).
 13. **Audit** : enregistrements stockés hors base (gzip + SHA-256 vérifié à la relecture, `services/recording_storage.py`), registre des sessions en direct dans Redis (`services/live.py`, pub/sub sortie + contrôle), SIEM par curseur persistant (`services/siem.py`).
+14. **Routage** : `services/routing.py`, `async with routing.via(server)` déclare la route ; `ssh_service._connect` et `session_manager` prennent la passerelle en `tunnel=`, WinRM/RDP/Ansible passent par `tcp_endpoint` (redirection de port). Tout nouvel accès à un serveur doit être entouré de `via(server)`.
 
 ## Commandes utiles
 

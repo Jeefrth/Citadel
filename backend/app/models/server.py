@@ -30,11 +30,20 @@ class Server(UUIDMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Network zone reached through SSH gateways (A4); None = direct
+    zone_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zones.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Cloud inventory link (A8): "azure:<vm resource id>"; cloud_state: present | missing
+    cloud_ref: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True)
+    cloud_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     node_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     node = relationship("Node")
+    zone = relationship("Zone", lazy="selectin")
     accounts = relationship(
         "Account", back_populates="server", cascade="all, delete-orphan",
         lazy="selectin", order_by="Account.username",

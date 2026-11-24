@@ -21,7 +21,7 @@ from app.schemas.monitoring import (
     AlertRuleRead,
     ActiveAlert,
 )
-from app.services import monitoring_service
+from app.services import monitoring_service, routing
 
 router = APIRouter()
 
@@ -44,19 +44,20 @@ async def collect_metrics(
     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
 
     try:
-        if server.os_type == OSType.LINUX:
-            metrics = await monitoring_service.collect_linux_metrics(
-                host=server.ip_address, port=port,
-                username=credential.username,
-                password=credential.password,
-                ssh_key=credential.ssh_key,
-            )
-        else:
-            metrics = await monitoring_service.collect_windows_metrics(
-                host=server.ip_address, port=port,
-                username=credential.username,
-                password=credential.password,
-            )
+        async with routing.via(server):
+            if server.os_type == OSType.LINUX:
+                metrics = await monitoring_service.collect_linux_metrics(
+                    host=server.ip_address, port=port,
+                    username=credential.username,
+                    password=credential.password,
+                    ssh_key=credential.ssh_key,
+                )
+            else:
+                metrics = await monitoring_service.collect_windows_metrics(
+                    host=server.ip_address, port=port,
+                    username=credential.username,
+                    password=credential.password,
+                )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Metrics collection failed: {e}")
 

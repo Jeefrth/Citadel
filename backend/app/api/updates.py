@@ -23,7 +23,7 @@ from app.schemas.update import (
     UpdateJobRead,
     ComplianceEntry,
 )
-from app.services import update_service
+from app.services import routing, update_service
 
 router = APIRouter()
 
@@ -49,19 +49,20 @@ async def scan_updates(
 
     port = server.ssh_port if server.os_type == OSType.LINUX else server.winrm_port
 
-    if server.os_type == OSType.LINUX:
-        result = await update_service.scan_linux_updates(
-            server_id=str(server.id), host=server.ip_address, port=port,
-            username=credential.username,
-            password=credential.password,
-            ssh_key=credential.ssh_key,
-        )
-    else:
-        result = await update_service.scan_windows_updates(
-            server_id=str(server.id), host=server.ip_address, port=port,
-            username=credential.username,
-            password=credential.password,
-        )
+    async with routing.via(server):
+        if server.os_type == OSType.LINUX:
+            result = await update_service.scan_linux_updates(
+                server_id=str(server.id), host=server.ip_address, port=port,
+                username=credential.username,
+                password=credential.password,
+                ssh_key=credential.ssh_key,
+            )
+        else:
+            result = await update_service.scan_windows_updates(
+                server_id=str(server.id), host=server.ip_address, port=port,
+                username=credential.username,
+                password=credential.password,
+            )
 
     db.add(AuditLog(
         user_id=user.id, server_id=server.id,
@@ -101,21 +102,22 @@ async def apply_updates(
     await db.refresh(job)
 
     # Execute
-    if server.os_type == OSType.LINUX:
-        result = await update_service.apply_linux_updates(
-            host=server.ip_address, port=port,
-            username=credential.username,
-            password=credential.password,
-            ssh_key=credential.ssh_key,
-            packages=body.packages,
-        )
-    else:
-        result = await update_service.apply_windows_updates(
-            host=server.ip_address, port=port,
-            username=credential.username,
-            password=credential.password,
-            packages=body.packages,
-        )
+    async with routing.via(server):
+        if server.os_type == OSType.LINUX:
+            result = await update_service.apply_linux_updates(
+                host=server.ip_address, port=port,
+                username=credential.username,
+                password=credential.password,
+                ssh_key=credential.ssh_key,
+                packages=body.packages,
+            )
+        else:
+            result = await update_service.apply_windows_updates(
+                host=server.ip_address, port=port,
+                username=credential.username,
+                password=credential.password,
+                packages=body.packages,
+            )
 
     # Update job
     job.status = JobStatus.COMPLETED if result.success else JobStatus.FAILED

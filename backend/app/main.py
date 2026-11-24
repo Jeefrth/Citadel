@@ -11,7 +11,7 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations
 from app.websocket import terminal, rdp, monitor
 
 # Structured logging
@@ -25,6 +25,11 @@ logging.basicConfig(
 async def lifespan(_app: FastAPI):
     stop = asyncio.Event()
     tasks = []
+    try:
+        from app.services.jobs import mark_interrupted
+        await mark_interrupted()  # jobs cut by a restart cannot resume
+    except Exception:  # noqa: BLE001 - DB may not be migrated yet
+        logging.getLogger("citadel").warning("could not clean interrupted jobs")
     if settings.SCHEDULER_ENABLED and not settings.DEV_MODE:
         from app.services.scheduler import scheduler_loop
         tasks.append(asyncio.create_task(scheduler_loop(stop)))
@@ -72,6 +77,7 @@ app.include_router(pam.router, prefix="/api", tags=["pam"])
 app.include_router(secrets.router, prefix="/api", tags=["secrets"])
 app.include_router(governance.router, prefix="/api", tags=["governance"])
 app.include_router(audit.router, prefix="/api", tags=["audit"])
+app.include_router(operations.router, prefix="/api", tags=["operations"])
 app.include_router(terminal.router, tags=["terminal"])
 app.include_router(rdp.router, tags=["rdp"])
 app.include_router(monitor.router, tags=["monitor"])
