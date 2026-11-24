@@ -515,6 +515,8 @@ function PolicyModal({
                       execute: "commandes et mises à jour",
                       copy: "presse-papiers distant vers local (RDP)",
                       paste: "presse-papiers local vers distant (RDP)",
+                      upload: "envoyer, créer, renommer, supprimer (SFTP, Linux)",
+                      download: "parcourir et télécharger (SFTP, Linux)",
                     }[a]
                   }
                 </span>

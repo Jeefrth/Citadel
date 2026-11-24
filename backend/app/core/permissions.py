@@ -45,8 +45,9 @@ ADMIN_GRANT = ServerGrant(actions=set(ALL_ACTIONS), accounts=set(VIRTUAL_ACCOUNT
 
 
 def _role_ceiling(user: User, actions: set[str]) -> set[str]:
+    """Viewers can look, connect and download, never change anything on a server."""
     if user.role == UserRole.VIEWER:
-        return actions - {PolicyAction.EXECUTE.value}
+        return actions - {PolicyAction.EXECUTE.value, PolicyAction.UPLOAD.value}
     return actions
 
 

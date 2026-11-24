@@ -21,6 +21,9 @@ import MyAccount from "@/pages/MyAccount";
 import Approvals from "@/pages/Approvals";
 import LiveSessions from "@/pages/LiveSessions";
 import CommandJournal from "@/pages/CommandJournal";
+import Jobs from "@/pages/Jobs";
+import JobDetail from "@/pages/JobDetail";
+import Infrastructure from "@/pages/Infrastructure";
 
 // DEV MODE: bypass Entra ID auth for local testing
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
@@ -37,6 +40,9 @@ function AppRoutes() {
         <Route path="/live" element={<LiveSessions />} />
         <Route path="/commands" element={<CommandJournal />} />
         <Route path="/updates" element={<Updates />} />
+        <Route path="/jobs" element={<Jobs />} />
+        <Route path="/jobs/:jobId" element={<JobDetail />} />
+        <Route path="/infrastructure" element={<Infrastructure />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/access" element={<Access />} />

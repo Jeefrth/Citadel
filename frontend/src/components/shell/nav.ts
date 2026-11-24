@@ -4,7 +4,9 @@ import {
   Film,
   KeyRound,
   LayoutDashboard,
+  ListChecks,
   type LucideIcon,
+  Network,
   RefreshCw,
   ScrollText,
   Server,
@@ -34,6 +36,7 @@ export const NAV: NavGroup[] = [
       { to: "/", label: "Tableau de bord", icon: LayoutDashboard },
       { to: "/servers", label: "Serveurs", icon: Server },
       { to: "/terminal", label: "Terminal", icon: Terminal },
+      { to: "/jobs", label: "Tâches", icon: ListChecks },
       { to: "/updates", label: "Mises à jour", icon: RefreshCw },
     ],
   },
@@ -55,7 +58,10 @@ export const NAV: NavGroup[] = [
   },
   {
     label: "Administration",
-    items: [{ to: "/settings", label: "Paramètres", icon: Settings, adminOnly: true }],
+    items: [
+      { to: "/infrastructure", label: "Infrastructure", icon: Network, adminOnly: true },
+      { to: "/settings", label: "Paramètres", icon: Settings, adminOnly: true },
+    ],
   },
 ];
 
@@ -64,6 +70,7 @@ const EXTRA_TITLES: Record<string, string> = { "/account": "Mon compte" };
 /** Breadcrumb trail for a pathname: [{label, to?}] */
 export function trailFor(pathname: string): { label: string; to?: string }[] {
   if (pathname.startsWith("/servers/")) return [{ label: "Serveurs", to: "/servers" }, { label: "Fiche serveur" }];
+  if (pathname.startsWith("/jobs/")) return [{ label: "Tâches", to: "/jobs" }, { label: "Détail de la tâche" }];
   for (const g of NAV) {
     const item = g.items.find((i) => i.to === pathname);
     if (item) return pathname === "/" ? [{ label: item.label }] : [{ label: g.label }, { label: item.label }];

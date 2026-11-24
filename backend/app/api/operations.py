@@ -163,7 +163,7 @@ async def upload_file(server_id: uuid.UUID, request: Request, directory: str = F
             size, sha = await sftp.write_stream(client, dest, chunks(), max_bytes, overwrite)
     except sftp.SftpError as e:
         await _audit_file(user, server, "file.upload", dest, ip, f"account={account.label} {e}", "failure")
-        raise HTTPException(status_code=409 if "exists" in str(e) else 400, detail=str(e))
+        raise HTTPException(status_code=409 if isinstance(e, sftp.FileExists) else 400, detail=str(e))
     except Exception as e:  # noqa: BLE001
         await _audit_file(user, server, "file.upload", dest, ip, f"account={account.label} {e}", "failure")
         raise _sftp_error(e)
@@ -441,13 +441,15 @@ class JobIn(BaseModel):
     timeout: int = Field(default=60, ge=5, le=7200)
 
 
-def _job_read(j: Job, with_output: bool = False) -> dict:
+def _job_read(j: Job, with_output: bool = False, user_names: dict | None = None) -> dict:
     counts: dict[str, int] = {}
     for t in j.targets:
         counts[t.status] = counts.get(t.status, 0) + 1
     out = {"id": str(j.id), "kind": j.kind, "name": j.name, "command": j.command,
            "playbook_id": str(j.playbook_id) if j.playbook_id else None, "selector": j.selector,
            "parallelism": j.parallelism, "timeout": j.timeout, "status": j.status, "user_id": str(j.user_id),
+           "user_name": (user_names or {}).get(str(j.user_id)), "extra_vars": j.extra_vars or {},
+           "account": (j.selector or {}).get("account"),
            "created_at": j.created_at, "started_at": j.started_at, "finished_at": j.finished_at,
            "counts": counts, "target_count": len(j.targets)}
     if with_output:
@@ -502,7 +504,8 @@ async def list_jobs(limit: int = Query(default=50, ge=1, le=200), db: AsyncSessi
     q = select(Job).order_by(Job.created_at.desc()).limit(limit)
     if user.role != UserRole.ADMIN:
         q = q.where(Job.user_id == user.id)
-    return [_job_read(j) for j in (await db.execute(q)).scalars().all()]
+    names = {str(i): n for i, n in (await db.execute(select(User.id, User.display_name))).all()}
+    return [_job_read(j, user_names=names) for j in (await db.execute(q)).scalars().all()]
 
 
 async def _get_job(db, user, job_id) -> Job:
@@ -514,7 +517,9 @@ async def _get_job(db, user, job_id) -> Job:
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    return _job_read(await _get_job(db, user, job_id), with_output=True)
+    job = await _get_job(db, user, job_id)
+    owner = await db.get(User, job.user_id)
+    return _job_read(job, with_output=True, user_names={str(job.user_id): owner.display_name if owner else None})
 
 
 @router.post("/jobs/{job_id}/cancel")

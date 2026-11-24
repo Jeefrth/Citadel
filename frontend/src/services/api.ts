@@ -157,3 +157,42 @@ export const api = {
   delete: (path: string) =>
     apiFetch<void>(path, { method: "DELETE" }),
 };
+
+/**
+ * Authenticated multipart POST with upload progress (XMLHttpRequest, since fetch
+ * has no upload progress). `onProgress` receives a ratio between 0 and 1.
+ */
+export async function postMultipart<T>(
+  path: string,
+  form: FormData,
+  onProgress?: (ratio: number) => void,
+): Promise<T> {
+  const token = await getToken();
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${apiConfig.baseUrl}${path}`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+      };
+    }
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        body = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as T);
+      } else {
+        const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : null;
+        reject(new ApiError(formatDetail(detail) || `API error ${xhr.status}`, xhr.status));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError("Erreur réseau pendant l'envoi", 0));
+    xhr.onabort = () => reject(new ApiError("Envoi annulé", 0));
+    xhr.send(form);
+  });
+}

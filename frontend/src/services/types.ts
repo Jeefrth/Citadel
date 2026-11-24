@@ -1,8 +1,8 @@
 // Shared API types (mirror backend/app/schemas)
 
 export type OSType = "linux" | "windows";
-export type ServerAction = "connect" | "execute" | "copy" | "paste";
-export const ALL_ACTIONS: ServerAction[] = ["connect", "execute", "copy", "paste"];
+export type ServerAction = "connect" | "execute" | "copy" | "paste" | "upload" | "download";
+export const ALL_ACTIONS: ServerAction[] = ["connect", "execute", "copy", "paste", "upload", "download"];
 export type VirtualAccount = "@ALL" | "@USER" | "@INPUT";
 export const VIRTUAL_ACCOUNTS: VirtualAccount[] = ["@ALL", "@USER", "@INPUT"];
 
@@ -29,6 +29,12 @@ export interface ServerData {
   tags: Record<string, string> | null;
   node_id: string | null;
   node_path: string | null;
+  /** Network zone reached through SSH gateways; null = direct. */
+  zone_id: string | null;
+  zone_name: string | null;
+  /** "azure:/subscriptions/..." for servers imported from a cloud account. */
+  cloud_ref: string | null;
+  cloud_state: "present" | "missing" | null;
   created_at: string;
   default_account: AccountSummary | null;
   accounts_count: number;
@@ -279,6 +285,8 @@ export const ACTION_LABELS: Record<string, string> = {
   execute: "Exécution",
   copy: "Copier",
   paste: "Coller",
+  upload: "Envoyer des fichiers",
+  download: "Télécharger des fichiers",
   "*": "Tout",
 };
 
@@ -575,7 +583,7 @@ export interface RecordingVerifyResult {
 
 export type CommandDecision = "allowed" | "alert" | "denied" | "review" | "approved_run";
 export const COMMAND_DECISIONS: CommandDecision[] = ["allowed", "alert", "denied", "review", "approved_run"];
-export type CommandSource = "terminal" | "execute";
+export type CommandSource = "terminal" | "execute" | "job" | "playbook";
 
 export interface CommandLogEntry {
   id: string;
@@ -675,4 +683,158 @@ export interface SiemTargetIn {
   secret?: string;
   streams: SiemStream[];
   start_from?: "now" | "beginning"; // creation only
+}
+
+// ── Operations (lot 5): files, jobs, playbooks, zones, cloud ──────
+
+export type FileEntryType = "file" | "dir" | "link" | "other";
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: FileEntryType;
+  size: number | null;
+  /** "-rw-r--r--" */
+  mode: string;
+  /** Unix seconds. */
+  mtime: number | null;
+  owner: string | null;
+  group: string | null;
+}
+
+export interface FileListing {
+  /** Resolved absolute path. */
+  path: string;
+  account: string;
+  can_upload: boolean;
+  can_download: boolean;
+  entries: FileEntry[];
+}
+
+export interface UploadResult {
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+export interface JobSelector {
+  server_ids: string[];
+  node_ids: string[];
+  labels: string[];
+  account?: string | null;
+}
+
+export interface TargetPreview {
+  server_id: string;
+  server_name: string;
+  ip_address: string;
+  os_type: OSType;
+  allowed: boolean;
+  reason: string | null;
+}
+
+export type JobKind = "command" | "playbook";
+export type JobStatus = "pending" | "running" | "success" | "partial" | "failed" | "cancelled";
+export type JobTargetStatus = "pending" | "running" | "success" | "failed" | "skipped" | "cancelled";
+
+export interface JobData {
+  id: string;
+  kind: JobKind;
+  name: string;
+  command: string | null;
+  playbook_id: string | null;
+  selector: JobSelector;
+  parallelism: number;
+  timeout: number;
+  status: JobStatus;
+  user_id: string;
+  counts: Partial<Record<JobTargetStatus, number>>;
+  target_count: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface JobTarget {
+  id: string;
+  server_id: string | null;
+  server_name: string;
+  account: string | null;
+  status: JobTargetStatus;
+  exit_code: number | null;
+  stdout: string | null;
+  stderr: string | null;
+  message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface JobDetail extends JobData {
+  output: string | null;
+  targets: JobTarget[];
+}
+
+export interface PlaybookData {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  variables: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface GatewayData {
+  id: string;
+  zone_id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  credential_id: string | null;
+  credential_name: string | null;
+  use_cert: boolean;
+  priority: number;
+  is_active: boolean;
+  last_check_at: string | null;
+  last_check_ok: boolean | null;
+  last_check_message: string | null;
+}
+
+export interface ZoneData {
+  id: string;
+  name: string;
+  description: string | null;
+  server_count: number;
+  gateways: GatewayData[];
+  created_at: string;
+}
+
+export interface AzureConfig {
+  tenant_id: string;
+  client_id: string;
+  subscription_ids: string[];
+  use_public_ip: boolean;
+  only_running: boolean;
+}
+
+export interface CloudAccountData {
+  id: string;
+  name: string;
+  provider: "azure";
+  config: Partial<AzureConfig>;
+  has_secret: boolean;
+  node_id: string | null;
+  zone_id: string | null;
+  is_active: boolean;
+  sync_interval_minutes: number;
+  last_sync_at: string | null;
+  last_sync_status: "ok" | "error" | null;
+  last_sync_message: string | null;
+  created_at: string;
+}
+
+export interface CloudSyncResult {
+  /** created / updated / missing / skipped; "error" (message) when the sync failed. */
+  stats: Record<string, number | string>;
+  account: CloudAccountData;
 }

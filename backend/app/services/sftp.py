@@ -25,6 +25,10 @@ class SftpError(RuntimeError):
     pass
 
 
+class FileExists(SftpError):
+    pass
+
+
 @dataclass
 class Entry:
     name: str
@@ -105,7 +109,7 @@ async def write_stream(client: asyncssh.SFTPClient, path: str, chunks: AsyncIter
     if not overwrite:
         try:
             await client.stat(path)
-            raise SftpError("A file with this name already exists")
+            raise FileExists("A file with this name already exists")
         except asyncssh.SFTPNoSuchFile:
             pass
     digest, size = hashlib.sha256(), 0

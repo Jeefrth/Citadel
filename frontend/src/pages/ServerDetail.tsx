@@ -7,6 +7,8 @@ import { hasAction, type ServerData } from "@/services/types";
 import Sparkline from "@/components/Sparkline";
 import AccountsSection from "@/components/AccountsSection";
 import { DiscoveredAccountsSection } from "@/components/DiscoveredAccounts";
+import FilesSection from "@/components/FilesSection";
+import { ServerOriginChips } from "@/components/opsUi";
 import { Chip, EmptyState, LabelChips, PageHeader } from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -236,6 +238,7 @@ export default function ServerDetail() {
   const diskHistory = history.map((h) => h.disk_percent);
 
   const canConnect = hasAction(server, "connect");
+  const canFiles = server.os_type === "linux" && (hasAction(server, "upload") || hasAction(server, "download"));
 
   return (
     <div>
@@ -249,6 +252,7 @@ export default function ServerDetail() {
             {server.name}
             <FavoriteStar on={server.is_favorite} onToggle={toggleFavorite} />
             <StatusBadge status={server.status} />
+            <ServerOriginChips server={server} />
           </span>
         }
         description={
@@ -400,6 +404,8 @@ export default function ServerDetail() {
           Lancez une première collecte pour suivre le CPU, la mémoire et le disque de ce serveur.
         </EmptyState>
       )}
+
+      {canFiles && <FilesSection server={server} />}
 
       {isAdmin && (
         <>

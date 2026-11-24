@@ -91,8 +91,13 @@ async def resolve_targets(db: AsyncSession, user: User, selector: dict) -> list[
             continue  # invisible servers are not even listed
         if PolicyAction.EXECUTE.value not in grant.actions:
             out.append(Candidate(s, False, "Droit « exécuter » non accordé", grant))
-        else:
-            out.append(Candidate(s, True, None, grant))
+            continue
+        try:
+            pick_account(s, grant, selector.get("account"))
+        except ValueError as e:
+            out.append(Candidate(s, False, str(e), grant))
+            continue
+        out.append(Candidate(s, True, None, grant))
     return out
 
 

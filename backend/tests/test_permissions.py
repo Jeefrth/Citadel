@@ -127,3 +127,8 @@ def test_connectable_accounts_on_windows_only_offers_passwords():
     cert = _acc("jf", use_cert=True)
     items = connectable_accounts(_server(admin_pw, keyed, cert, os_type=OSType.WINDOWS), ADMIN_GRANT)
     assert [(a["username"], a["auth"]) for a in items] == [("Administrator", "password"), ("@INPUT", "password")]
+
+
+def test_viewer_never_gets_upload():
+    viewer = SimpleNamespace(role=UserRole.VIEWER)
+    assert _role_ceiling(viewer, {"connect", "download", "upload", "execute"}) == {"connect", "download"}

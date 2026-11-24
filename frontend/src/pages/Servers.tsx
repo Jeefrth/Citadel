@@ -11,7 +11,9 @@ import {
   type NodeData,
   type OSType,
   type ServerData,
+  type ZoneData,
 } from "@/services/types";
+import { ServerOriginChips } from "@/components/opsUi";
 import NodeTree from "@/components/NodeTree";
 import { GovernanceNotice } from "@/components/governanceUi";
 import { AuthModePicker, CheckField, RowAction } from "@/components/AccountsSection";
@@ -94,6 +96,7 @@ interface ServerFormState {
   winrm_port: number;
   rdp_port: number;
   node_id: string;
+  zone_id: string;
   tags: Record<string, string>;
   // Creation only: optional default account
   with_account: boolean;
@@ -113,6 +116,7 @@ const emptyForm = (nodeId: string | null): ServerFormState => ({
   winrm_port: 5985,
   rdp_port: 3389,
   node_id: nodeId || "",
+  zone_id: "",
   tags: {},
   with_account: false,
   acc_username: "",
@@ -122,6 +126,7 @@ const emptyForm = (nodeId: string | null): ServerFormState => ({
 });
 
 const ROOT_NODE = "__root__";
+const NO_ZONE = "__direct__";
 
 function NodeSelect({
   nodes,
@@ -161,6 +166,7 @@ function ServerFormModal({
   server,
   initialNode,
   nodes,
+  zones,
   credentials,
   labelSuggestions,
   onClose,
@@ -169,6 +175,7 @@ function ServerFormModal({
   server: ServerData | null; // null = creation
   initialNode: string | null;
   nodes: NodeData[];
+  zones: ZoneData[];
   credentials: CredentialData[];
   labelSuggestions: Record<string, string[]>;
   onClose: () => void;
@@ -187,6 +194,7 @@ function ServerFormModal({
           winrm_port: server.winrm_port,
           rdp_port: server.rdp_port,
           node_id: server.node_id || "",
+          zone_id: server.zone_id || "",
           tags: { ...(server.tags || {}) },
         }
       : emptyForm(initialNode)
@@ -214,6 +222,7 @@ function ServerFormModal({
       winrm_port: form.winrm_port,
       rdp_port: form.rdp_port,
       node_id: form.node_id || null,
+      zone_id: form.zone_id || null,
       tags: form.tags,
     };
     if (!server && form.with_account) {
@@ -331,6 +340,30 @@ function ServerFormModal({
         <div className={form.os_type === "linux" ? "" : "col-span-2"}>
           <Field label="Nœud">
             <NodeSelect nodes={nodes} value={form.node_id} onChange={(v) => set({ node_id: v })} />
+          </Field>
+        </div>
+        <div className={form.os_type === "linux" ? "" : "col-span-2"}>
+          <Field
+            label="Zone réseau"
+            hint="Sans zone, Citadel joint le serveur directement. Avec une zone, tout passe par ses passerelles SSH."
+          >
+            <Select value={form.zone_id || NO_ZONE} onValueChange={(v) => set({ zone_id: v === NO_ZONE ? "" : v })}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_ZONE}>Aucune (accès direct)</SelectItem>
+                {zones.map((z) => (
+                  <SelectItem key={z.id} value={z.id}>
+                    {z.name}
+                    <span className="text-muted-foreground">
+                      {" "}
+                      ({z.gateways.length} passerelle{z.gateways.length > 1 ? "s" : ""})
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
         </div>
         <div className="col-span-2">
@@ -520,6 +553,7 @@ export default function Servers() {
 
   const [servers, setServers] = useState<ServerData[]>([]);
   const [nodes, setNodes] = useState<NodeData[]>([]);
+  const [zones, setZones] = useState<ZoneData[]>([]);
   const [labels, setLabels] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -614,6 +648,10 @@ export default function Servers() {
     api.get<NodeData[]>("/api/nodes").then(setNodes).catch(() => {});
   }, []);
 
+  const loadZones = useCallback(() => {
+    api.get<ZoneData[]>("/api/zones").then(setZones).catch(() => {});
+  }, []);
+
   const loadLabels = useCallback(() => {
     api.get<Record<string, string[]>>("/api/servers/labels/").then(setLabels).catch(() => {});
   }, []);
@@ -625,7 +663,8 @@ export default function Servers() {
   useEffect(() => {
     loadNodes();
     loadLabels();
-  }, [loadNodes, loadLabels]);
+    loadZones();
+  }, [loadNodes, loadLabels, loadZones]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -1077,7 +1116,10 @@ export default function Servers() {
                             </span>
                           </TableCell>
                           <TableCell>
-                            <LabelChips tags={srv.tags} />
+                            <div className="flex flex-wrap gap-1">
+                              <ServerOriginChips server={srv} />
+                              <LabelChips tags={srv.tags} />
+                            </div>
                           </TableCell>
                           <TableCell>
                             {srv.default_account ? (
@@ -1257,6 +1299,7 @@ export default function Servers() {
           server={formServer}
           initialNode={selectedNode}
           nodes={nodes}
+          zones={zones}
           credentials={credentials}
           labelSuggestions={labels}
           onClose={() => setFormServer(undefined)}

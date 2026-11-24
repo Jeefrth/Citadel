@@ -123,6 +123,8 @@ export function DecisionChip({ decision }: { decision: string }) {
 export const SOURCE_LABELS: Record<CommandSource, string> = {
   terminal: "Terminal",
   execute: "Exécution",
+  job: "Tâche",
+  playbook: "Playbook",
 };
 
 // ── Small shared UI helpers ──────────────────────────────────
