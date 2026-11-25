@@ -129,17 +129,12 @@ export default function MembersPanel({
       const res = await api.post<OrgInviteResult>("/api/org/invitations", { email: value, role: inviteRole });
       setInviteNotice({
         ok: true,
-        text:
-          res.status === "member" ? (
-            <>
-              <strong>{res.email}</strong> est maintenant membre de l'organisation ({roleLabel(res.role).toLowerCase()}).
-            </>
-          ) : (
-            <>
-              Invitation enregistrée pour <strong>{res.email}</strong> ({roleLabel(res.role).toLowerCase()}). Le compte
-              rejoindra l'organisation à sa première connexion avec Microsoft.
-            </>
-          ),
+        text: (
+          <>
+            Invitation envoyée à <strong>{res.email}</strong> ({roleLabel(res.role).toLowerCase()}). La personne doit
+            l'accepter dans Citadel (Mon compte) après s'être connectée avec Microsoft.
+          </>
+        ),
       });
       setEmail("");
       await load();
@@ -171,7 +166,7 @@ export default function MembersPanel({
       <SettingsCard
         icon={MailPlus}
         title="Inviter"
-        description="Une personne déjà connue de Citadel devient membre tout de suite. Sinon l'invitation est gardée et la personne rejoint l'organisation à sa première connexion avec Microsoft."
+        description="La personne reçoit une invitation qu'elle doit accepter dans Citadel (Mon compte) après s'être connectée avec Microsoft. Elle ne devient membre qu'après avoir accepté."
       >
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
@@ -305,7 +300,7 @@ export default function MembersPanel({
               <span className="tabular font-normal text-muted-foreground">({invitations.length})</span>
             </>
           }
-          description="Ces personnes rejoindront l'organisation à leur première connexion avec Microsoft."
+          description="Ces personnes n'ont pas encore accepté. Elles rejoindront l'organisation dès qu'elles accepteront depuis Mon compte."
           className="[&>div:last-child]:p-0"
         >
           <Table>

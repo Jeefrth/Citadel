@@ -5,7 +5,7 @@
 
 const ORG_KEY = "citadel.org";
 
-export function getOrgSlug(): string | null {
+function readStoredSlug(): string | null {
   try {
     return localStorage.getItem(ORG_KEY) || null;
   } catch {
@@ -13,20 +13,61 @@ export function getOrgSlug(): string | null {
   }
 }
 
+/**
+ * Organisation of THIS tab, read once at load. Another tab switching organisation
+ * changes localStorage but never this value: this tab keeps acting in its own
+ * organisation until it is reloaded (see onOrgChangedElsewhere).
+ */
+let currentSlug: string | null = readStoredSlug();
+
+export function getOrgSlug(): string | null {
+  return currentSlug;
+}
+
 export function setOrgSlug(slug: string): void {
+  currentSlug = slug;
   try {
     localStorage.setItem(ORG_KEY, slug);
   } catch {
-    /* storage unavailable: the backend keeps using the default organisation */
+    /* storage unavailable: only this tab knows the choice */
   }
 }
 
 export function clearOrgSlug(): void {
+  currentSlug = null;
   try {
     localStorage.removeItem(ORG_KEY);
   } catch {
     /* storage unavailable */
   }
+}
+
+// ── Organisation changed in another tab ───────────────
+let changedElsewhere = false;
+const changeListeners = new Set<(changed: boolean) => void>();
+
+/** True when another tab stored a different organisation than this tab's. */
+export function orgChangedElsewhere(): boolean {
+  return changedElsewhere;
+}
+
+export function onOrgChangedElsewhere(listener: (changed: boolean) => void): () => void {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    // key null: the whole storage was cleared
+    if (e.key !== ORG_KEY && e.key !== null) return;
+    const stored = e.key === null ? null : e.newValue || null;
+    const changed = stored !== currentSlug;
+    if (changed === changedElsewhere) return;
+    changedElsewhere = changed;
+    changeListeners.forEach((l) => l(changed));
+  });
 }
 
 /** Extra fields for WebSocket `{"type": "auth"}` messages: the selected organisation, if any. */
@@ -44,8 +85,20 @@ export function switchOrg(slug: string): void {
   window.location.assign("/");
 }
 
-/** 403 details meaning the stored organisation cannot be used by this user. */
+/**
+ * 403 details meaning the stored organisation cannot be used by this user.
+ * "Aucune organisation pour ce compte" is NOT one of them: that person has no
+ * organisation at all and gets the no-organisation screen (see isNoOrgError).
+ */
 const ORG_REFUSED = /organisation inconnue|pas membre de cette organisation/i;
+const NO_ORG = /aucune organisation pour ce compte/i;
+
+/** The signed-in person belongs to no organisation (403 "Aucune organisation pour ce compte"). */
+export function isNoOrgError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const { status, message } = e as { status?: unknown; message?: unknown };
+  return status === 403 && typeof message === "string" && NO_ORG.test(message);
+}
 
 let resetting = false;
 
@@ -55,7 +108,7 @@ let resetting = false;
  * Without a stored slug nothing happens, so a refusal of the default org cannot loop.
  */
 export function handleOrgRefused(status: number, detail: string): boolean {
-  if (status !== 403 || !ORG_REFUSED.test(detail)) return false;
+  if (status !== 403 || NO_ORG.test(detail) || !ORG_REFUSED.test(detail)) return false;
   if (!getOrgSlug()) return false;
   if (resetting) return true;
   resetting = true;

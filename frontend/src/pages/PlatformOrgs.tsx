@@ -102,7 +102,7 @@ function CreateOrgModal({ onClose, onCreated }: { onClose: () => void; onCreated
         label="E-mail du premier administrateur (facultatif)"
         hint={
           emailOk
-            ? "Il devient administrateur de l'organisation, tout de suite s'il est connu, sinon à sa première connexion avec Microsoft."
+            ? "Cette personne est invitée comme administrateur de l'organisation."
             : "Adresse e-mail invalide."
         }
       >

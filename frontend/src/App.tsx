@@ -7,6 +7,7 @@ import {
 } from "@azure/msal-react";
 import { setMsalInstance } from "@/services/api";
 import Layout from "@/components/Layout";
+import OrgChangedNotice from "@/components/shell/OrgChangedNotice";
 import LoginPage from "@/components/LoginPage";
 import Dashboard from "@/pages/Dashboard";
 import Servers from "@/pages/Servers";
@@ -36,6 +37,8 @@ const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
 
 function AppRoutes() {
   return (
+    <>
+    <OrgChangedNotice />
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
@@ -62,6 +65,7 @@ function AppRoutes() {
         <Route path="/approvals" element={<Approvals />} />
       </Route>
     </Routes>
+    </>
   );
 }
 

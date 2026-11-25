@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useTheme } from "next-themes";
 import { motion } from "motion/react";
-import { Building2, Check, ChevronsUpDown, LogOut, Moon, Search, Sun, UserCog } from "lucide-react";
+import { Building2, Check, ChevronsUpDown, LogOut, MailPlus, Moon, Search, Sun, UserCog } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { roleLabel, switchOrg } from "@/services/org";
+import NoOrgScreen from "@/components/NoOrgScreen";
 import { useHasK8sClusters } from "@/services/k8s";
 import NotificationBell, { usePolledCount } from "@/components/NotificationBell";
 import LiveIndicator from "@/components/shell/LiveIndicator";
@@ -224,6 +225,7 @@ function UserMenu() {
   const { resolvedTheme, setTheme } = useTheme();
   const name = account?.name || user?.display_name || "Utilisateur";
   const email = account?.username || user?.email || "";
+  const invites = user?.pending_invitations || 0;
 
   return (
     <SidebarMenu>
@@ -231,11 +233,19 @@ function UserMenu() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
-              <Avatar className="size-8 rounded-md">
-                <AvatarFallback className="rounded-md bg-sidebar-accent text-xs font-semibold">
-                  {initials(name)}
-                </AvatarFallback>
-              </Avatar>
+              <span className="relative shrink-0">
+                <Avatar className="size-8 rounded-md">
+                  <AvatarFallback className="rounded-md bg-sidebar-accent text-xs font-semibold">
+                    {initials(name)}
+                  </AvatarFallback>
+                </Avatar>
+                {invites > 0 && (
+                  <span
+                    className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-sidebar bg-live"
+                    aria-label={`${invites} invitation${invites > 1 ? "s" : ""} en attente`}
+                  />
+                )}
+              </span>
               <span className="grid flex-1 text-left leading-tight">
                 <span className="truncate text-sm font-medium text-sidebar-accent-foreground">{name}</span>
                 <span className="truncate text-xs">{roleLabel(user?.role || "viewer")}
@@ -260,6 +270,14 @@ function UserMenu() {
                 <UserCog /> Mon compte
               </Link>
             </DropdownMenuItem>
+            {invites > 0 && (
+              <DropdownMenuItem asChild>
+                <Link to="/account#invitations">
+                  <MailPlus /> Invitations
+                  <span className="tabular ml-auto rounded bg-live/10 px-1.5 text-xs font-medium text-live">{invites}</span>
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
               {resolvedTheme === "dark" ? <Sun /> : <Moon />}
               {resolvedTheme === "dark" ? "Thème clair" : "Thème sombre"}
@@ -275,7 +293,13 @@ function UserMenu() {
   );
 }
 
+/** No organisation for this account: dedicated screen instead of the shell. */
 export default function Layout() {
+  const { noOrg } = useCurrentUser();
+  return noOrg ? <NoOrgScreen /> : <AppShell />;
+}
+
+function AppShell() {
   const { pathname } = useLocation();
   const { can, allows: allowsPerm, isPlatformAdmin } = useCurrentUser();
   const hasClusters = useHasK8sClusters();

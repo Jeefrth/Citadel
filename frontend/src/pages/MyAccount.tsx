@@ -2,11 +2,27 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { AlertTriangle, Check, Copy, History, KeyRound, Laptop, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Check,
+  Copy,
+  History,
+  KeyRound,
+  Laptop,
+  MailPlus,
+  Plus,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { api, handleDeviceRevoked } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
+import { switchOrg } from "@/services/org";
+import { InvitationRows, useMyInvitations } from "@/components/MyInvitations";
 import {
   errorMessage,
+  type MyInvitation,
+  type MyInvitationAnswer,
   type AccessKeyCreated,
   type AccessKeyData,
   type DeviceData,
@@ -24,6 +40,7 @@ import {
   ErrorBox,
   Field,
   Modal,
+  Notice,
   PageHeader,
   SaveButton,
   formatDate,
@@ -217,12 +234,24 @@ export default function MyAccount() {
   const [logins, setLogins] = useState<LoginEventPage | null>(null);
   const [loginsError, setLoginsError] = useState<string | null>(null);
 
-  // Deep link (Cmd+K "Préparer mon accès SSH"): bring the section into view
+  const myInvitations = useMyInvitations();
+  const [acceptedOrg, setAcceptedOrg] = useState<MyInvitationAnswer["org"] | null>(null);
+  const answerInvitation = async (inv: MyInvitation, accept: boolean) => {
+    const res = await myInvitations.answer(inv, accept);
+    if (!res) return;
+    if (res.accepted) setAcceptedOrg(res.org);
+    else toast.success(`Invitation de ${res.org.name} refusée`);
+  };
+  const invitationsLoaded = myInvitations.invitations !== null;
+
+  // Deep links (Cmd+K "Préparer mon accès SSH", user menu "Invitations"): bring the section into view
   useEffect(() => {
-    if (hash !== "#ssh") return;
-    const t = setTimeout(() => document.getElementById("ssh")?.scrollIntoView({ block: "start" }), 50);
+    if (hash !== "#ssh" && hash !== "#invitations") return;
+    if (hash === "#invitations" && !invitationsLoaded) return;
+    const id = hash.slice(1);
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: "start" }), 50);
     return () => clearTimeout(t);
-  }, [hash]);
+  }, [hash, invitationsLoaded]);
 
   useEffect(() => {
     api
@@ -350,6 +379,50 @@ export default function MyAccount() {
           </div>
         )}
       </Card>
+
+      {/* Invitations waiting for my consent */}
+      <Notice
+        notice={
+          acceptedOrg
+            ? {
+                ok: true,
+                text: (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span>
+                      Vous êtes maintenant membre de <strong>{acceptedOrg.name}</strong>.
+                    </span>
+                    <Button size="sm" variant="outline" className="h-7" onClick={() => switchOrg(acceptedOrg.slug)}>
+                      <ArrowRightLeft /> Basculer vers {acceptedOrg.name}
+                    </Button>
+                  </div>
+                ),
+              }
+            : null
+        }
+        onClose={() => setAcceptedOrg(null)}
+      />
+      {((myInvitations.invitations?.length ?? 0) > 0 || myInvitations.error) && (
+        <Card id="invitations" className="scroll-mt-20 overflow-hidden">
+          <CardHeader className="space-y-1 border-b p-4">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MailPlus className="size-4 text-muted-foreground" /> Invitations
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Des organisations vous invitent. Vous n'y avez accès qu'après avoir accepté.
+            </CardDescription>
+          </CardHeader>
+          <div className="space-y-3 p-4">
+            <ErrorBox message={myInvitations.error} />
+            {(myInvitations.invitations?.length ?? 0) > 0 && (
+              <InvitationRows
+                invitations={myInvitations.invitations}
+                busy={myInvitations.busy}
+                onAnswer={answerInvitation}
+              />
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* My access */}
       <Card className="overflow-hidden">

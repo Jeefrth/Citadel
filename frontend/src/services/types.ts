@@ -226,6 +226,8 @@ export interface UserData {
   is_platform_admin?: boolean;
   org?: OrgBrief | null;
   orgs?: OrgBrief[];
+  /** Invitations waiting for this person's consent (Mon compte > Invitations). */
+  pending_invitations?: number;
 }
 
 export type BaseRole = "admin" | "operator" | "viewer";
@@ -265,8 +267,22 @@ export interface OrgInvitation {
   created_at: string;
 }
 
+/** /api/me/invitations row: an organisation inviting the signed-in person. */
+export interface MyInvitation {
+  id: string;
+  org: { id: string; name: string; slug: string };
+  role: BaseRole;
+  created_at: string;
+}
+
+export interface MyInvitationAnswer {
+  accepted: boolean;
+  org: { id: string; name: string; slug: string };
+}
+
 export interface OrgInviteResult {
-  status: "member" | "invited";
+  /** Always "invited" since invitations need the invitee's consent. */
+  status: "invited";
   email: string;
   role: BaseRole;
 }
