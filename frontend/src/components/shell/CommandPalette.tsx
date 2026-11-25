@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
-import { AppWindow, Archive, CloudCog, EyeOff, KeyRound, Laptop, Moon, Server, ShieldAlert, Sun, Terminal, UserCog, UserPlus } from "lucide-react";
-import type { Requirement } from "@/services/permissions";
+import { AppWindow, Archive, CloudCog, Container, ShieldCheck, EyeOff, KeyRound, Laptop, Moon, Server, ShieldAlert, Sun, Terminal, UserCog, UserPlus } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -14,7 +13,8 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { api } from "@/services/api";
-import { NAV } from "./nav";
+import type { K8sCluster } from "@/services/k8s";
+import { NAV, type NavRequirement } from "./nav";
 
 interface ServerLite {
   id: string;
@@ -47,16 +47,23 @@ export default function CommandPalette({
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  allows: (req: Requirement | undefined) => boolean;
+  allows: (req: NavRequirement | undefined) => boolean;
 }) {
   const navigate = useNavigate();
   const { resolvedTheme, setTheme } = useTheme();
   const [servers, setServers] = useState<ServerLite[]>([]);
+  const [clusters, setClusters] = useState<K8sCluster[]>([]);
+  const k8sVisible = allows("k8s");
 
   useEffect(() => {
     if (!open) return;
     api.get<ServerLite[]>("/api/servers/").then(setServers).catch(() => setServers([]));
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !k8sVisible) return;
+    api.get<K8sCluster[]>("/api/k8s/clusters").then(setClusters).catch(() => setClusters([]));
+  }, [open, k8sVisible]);
 
   const go = (to: string) => {
     onOpenChange(false);
@@ -106,6 +113,22 @@ export default function CommandPalette({
           </CommandGroup>
         )}
 
+        {clusters.length > 0 && (
+          <CommandGroup heading="Clusters Kubernetes">
+            {clusters.map((c) => (
+              <CommandItem
+                key={`k-${c.id}`}
+                value={`kubernetes k8s cluster ${c.name} ${c.api_url}`}
+                onSelect={() => go(`/kubernetes/${c.id}`)}
+              >
+                <Container />
+                <span className="font-medium">{c.name}</span>
+                <span className="truncate font-mono text-xs text-muted-foreground">{c.api_url}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
         <CommandSeparator />
         {NAV.map((group) => {
           const items = group.items.filter((i) => allows(i.perm));
@@ -147,6 +170,18 @@ export default function CommandPalette({
               <UserPlus />
               Pousser un compte sur des serveurs
             </CommandItem>
+          )}
+          {allows("kubernetes") && (
+            <>
+              <CommandItem value="ajouter un cluster kubernetes k8s" onSelect={() => go("/kubernetes?new=1")}>
+                <Container />
+                Ajouter un cluster Kubernetes
+              </CommandItem>
+              <CommandItem value="règles d'accès kubernetes k8s espaces de noms" onSelect={() => go("/kubernetes?tab=policies")}>
+                <ShieldCheck />
+                Gérer les règles d'accès Kubernetes
+              </CommandItem>
+            </>
           )}
           {allows("audit") && (
             <CommandItem value="risques analyser" onSelect={() => go("/risks")}>

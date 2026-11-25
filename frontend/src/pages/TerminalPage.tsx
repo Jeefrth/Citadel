@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "@/services/authConfig";
-import { api, getAuthToken } from "@/services/api";
+import { api, getAuthToken, wsBaseUrl } from "@/services/api";
 import { hasAction, type ConnectionChoice, type ServerData } from "@/services/types";
 import Terminal from "@/components/Terminal";
 import RdpViewer from "@/components/RdpViewer";
@@ -29,7 +29,9 @@ interface Tab {
   /** Display parts of the tab (serverName keeps the historical "name (account)" form). */
   serverLabel: string;
   accountLabel: string;
-  protocol: "ssh" | "rdp";
+  protocol: "ssh" | "rdp" | "k8s";
+  /** Kubernetes shell: WebSocket path and auth fields (stable object, kept with the tab). */
+  k8s?: { path: string; auth: { namespace: string; pod: string; container: string } };
   certDuration?: number;
   connection: ConnectionChoice;
   osType: string;
@@ -65,6 +67,39 @@ export default function TerminalPage() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Deep link from the Kubernetes pages: /terminal?k8s=<cluster>&name=&ns=&pod=&container=
+  const k8sLinkHandled = useRef<string | null>(null);
+  useEffect(() => {
+    const clusterId = searchParams.get("k8s");
+    if (!clusterId) return;
+    const key = searchParams.toString();
+    if (k8sLinkHandled.current === key) return; // StrictMode double run
+    k8sLinkHandled.current = key;
+    const ns = searchParams.get("ns") || "";
+    const pod = searchParams.get("pod") || "";
+    const container = searchParams.get("container") || "";
+    const clusterName = searchParams.get("name") || clusterId.slice(0, 8);
+    if (ns && pod) {
+      const label = `${clusterName}/${ns}/${pod}${container ? `/${container}` : ""}`;
+      const id = `tab-${++tabCounter}`;
+      const tab: Tab = {
+        id,
+        serverId: clusterId,
+        serverName: label,
+        serverLabel: label,
+        accountLabel: `k8s:${ns}`,
+        protocol: "k8s",
+        k8s: { path: `/ws/k8s-exec/${encodeURIComponent(clusterId)}`, auth: { namespace: ns, pod, container } },
+        osType: "linux",
+        connection: { label: `k8s:${ns}` } as ConnectionChoice,
+        connected: true,
+      };
+      setTabs((prev) => [...prev, tab]);
+      setActiveTab(id);
+    }
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Same silent-then-redirect policy as the API client (no hidden iframe)
   const getToken = useCallback(async (): Promise<string> => getAuthToken(), []);
@@ -142,7 +177,11 @@ export default function TerminalPage() {
               tabIndex={0}
               onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveTab(tab.id)}
-              title={`${tab.protocol.toUpperCase()} ${tab.serverLabel}, compte ${tab.accountLabel}${tab.connected ? "" : " (déconnecté)"}`}
+              title={
+                tab.protocol === "k8s"
+                  ? `Shell Kubernetes ${tab.serverLabel}${tab.connected ? "" : " (déconnecté)"}`
+                  : `${tab.protocol.toUpperCase()} ${tab.serverLabel}, compte ${tab.accountLabel}${tab.connected ? "" : " (déconnecté)"}`
+              }
               className={cn(
                 "group relative flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-t-md px-3 text-sm transition-colors",
                 active ? "bg-card text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
@@ -150,10 +189,16 @@ export default function TerminalPage() {
             >
               <LiveDot live={tab.connected} />
               <span className="rounded border px-1 font-mono text-2xs text-muted-foreground">
-                {tab.protocol === "rdp" ? "RDP" : "SSH"}
+                {tab.protocol === "rdp" ? "RDP" : tab.protocol === "k8s" ? "k8s" : "SSH"}
               </span>
-              <span className="max-w-[160px] truncate font-medium">{tab.serverLabel}</span>
-              <span className="max-w-[120px] truncate font-mono text-xs text-muted-foreground">{tab.accountLabel}</span>
+              {tab.protocol === "k8s" ? (
+                <span className="max-w-[280px] truncate font-mono text-xs">{tab.serverLabel}</span>
+              ) : (
+                <>
+                  <span className="max-w-[160px] truncate font-medium">{tab.serverLabel}</span>
+                  <span className="max-w-[120px] truncate font-mono text-xs text-muted-foreground">{tab.accountLabel}</span>
+                </>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -218,6 +263,16 @@ export default function TerminalPage() {
                 serverId={tab.serverId}
                 serverName={tab.serverName}
                 connection={tab.connection}
+                onDisconnected={() => handleDisconnected(tab.id)}
+              />
+            ) : tab.protocol === "k8s" && tab.k8s ? (
+              <Terminal
+                serverId={tab.serverId}
+                serverName={tab.serverName}
+                getToken={getToken}
+                wsBaseUrl={wsBaseUrl()}
+                wsPath={tab.k8s.path}
+                authExtra={tab.k8s.auth}
                 onDisconnected={() => handleDisconnected(tab.id)}
               />
             ) : (

@@ -1,6 +1,7 @@
 import {
   Activity,
   ClipboardCheck,
+  Container,
   FileBarChart,
   Film,
   KeyRound,
@@ -19,12 +20,18 @@ import {
 } from "lucide-react";
 import type { Requirement } from "@/services/permissions";
 
+/** Nav requirement: a permission requirement, or "k8s" (resolved by the layout). */
+export type NavRequirement = Requirement | "k8s";
+
 export interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
-  /** Who sees the entry: a permission, any of several, or "admin". None: everyone. */
-  perm?: Requirement;
+  /**
+   * Who sees the entry: a permission, any of several, or "admin". None: everyone.
+   * "k8s": users who see at least one cluster, or hold the "kubernetes" permission.
+   */
+  perm?: NavRequirement;
   badge?: "approvals";
 }
 
@@ -41,6 +48,7 @@ export const NAV: NavGroup[] = [
       { to: "/", label: "Tableau de bord", icon: LayoutDashboard },
       { to: "/servers", label: "Serveurs", icon: Server },
       { to: "/terminal", label: "Terminal", icon: Terminal },
+      { to: "/kubernetes", label: "Kubernetes", icon: Container, perm: "k8s" },
       { to: "/jobs", label: "Tâches", icon: ListChecks },
       { to: "/updates", label: "Mises à jour", icon: RefreshCw },
     ],
@@ -78,6 +86,8 @@ const EXTRA_TITLES: Record<string, string> = { "/account": "Mon compte" };
 /** Breadcrumb trail for a pathname: [{label, to?}] */
 export function trailFor(pathname: string): { label: string; to?: string }[] {
   if (pathname.startsWith("/servers/")) return [{ label: "Serveurs", to: "/servers" }, { label: "Fiche serveur" }];
+  if (pathname.startsWith("/kubernetes/"))
+    return [{ label: "Kubernetes", to: "/kubernetes" }, { label: "Cluster" }];
   if (pathname.startsWith("/jobs/")) return [{ label: "Tâches", to: "/jobs" }, { label: "Détail de la tâche" }];
   for (const g of NAV) {
     const item = g.items.find((i) => i.to === pathname);

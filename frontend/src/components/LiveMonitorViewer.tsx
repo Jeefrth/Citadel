@@ -200,7 +200,7 @@ export default function LiveMonitorViewer({
       >
         <div className="flex items-center justify-between gap-3 border-b py-3 pl-4 pr-12">
           <div className="flex min-w-0 items-center gap-3">
-            <ProtocolBadge protocol={session.protocol} />
+            <ProtocolBadge protocol={session.protocol} channel={session.channel} />
             <div className="min-w-0">
               <DialogTitle className="truncate font-mono text-sm font-medium">
                 {session.account && <span className="text-muted-foreground">{session.account}@</span>}

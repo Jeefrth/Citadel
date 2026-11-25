@@ -410,7 +410,7 @@ export default function Dashboard() {
                         </TableCell>
                         <TableCell>
                           <span className="mr-2 rounded border px-1 font-mono text-2xs text-muted-foreground">
-                            {s.protocol === "rdp" ? "RDP" : "SSH"}
+                            {s.protocol === "rdp" ? "RDP" : s.channel === "k8s" ? "k8s" : "SSH"}
                           </span>
                           {s.server}
                         </TableCell>

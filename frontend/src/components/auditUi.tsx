@@ -2,7 +2,7 @@
 // and the settings cards (status dot, card frame, tooltip, table skeleton).
 import type { ReactNode } from "react";
 import { motion } from "motion/react";
-import { Monitor, Terminal as TerminalIcon } from "lucide-react";
+import { Container, Monitor, Terminal as TerminalIcon } from "lucide-react";
 import type { ITerminalOptions } from "@xterm/xterm";
 import type { CommandDecision, CommandSource, RecordingStorageType, SessionProtocol } from "@/services/types";
 import { Chip, type ChipTone } from "@/components/kit";
@@ -77,7 +77,20 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} Mo`;
 }
 
-export function ProtocolBadge({ protocol }: { protocol: SessionProtocol }) {
+/** Kubernetes shell: recorded with protocol "k8s"; live sessions say protocol "ssh" + channel "k8s". */
+export function isK8sSession(s: { protocol: SessionProtocol; channel?: string | null }): boolean {
+  return s.protocol === "k8s" || s.channel === "k8s";
+}
+
+export function ProtocolBadge({ protocol, channel }: { protocol: SessionProtocol; channel?: string | null }) {
+  if (isK8sSession({ protocol, channel })) {
+    return (
+      <Chip tone="default" title="Shell dans un conteneur Kubernetes">
+        <Container className="size-3" />
+        Kubernetes
+      </Chip>
+    );
+  }
   const rdp = protocol === "rdp";
   const Icon = rdp ? Monitor : TerminalIcon;
   return (

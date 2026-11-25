@@ -1,12 +1,12 @@
 // "Sessions en direct" (admin): active SSH / RDP sessions, read-only monitoring and kill.
 import { useCallback, useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { Activity, Eye, Power, RefreshCw } from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { errorMessage, type KillSessionResult, type LiveSession } from "@/services/types";
 import { Chip, ConfirmModal, EmptyState, ErrorBox, Field, Notice, PageHeader, type NoticeData } from "@/components/kit";
-import { ProtocolBadge, StatusDot, TableSkeleton, Tip, formatDuration } from "@/components/auditUi";
+import { ProtocolBadge, StatusDot, TableSkeleton, Tip, formatDuration, isK8sSession } from "@/components/auditUi";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -59,7 +59,7 @@ function KillDialog({
       onClose={onClose}
     >
       <p>
-        La session <strong>{session.protocol.toUpperCase()}</strong> de <strong>{session.user}</strong> sur{" "}
+        La session <strong>{isK8sSession(session) ? "Kubernetes" : session.protocol.toUpperCase()}</strong> de <strong>{session.user}</strong> sur{" "}
         <strong>
           {session.account ? `${session.account}@` : ""}
           {session.server}
@@ -122,7 +122,7 @@ export default function LiveSessions() {
     <div className="space-y-4">
       <PageHeader
         title="Sessions en direct"
-        description="Sessions SSH et RDP ouvertes en ce moment. Observez-les en lecture seule ou terminez-les. Actualisation toutes les 5 secondes."
+        description="Sessions SSH, RDP et shells Kubernetes ouverts en ce moment. Observez-les en lecture seule ou terminez-les. Actualisation toutes les 5 secondes."
         actions={
           <Button variant="outline" size="sm" onClick={load}>
             <RefreshCw /> Actualiser
@@ -135,7 +135,7 @@ export default function LiveSessions() {
 
       {!loading && sessions.length === 0 ? (
         <EmptyState icon={Activity} title="Aucune session en cours">
-          Les sessions SSH et RDP ouvertes apparaissent ici dès leur connexion.
+          Les sessions SSH, RDP et Kubernetes ouvertes apparaissent ici dès leur connexion.
         </EmptyState>
       ) : (
         <div className="overflow-hidden rounded-lg border bg-card">
@@ -164,13 +164,19 @@ export default function LiveSessions() {
                       <TableCell className="pl-4">
                         <div className="flex items-center gap-2.5">
                           <StatusDot tone="live" pulse label="En direct" />
-                          <ProtocolBadge protocol={s.protocol} />
+                          <ProtocolBadge protocol={s.protocol} channel={s.channel} />
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap font-medium">{s.user}</TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-sm">
-                        {s.account && <span className="text-muted-foreground">{s.account}@</span>}
-                        {s.server}
+                        <Link
+                          to={isK8sSession(s) ? `/kubernetes/${s.server_id}` : `/servers/${s.server_id}`}
+                          className="underline-offset-4 hover:underline"
+                          title={isK8sSession(s) ? "Ouvrir le cluster" : "Ouvrir la fiche serveur"}
+                        >
+                          {s.account && <span className="text-muted-foreground">{s.account}@</span>}
+                          {s.server}
+                        </Link>
                       </TableCell>
                       <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{s.client_ip || "-"}</TableCell>
                       <TableCell className="tabular whitespace-nowrap text-muted-foreground">{fmtTime(s.started_at)}</TableCell>

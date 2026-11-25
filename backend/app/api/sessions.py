@@ -28,7 +28,7 @@ router = APIRouter()
 @router.get("/", response_model=list[SessionRecordingList])
 async def list_sessions(
     server_id: uuid.UUID | None = Query(default=None),
-    protocol: str | None = Query(default=None, pattern="^(ssh|rdp)$"),
+    protocol: str | None = Query(default=None, pattern="^(ssh|rdp|k8s)$"),
     session_id: str | None = Query(default=None, description="Exact session id (command journal deep links)"),
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -77,7 +77,7 @@ async def get_session(recording_id: uuid.UUID, request: Request, db: AsyncSessio
                       user: User = Depends(get_current_user)):
     """SSH recording with its events for replay."""
     rec = await _get_visible(db, user, recording_id)
-    if rec.protocol != "ssh":
+    if rec.protocol not in ("ssh", "k8s"):
         raise HTTPException(status_code=400, detail="Not an SSH recording: use /rdp")
     events = rec.events if rec.events is not None else json.loads(await _load(db, rec))
     await _audit_view(db, user, rec, request)

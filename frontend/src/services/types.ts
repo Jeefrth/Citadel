@@ -508,7 +508,8 @@ export function isReviewMessage(msg: string | null | undefined): boolean {
 
 // ── Audit (lot 4): live sessions, recordings, command journal, storage, SIEM ──
 
-export type SessionProtocol = "ssh" | "rdp";
+/** "k8s": shell in a Kubernetes container, recorded and replayed like SSH. */
+export type SessionProtocol = "ssh" | "rdp" | "k8s";
 
 /** Active session from GET /api/live-sessions (timestamps are unix seconds). */
 export interface LiveSession {
@@ -520,6 +521,8 @@ export interface LiveSession {
   server_id: string;
   account: string | null;
   client_ip: string | null;
+  /** web | ssh-proxy | k8s; for "k8s", server_id is the cluster id. */
+  channel?: string;
   started_at: number;
   last_activity: number;
   watchers: string[];

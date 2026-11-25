@@ -27,6 +27,8 @@ import Infrastructure from "@/pages/Infrastructure";
 import Logins from "@/pages/Logins";
 import Reports from "@/pages/Reports";
 import Risks from "@/pages/Risks";
+import Kubernetes from "@/pages/Kubernetes";
+import KubernetesCluster from "@/pages/KubernetesCluster";
 
 // DEV MODE: bypass Entra ID auth for local testing
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
@@ -39,6 +41,8 @@ function AppRoutes() {
         <Route path="/servers" element={<Servers />} />
         <Route path="/servers/:serverId" element={<ServerDetail />} />
         <Route path="/terminal" element={<TerminalPage />} />
+        <Route path="/kubernetes" element={<Kubernetes />} />
+        <Route path="/kubernetes/:clusterId" element={<KubernetesCluster />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/live" element={<LiveSessions />} />
         <Route path="/commands" element={<CommandJournal />} />

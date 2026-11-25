@@ -313,7 +313,7 @@ export default function Sessions() {
                             {s.account && <span className="text-muted-foreground">{s.account}@</span>}
                             {s.server_name}
                           </span>
-                          {!s.server_id && (
+                          {!s.server_id && s.protocol !== "k8s" && (
                             <Chip tone="default" title="Le serveur a été supprimé depuis">
                               supprimé
                             </Chip>
@@ -351,7 +351,7 @@ export default function Sessions() {
                           <span className="tabular">{formatBytes(s.size_bytes)}</span>
                           <StorageChip type={s.storage_type} />
                         </div>
-                        {s.protocol === "ssh" && (
+                        {s.protocol !== "rdp" && (
                           <p className="tabular text-xs text-muted-foreground">{s.event_count} événements</p>
                         )}
                       </TableCell>

@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { isReviewMessage, type ConnectionChoice } from "@/services/types";
 import { GovernanceNotice } from "@/components/governanceUi";
+import { wsBaseUrl as defaultWsBaseUrl } from "@/services/api";
 
 /** Refusals from the connection ACL (deny or review) get a banner above the terminal. */
 function isGovernanceMessage(msg: string): boolean {
@@ -47,6 +48,10 @@ interface TerminalProps {
   certDuration?: number; // minutes, passed to backend for cert signing
   connection?: ConnectionChoice; // account picked before connecting (default account otherwise)
   wsBaseUrl?: string;
+  /** WebSocket path; default /ws/terminal/{serverId}. Same protocol for /ws/k8s-exec/{clusterId}. */
+  wsPath?: string;
+  /** Extra fields of the first "auth" message (namespace, pod, container for Kubernetes). */
+  authExtra?: Record<string, unknown>;
   onDisconnected?: () => void;
 }
 
@@ -57,8 +62,15 @@ export default function Terminal({
   certDuration,
   connection,
   wsBaseUrl,
+  wsPath,
+  authExtra,
   onDisconnected,
 }: TerminalProps) {
+  // Kept in refs: a new callback or object identity from the parent must not reconnect the session
+  const onDisconnectedRef = useRef(onDisconnected);
+  onDisconnectedRef.current = onDisconnected;
+  const authExtraRef = useRef(authExtra);
+  authExtraRef.current = authExtra;
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -100,14 +112,15 @@ export default function Terminal({
     }
 
     // Open WebSocket
-    const base = wsBaseUrl || `ws://${window.location.host}`;
-    const ws = new WebSocket(`${base}/ws/terminal/${serverId}`);
+    const base = wsBaseUrl || defaultWsBaseUrl();
+    const ws = new WebSocket(`${base}${wsPath || `/ws/terminal/${serverId}`}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
       // Send auth message with terminal dimensions + cert duration
       const dims = fitAddon.proposeDimensions();
       const authMsg: Record<string, unknown> = {
+        ...(authExtraRef.current || {}),
         type: "auth",
         token,
         cols: dims?.cols || 80,
@@ -152,14 +165,14 @@ export default function Terminal({
 
         case "disconnected":
           xterm.writeln("\r\n\x1b[1;33mSession disconnected\x1b[0m");
-          onDisconnected?.();
+          onDisconnectedRef.current?.();
           break;
       }
     };
 
     ws.onclose = () => {
       xterm.writeln("\r\n\x1b[1;33mConnection closed\x1b[0m");
-      onDisconnected?.();
+      onDisconnectedRef.current?.();
     };
 
     ws.onerror = () => {
@@ -209,7 +222,7 @@ export default function Terminal({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [serverId, serverName, getToken, certDuration, connection, wsBaseUrl, onDisconnected]);
+  }, [serverId, serverName, getToken, certDuration, connection, wsBaseUrl, wsPath]);
 
   useEffect(() => {
     const cleanup = connect();

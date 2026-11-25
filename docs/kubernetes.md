@@ -32,7 +32,7 @@ Le rôle plafonne comme pour les serveurs : un viewer n'a jamais que `view` et `
 
 ## Shell dans un conteneur
 
-Kubernetes > cluster > pod > Shell. Même chaîne que le terminal SSH (`services/terminal_core.py`) :
+Kubernetes > cluster > pod > Shell. Comme pour un terminal SSH, une réauthentification Entra (MFA par l'accès conditionnel) est demandée au clic. Même chaîne que le terminal SSH (`services/terminal_core.py`) :
 - règle de connexion à Citadel puis ACL de connexion ;
 - ACL de commandes ligne par ligne ;
 - masquage des données ;

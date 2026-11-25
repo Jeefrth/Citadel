@@ -40,11 +40,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCurrentUser } from "@/services/useCurrentUser";
-import type { Requirement } from "@/services/permissions";
+import { useHasK8sClusters } from "@/services/k8s";
 import NotificationBell, { usePolledCount } from "@/components/NotificationBell";
 import LiveIndicator from "@/components/shell/LiveIndicator";
 import CommandPalette, { useCommandPalette } from "@/components/shell/CommandPalette";
-import { NAV, trailFor } from "@/components/shell/nav";
+import { NAV, trailFor, type NavRequirement } from "@/components/shell/nav";
 
 function initials(name: string): string {
   return name
@@ -67,7 +67,7 @@ function CitadelMark({ className = "" }: { className?: string }) {
   );
 }
 
-function AppSidebar({ allows }: { allows: (req: Requirement | undefined) => boolean }) {
+function AppSidebar({ allows }: { allows: (req: NavRequirement | undefined) => boolean }) {
   const { pathname } = useLocation();
   const [pendingApprovals] = usePolledCount("/api/approvals/pending-count");
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`));
@@ -185,7 +185,10 @@ function UserMenu() {
 
 export default function Layout() {
   const { pathname } = useLocation();
-  const { can, allows } = useCurrentUser();
+  const { can, allows: allowsPerm } = useCurrentUser();
+  const hasClusters = useHasK8sClusters();
+  const allows = (req: NavRequirement | undefined) =>
+    req === "k8s" ? hasClusters || can("kubernetes") : allowsPerm(req);
   const palette = useCommandPalette();
   const trail = trailFor(pathname);
 

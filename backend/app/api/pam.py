@@ -133,7 +133,9 @@ async def delete_node(node_id: uuid.UUID, db: AsyncSession = Depends(get_db), us
 
 
 @router.get("/user-groups", response_model=list[UserGroupRead])
-async def list_groups(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
+async def list_groups(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    if not (has_perm(user, "policies") or has_perm(user, "kubernetes")):
+        raise HTTPException(status_code=403, detail="Permission 'policies' or 'kubernetes' required")
     return (await db.execute(select(UserGroup).order_by(UserGroup.name))).scalars().all()
 
 

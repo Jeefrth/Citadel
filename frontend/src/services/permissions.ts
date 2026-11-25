@@ -2,8 +2,8 @@
 // ones granted by their custom role. Single place to test them in the UI.
 import type { UserData } from "@/services/types";
 
-export type Perm = "audit" | "sessions" | "servers" | "secrets" | "policies" | "playbooks";
-export const ALL_PERMS: Perm[] = ["audit", "sessions", "servers", "secrets", "policies", "playbooks"];
+export type Perm = "audit" | "sessions" | "servers" | "secrets" | "policies" | "playbooks" | "kubernetes";
+export const ALL_PERMS: Perm[] = ["audit", "sessions", "servers", "secrets", "policies", "playbooks", "kubernetes"];
 
 /** What a screen requires: a permission, any of several, or the admin role. */
 export type Requirement = Perm | Perm[] | "admin";

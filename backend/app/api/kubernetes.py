@@ -58,7 +58,7 @@ class ClusterIn(BaseModel):
     def _pem(cls, v):
         if v and "BEGIN CERTIFICATE" not in v:
             raise ValueError("ca_cert must be a PEM certificate")
-        return v or None
+        return v  # None = unchanged on update, "" = remove
 
 
 def _cluster_read(c: K8sCluster, grant: k8s_access.ClusterGrant | None = None) -> dict:
@@ -90,7 +90,7 @@ async def list_clusters(db: AsyncSession = Depends(get_db), user: User = Depends
 async def create_cluster(data: ClusterIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(manage)):
     if (await db.execute(select(K8sCluster.id).where(K8sCluster.name == data.name))).first():
         raise HTTPException(status_code=409, detail="A cluster with this name already exists")
-    c = K8sCluster(**data.model_dump(exclude={"token"}))
+    c = K8sCluster(**data.model_dump(exclude={"token", "ca_cert"}), ca_cert=data.ca_cert or None)
     if data.token:
         c.encrypted_token = encrypt_value(data.token.strip())
     db.add(c)
@@ -107,7 +107,7 @@ async def update_cluster(cluster_id: uuid.UUID, data: ClusterIn, request: Reques
     for k, v in data.model_dump(exclude={"token", "ca_cert"}).items():
         setattr(c, k, v)
     if data.ca_cert is not None:
-        c.ca_cert = data.ca_cert
+        c.ca_cert = data.ca_cert or None  # "" removes it
     if data.token:
         c.encrypted_token = encrypt_value(data.token.strip())
     await _audit(db, user, request, "k8s.cluster.update", c.name)
