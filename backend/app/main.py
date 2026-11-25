@@ -11,8 +11,8 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations, identity, reports, backups, applications, risks, roles
-from app.websocket import terminal, rdp, monitor
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations, identity, reports, backups, applications, risks, roles, kubernetes
+from app.websocket import terminal, rdp, monitor, k8s_exec
 
 # Structured logging
 logging.basicConfig(
@@ -93,9 +93,11 @@ app.include_router(backups.router, prefix="/api", tags=["backups"])
 app.include_router(applications.router, prefix="/api", tags=["applications"])
 app.include_router(risks.router, prefix="/api", tags=["risks"])
 app.include_router(roles.router, prefix="/api", tags=["roles"])
+app.include_router(kubernetes.router, prefix="/api", tags=["kubernetes"])
 app.include_router(terminal.router, tags=["terminal"])
 app.include_router(rdp.router, tags=["rdp"])
 app.include_router(monitor.router, tags=["monitor"])
+app.include_router(k8s_exec.router, tags=["kubernetes"])
 
 
 @app.get("/api/health")

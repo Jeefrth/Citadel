@@ -273,6 +273,7 @@ CAPABILITIES = {
     "secrets": "Secrets : vérification, rotation, historique, collecte des comptes, modèles et push de comptes",
     "policies": "Droits : groupes, règles d'accès (import / export), ACL de connexion et de commandes",
     "playbooks": "Playbooks Ansible : créer et modifier (le contenu s'exécute sur les serveurs)",
+    "kubernetes": "Kubernetes : clusters et règles d'accès aux espaces de noms",
 }
 
 

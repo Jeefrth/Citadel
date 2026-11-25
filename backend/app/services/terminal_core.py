@@ -78,16 +78,45 @@ def _red(text: str) -> bytes:
     return f"\r\n\x1b[1;31m[Citadel] {text}\x1b[0m\r\n".encode()
 
 
+class TargetChannel(Protocol):
+    """The remote side of a session: an SSH shell, a container exec..."""
+    session_id: str
+    async def read(self) -> bytes | None: ...   # None = closed
+    async def write(self, data: bytes) -> None: ...
+    async def resize(self, cols: int, rows: int) -> None: ...
+    async def close(self) -> None: ...
+
+
+class _SSHChannel:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+
+    async def read(self):
+        return await session_manager.read(self.session_id)
+
+    async def write(self, data: bytes):
+        await session_manager.write(self.session_id, data)
+
+    async def resize(self, cols: int, rows: int):
+        await session_manager.resize(self.session_id, cols, rows)
+
+    async def close(self):
+        await session_manager.close(self.session_id)
+
+
 @dataclass
 class SessionSpec:
     user: User
-    server: Server
+    server: Server                 # a Server, or a target with the same shape (is_k8s, link, name, node_id, tags)
     account: ResolvedAccount
     ip: str | None
     cols: int = 80
     rows: int = 24
     cert_minutes: int | None = None
-    channel: str = "web"          # web | ssh-proxy (audit and live view)
+    channel: str = "web"           # web | ssh-proxy | k8s (audit and live view)
+    protocol: str = "ssh"          # recording protocol
+    open_channel: object = None    # async (cols, rows) -> TargetChannel; None = SSH to the server
+    route: object = None           # what routing.via() gets (default: server)
     extra: dict = field(default_factory=dict)
 
 
@@ -98,20 +127,28 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
     use_cert = account.use_cert
     cert_minutes = spec.cert_minutes or account.cert_minutes or 480
     route_stack = AsyncExitStack()
+    is_server = not getattr(server, "is_k8s", False)
     try:
-        await route_stack.enter_async_context(routing.via(server))
-        session = await session_manager.create_ssh_session(
-            server_id=str(server.id), user_id=str(user.id), host=server.ip_address, port=server.ssh_port,
-            username=account.username, password=account.password, ssh_key=account.ssh_key,
-            use_ephemeral_cert=use_cert, cert_validity_minutes=cert_minutes, cols=spec.cols, rows=spec.rows,
-        )
+        await route_stack.enter_async_context(routing.via(spec.route or server))
+        if spec.open_channel is not None:
+            ch = await spec.open_channel(spec.cols, spec.rows)
+        else:
+            session = await session_manager.create_ssh_session(
+                server_id=str(server.id), user_id=str(user.id), host=server.ip_address, port=server.ssh_port,
+                username=account.username, password=account.password, ssh_key=account.ssh_key,
+                use_ephemeral_cert=use_cert, cert_validity_minutes=cert_minutes, cols=spec.cols, rows=spec.rows,
+            )
+            ch = _SSHChannel(session.session_id)
     except Exception as e:  # noqa: BLE001
         await route_stack.aclose()
         raise SessionOpenError(f"Connection failed: {e}") from e
 
-    server_name, user_name, user_id, srv_id = server.name, user.display_name, user.id, server.id
-    cert_max_seconds = cert_minutes * 60 if use_cert else None
-    sid = session.session_id
+    server_name, user_name, user_id = server.name, user.display_name, user.id
+    srv_id = server.id if is_server else None          # FK to servers
+    live_target_id = str(server.id)
+    acl_target = None if is_server else server        # non-server targets are passed as is
+    cert_max_seconds = cert_minutes * 60 if (use_cert and spec.open_channel is None) else None
+    sid = ch.session_id
 
     async with async_session() as db:
         masker = await masking.load(db)
@@ -123,7 +160,7 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
         # Recording row created at start: an interrupted session still leaves a trace
         db.add(SessionRecording(
             session_id=sid, server_id=srv_id, user_id=user_id, server_name=server_name, user_name=user_name,
-            protocol="ssh", account=account.label, client_ip=ip, events=None,
+            protocol=spec.protocol, account=account.label, client_ip=ip, events=None,
         ))
         await db.commit()
 
@@ -137,7 +174,7 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
     await fe.connected(sid)
     try:
         await live.register(sid, {
-            "protocol": "ssh", "user_id": str(user_id), "user": user_name, "server_id": str(srv_id),
+            "protocol": "ssh", "user_id": str(user_id), "user": user_name, "server_id": live_target_id,
             "server": server_name, "account": account.label, "client_ip": ip, "channel": spec.channel,
         })
     except Exception:  # noqa: BLE001 - live monitoring must never block a session
@@ -168,7 +205,7 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
     async def _from_server():
         try:
             while not stop_event.is_set():
-                data = await session_manager.read(sid)
+                data = await ch.read()
                 if data is None:
                     await _safe(fe.disconnected())
                     break
@@ -199,14 +236,14 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
                     break
                 last_activity = time.time()
                 if ev[0] == "resize":
-                    await session_manager.resize(sid, ev[1], ev[2])
+                    await ch.resize(ev[1], ev[2])
                     continue
                 data = ev[1]
                 recorder.record_input(data)
                 for chunk, enter in tracker.split(data):
                     if chunk:
                         tracker.feed(chunk)
-                        await session_manager.write(sid, chunk)
+                        await ch.write(chunk)
                     if not enter:
                         continue
                     in_app = tracker.alt_screen
@@ -216,7 +253,7 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
                     if command:
                         async with async_session() as cdb:
                             cuser = await cdb.get(User, user_id)
-                            cserver = await cdb.get(Server, srv_id)
+                            cserver = acl_target or await cdb.get(Server, srv_id)
                             outcome = await check_command(cdb, cuser, cserver, account.username, command, ip,
                                                           source="terminal")
                             # full-screen app: journal only what gets blocked (a faked
@@ -233,9 +270,9 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
                             if in_app:
                                 continue  # Enter withheld; nothing typed into the app
                             # Never send Enter: clear the typed line, get a fresh prompt
-                            await session_manager.write(sid, KILL_LINE + b"\r")
+                            await ch.write(KILL_LINE + b"\r")
                             continue
-                    await session_manager.write(sid, b"\r")
+                    await ch.write(b"\r")
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -279,13 +316,13 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
     finally:
         for t in tasks:
             t.cancel()
-        await session_manager.close(sid)
+        await ch.close()
         await route_stack.aclose()
         try:
             await live.unregister(sid)
         except Exception:  # noqa: BLE001
             pass
-        await _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masker.hits)
+        await _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masker.hits, spec.protocol)
 
 
 async def _safe(coro) -> None:
@@ -295,17 +332,18 @@ async def _safe(coro) -> None:
         pass
 
 
-async def _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masked_hits) -> None:
+async def _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masked_hits,
+                 protocol: str = "ssh") -> None:
     """Store the recording (D8) and close the audit trail."""
     try:
         async with async_session() as db:
             payload = json.dumps(recorder.events, separators=(",", ":")).encode()
             started = datetime.fromtimestamp(recorder.start_time, timezone.utc)
-            stored = await recording_storage.store(db, f"ssh/{started:%Y/%m/%d}/{sid}.json.gz", payload)
+            stored = await recording_storage.store(db, f"{protocol}/{started:%Y/%m/%d}/{sid}.json.gz", payload)
             rec = (await db.execute(select(SessionRecording).where(SessionRecording.session_id == sid))).scalar_one_or_none()
             if rec is None:
                 rec = SessionRecording(session_id=sid, server_id=srv_id, user_id=user_id,
-                                       server_name=server_name, user_name=user_name, protocol="ssh")
+                                       server_name=server_name, user_name=user_name, protocol=protocol)
                 db.add(rec)
             rec.events = None
             rec.storage_type, rec.storage_key, rec.sha256 = stored.storage_type, stored.key, stored.sha256

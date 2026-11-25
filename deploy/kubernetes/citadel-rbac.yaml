@@ -1,0 +1,63 @@
+# Service account used by Citadel to reach a cluster (lot 8).
+# Citadel decides who may do what (its own K8s policies); this account only
+# needs the operations Citadel offers. Remove the "manage" rules if no one
+# should restart or scale from Citadel, the "exec" rule if no shell.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: citadel-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: citadel
+  namespace: citadel-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: citadel-token
+  namespace: citadel-system
+  annotations:
+    kubernetes.io/service-account.name: citadel
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: citadel
+rules:
+  # view, logs
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  # exec (shell in a container)
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  # manage: restart a pod, scale, rollout restart
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: citadel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: citadel
+subjects:
+  - kind: ServiceAccount
+    name: citadel
+    namespace: citadel-system

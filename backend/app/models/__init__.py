@@ -13,6 +13,7 @@ from app.models.metric import ServerMetric, AlertRule
 from app.models.session_recording import SessionRecording
 from app.models.settings import AppSetting
 from app.models.operations import Zone, Gateway, Playbook, Job, JobTarget, CloudAccount, CloudPendingVM
+from app.models.kubernetes import K8sCluster, K8sPolicy
 from app.models.identity import UserDevice, LoginEvent, UserSSHKey, SSHConnectToken, CustomRole
 from app.models.audit_trail import CommandLog, RecordingStorage, SiemTarget
 from app.models.governance import (

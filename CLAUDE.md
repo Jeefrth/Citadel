@@ -50,6 +50,9 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **Lot 8** (11/2026) : Kubernetes (clusters, règles par espace de noms, logs, actions, shell dans un conteneur sur le cœur de session commun). Voir `docs/kubernetes.md`
+- **Lot 7** (11/2026) : proxy SSH, masquage, push de comptes, sauvegarde chiffrée, API applications, risques, rôles personnalisés. Voir `docs/operations.md`, `docs/vault.md`, `docs/governance.md`, `docs/audit.md`
+- **Lot 6** (11/2026) : journal des connexions et appareils, rapports, rappel d'expiration et import/export des règles, revue des VM cloud, téléchargement groupé des enregistrements
 - **Sprint PAM-5** (11/2026) : opérations : SFTP web, tâches (commandes, playbooks Ansible), zones et passerelles, import Azure. Voir `docs/operations.md`
 - **Sprint PAM-4** (11/2026) : audit : enregistrement RDP, journal des commandes, sessions en direct (observer, terminer), stockage local/S3/Azure + SHA-256 + rétention, export SIEM. Voir `docs/audit.md`
 - **Sprint PAM-3** (11/2026) : ACL de connexion et de commandes (API + terminal, `websocket/line_tracker.py`), validation à 4 yeux, demandes d'accès, notifications. Voir `docs/governance.md`
@@ -162,6 +165,8 @@ Services dev : `guacd` (1.6.0, non publié, enregistre dans `data/recordings/raw
 11. **Clés API** : `ctk_<prefix>_<secret>`, seul le SHA-256 est stocké, héritent des droits de l'utilisateur, ne peuvent pas créer d'autres clés.
 12. **Gouvernance** : point de contrôle unique `services/enforcement.py` (terminal, ticket RDP, execute, tâches, mises à jour). **Tout nouveau chemin qui exécute quelque chose sur un serveur doit appeler `enforce_connect` + `check_command` avec l'IP client, et `log_command`** (les mises à jour l'oubliaient : commande canonique `system-update ...`). Les tâches stockent `client_ip` à la création. Règles ordonnées par priorité, première correspondance gagnante, aucune = autorisé. 4 yeux strict (jamais sa propre demande). IP client via `core/governance.client_ip` (X-Forwarded-For seulement depuis `TRUSTED_PROXIES`).
 13. **Audit** : enregistrements stockés hors base (gzip + SHA-256 vérifié à la relecture, `services/recording_storage.py`), registre des sessions en direct dans Redis (`services/live.py`, pub/sub sortie + contrôle), SIEM par curseur persistant (`services/siem.py`).
+15. **Cœur de session** : `services/terminal_core.py` porte tout terminal interactif (web, proxy SSH, shell Kubernetes) via un `TargetChannel` (read/write/resize/close). Une cible qui n'est pas un serveur (`is_k8s`) n'a pas de server_id en audit et ses règles « validation » refusent.
+16. **Permissions** : `core/auth.CAPABILITIES` + `require_perm(cap)` / `has_perm(user, cap)` (rôles personnalisés). Les fonctions qui pourraient élargir des droits ou exporter tous les secrets restent `require_role(ADMIN)`.
 14. **Routage** : `services/routing.py`, `async with routing.via(server)` déclare la route ; `ssh_service._connect` et `session_manager` prennent la passerelle en `tunnel=`, WinRM/RDP/Ansible passent par `tcp_endpoint` (redirection de port). Tout nouvel accès à un serveur doit être entouré de `via(server)`.
 
 ## Commandes utiles
