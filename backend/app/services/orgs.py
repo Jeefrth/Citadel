@@ -121,3 +121,43 @@ async def answer_invitation(db: AsyncSession, user: User, invitation_id, accept:
         await db.delete(inv)
         await db.commit()
     return {"accepted": accept, "org": {"id": str(org.id), "name": org.name, "slug": org.slug}}
+
+
+async def delete_org(db: AsyncSession, org: Organization, actor: User) -> dict:
+    """Platform admin: erase an organisation and everything it owns. Only an
+    inactive, non-default organisation. Recording and backup files are removed
+    from its storage first (best effort), then the rows (ON DELETE CASCADE).
+    Its Transit key stays in the vault (the policy cannot delete keys): the
+    blobs are gone with the rows anyway."""
+    import logging
+    from app.models.pam import AccountBackup
+    from app.models.session_recording import SessionRecording
+    from app.services import live, recording_storage
+    if org.is_default:
+        raise HTTPException(status_code=400, detail="L'organisation par défaut ne peut pas être supprimée")
+    if org.is_active:
+        raise HTTPException(status_code=400, detail="Désactivez l'organisation avant de la supprimer")
+    files = failed = 0
+    with tenancy.tenant(org):
+        await tenancy.apply_to_session(db)
+        for meta in await live.list_active():
+            await live.send_control(meta["session_id"], {"action": "kill", "by": actor.display_name,
+                                                         "reason": "organisation supprimée"})
+        for model in (SessionRecording, AccountBackup):
+            for row in (await db.execute(select(model).where(model.storage_key.is_not(None)))).scalars().all():
+                try:
+                    await recording_storage.remove(db, row.storage_type, row.storage_key)
+                    files += 1
+                except Exception:  # noqa: BLE001
+                    failed += 1
+                    logging.getLogger("citadel.orgs").warning("could not remove %s of %s", row.storage_key, org.slug)
+        await db.commit()
+    name, slug = org.name, org.slug
+    with tenancy.system():
+        await tenancy.apply_to_session(db)
+        await db.delete(org)
+        # platform event: the organisation's own audit trail is gone with it
+        db.add(AuditLog(org_id=None, user_id=actor.id, action="org.delete",
+                        result=f"{name} ({slug}), {files} fichier(s) supprimé(s), {failed} échec(s)"))
+        await db.commit()
+    return {"deleted": slug, "files_removed": files, "files_failed": failed}

@@ -1,8 +1,9 @@
 // Platform > Organisations (platform admin only): list, create (own encryption key
-// and SSH CA), rename, activate / deactivate. The default organisation stays active.
+// and SSH CA), rename, activate / deactivate, delete (inactive only, slug typed
+// again). The default organisation stays active and cannot be deleted.
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowRightLeft, Building2, Check, KeyRound, Pencil, Plus, ShieldCheck } from "lucide-react";
+import { ArrowRightLeft, Building2, Check, KeyRound, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { SLUG_PATTERN, suggestSlug, switchOrg } from "@/services/org";
@@ -177,6 +178,70 @@ function RenameOrgModal({
   );
 }
 
+function DeleteOrgModal({
+  org,
+  onClose,
+  onDeleted,
+}: {
+  org: PlatformOrg;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const valid = typed.trim().toLowerCase() === org.slug;
+
+  const submit = async () => {
+    if (!valid) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.post(`/api/platform/orgs/${org.id}/delete`, { confirm_slug: typed.trim() });
+      onDeleted();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Supprimer l'organisation"
+      description="Action définitive."
+      onClose={onClose}
+      size="md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Annuler
+          </Button>
+          <Button variant="destructive" onClick={submit} disabled={!valid || saving}>
+            <Trash2 /> Supprimer définitivement
+          </Button>
+        </>
+      }
+    >
+      <ErrorBox message={error} />
+      <p className="text-sm">
+        Tout ce qui appartient à <strong>{org.name}</strong> est effacé : serveurs, comptes et secrets, règles,
+        enregistrements de sessions et sauvegardes, journal d'audit, membres et invitations. Les comptes des personnes
+        sont conservés, seule leur appartenance disparaît.
+      </p>
+      <Field label={`Tapez « ${org.slug} » pour confirmer`}>
+        <Input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          autoFocus
+          autoComplete="off"
+        />
+      </Field>
+    </Modal>
+  );
+}
+
 /** "Propre" (own key / CA) or "Commune" (shared with the platform, default org). */
 function OwnChip({ own, icon: Icon, label }: { own: boolean; icon: typeof KeyRound; label: string }) {
   return (
@@ -194,6 +259,7 @@ export default function PlatformOrgs() {
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<PlatformOrg | null>(null);
   const [deactivating, setDeactivating] = useState<PlatformOrg | null>(null);
+  const [deleting, setDeleting] = useState<PlatformOrg | null>(null);
   const [toggleLoading, setToggleLoading] = useState<string | null>(null);
   const [created, setCreated] = useState<PlatformOrg | null>(null);
 
@@ -362,6 +428,22 @@ export default function PlatformOrgs() {
                           <Pencil />
                         </Button>
                       </Tip>
+                      {!o.is_default && (
+                        <Tip content={o.is_active ? "Désactivez-la d'abord pour pouvoir la supprimer" : "Supprimer"}>
+                          <span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => setDeleting(o)}
+                              disabled={o.is_active}
+                              aria-label={`Supprimer ${o.name}`}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </span>
+                        </Tip>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -391,6 +473,18 @@ export default function PlatformOrgs() {
             replace(org);
             setRenaming(null);
             toast.success("Organisation renommée");
+          }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteOrgModal
+          org={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            toast.success("Organisation supprimée");
+            load();
           }}
         />
       )}

@@ -167,3 +167,19 @@ async def platform_update(org_id: uuid.UUID, data: OrgPatch, db: AsyncSession = 
             db.add(AuditLog(user_id=user.id, action="org.update", result=f"{org.slug}: {', '.join(changes)}"))
             await db.commit()
     return _org_read(org)
+
+
+class OrgDelete(BaseModel):
+    confirm_slug: str
+
+
+@router.post("/platform/orgs/{org_id}/delete")
+async def platform_delete(org_id: uuid.UUID, data: OrgDelete, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(require_platform_admin)):
+    """Erase an inactive organisation and all its data. Irreversible: the slug must be typed again."""
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+    if data.confirm_slug.strip().lower() != org.slug:
+        raise HTTPException(status_code=400, detail="L'identifiant saisi ne correspond pas")
+    return await orgs_svc.delete_org(db, org, user)

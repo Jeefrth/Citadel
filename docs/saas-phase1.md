@@ -28,7 +28,7 @@ Décisions validées par JF le 25/11/2026 (objectif : SaaS) :
 - CLI `secrets-status|migrate|rotate-key` : org par org.
 
 ### API
-- `/api/auth/me` (org courante, orgs accessibles, `is_platform_admin`), `/api/orgs/mine`, `/api/org/members` (+ PATCH / DELETE = retirer de l'org), `/api/org/invitations`, `/api/platform/orgs` (super-admin connecté, pas de clé d'accès). `/api/admin/users` et `/api/users` = membres de l'org courante.
+- `/api/auth/me` (org courante, orgs accessibles, `is_platform_admin`), `/api/orgs/mine`, `/api/org/members` (+ PATCH / DELETE = retirer de l'org), `/api/org/invitations`, `/api/platform/orgs` (super-admin connecté, pas de clé d'accès), suppression `POST /api/platform/orgs/{id}/delete` {confirm_slug} : seulement une org désactivée et pas celle par défaut ; efface fichiers d'enregistrements et de sauvegardes puis toutes les lignes (cascade), sessions en cours terminées, événement `org.delete` gardé au niveau plateforme ; la clé Transit reste dans le coffre (la politique interdit la suppression). `/api/admin/users` et `/api/users` = membres de l'org courante.
 
 ### Tests
 - `tests/test_tenancy.py` (contexte, clés par org, préfixes forgés, CA, préfixe du proxy) ; suite complète : 158 tests OK.
