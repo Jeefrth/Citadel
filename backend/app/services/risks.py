@@ -100,6 +100,15 @@ async def detect(db: AsyncSession, now: datetime) -> list[Found]:
             out.append(Found(f"app_any_ip:{app.id}", "application", "medium",
                              f"Application sans restriction d'IP : {app.name}", "Limiter les adresses autorisées.", "/settings?tab=applications"))
 
+    from app.models.kubernetes import K8sCluster
+    for c in (await db.execute(select(K8sCluster).where(K8sCluster.is_active.is_(True)))).scalars().all():
+        if c.skip_tls_verify:
+            out.append(Found(f"k8s_no_tls:{c.id}", "kubernetes", "medium",
+                             f"Cluster sans vérification TLS : {c.name}", "Renseigner la CA du cluster.", f"/kubernetes/{c.id}"))
+        if c.last_check_status == "error":
+            out.append(Found(f"k8s_unreachable:{c.id}", "kubernetes", "low",
+                             f"Cluster en erreur : {c.name}", (c.last_check_message or "")[:500], f"/kubernetes/{c.id}"))
+
     for p in (await db.execute(select(AccessPolicy).where(AccessPolicy.is_active.is_(True)))).scalars().all():
         broad = "@ALL" in (p.accounts or []) and "execute" in (p.actions or []) and p.valid_until is None
         if broad and not (p.servers or p.nodes or p.labels):

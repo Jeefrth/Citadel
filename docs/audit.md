@@ -95,3 +95,4 @@ Audit > Risques : analyse une fois par jour (ou à la demande), chaque risque ga
 | Application sans restriction d'IP | moyenne |
 | Règle d'accès très large (tous les comptes, exécution, sans fin ni cible) | moyenne |
 | Compte sans secret | faible |
+| Cluster Kubernetes sans vérification TLS ; cluster en erreur | moyenne / faible |
