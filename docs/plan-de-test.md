@@ -20,6 +20,7 @@ scripts/test-lab.sh up --rdp         # idem + bureau RDP (image d'environ 1 Go)
 scripts/test-lab.sh provision        # enregistre le labo dans Citadel (relançable, sans doublon) : voir 0.3
 scripts/test-lab.sh users            # utilisateurs de test non-admin + clés d'accès (data/lab/keys.txt)
 scripts/test-lab.sh status           # rappel des cibles et identifiants
+scripts/test-lab.sh unprovision      # retire le labo de Citadel (l'audit est conservé)
 scripts/test-lab.sh pause            # arrête les conteneurs (rien n'est perdu) ; resume pour reprendre
 ```
 
@@ -305,6 +306,8 @@ Déroulée dans Chrome par Claude (pilotage du navigateur) et JF (préparation 0
 - **B2** La suppression refusée d'un dossier non vide n'est pas journalisée dans l'audit (`file.delete` en échec absent), alors que la doc promet la trace des échecs.
 
 - **B3** Mon compte > « Mes connexions » affiche les connexions de tous les utilisateurs quand on est admin (l'écran appelle `/api/login-events` sans filtre, qui renvoie tout aux détenteurs de la permission `audit`). Exemple : le refus de Lab Operator apparaît dans la liste de JF.
+
+- **B4 (corrigé)** Supprimer un serveur effaçait tout son historique d'audit, sans tracer la suppression. Désormais l'historique est détaché du serveur (conservé) et `server.delete` est journalisé.
 
 ### Remarques
 - A1 : une reconnexion Entra du même navigateur dans les 8 h ne crée pas de ligne « connexion » (prévu, mais peut surprendre).

@@ -2,6 +2,7 @@
 # Citadel test lab: disposable targets on the compose network, for docs/plan-de-test.md.
 #   scripts/test-lab.sh up [--rdp]   start the lab (RDP desktop optional: ~1 GB image)
 #   scripts/test-lab.sh provision    register the lab in Citadel (nodes, credentials, zone, servers, cluster, rules)
+#   scripts/test-lab.sh unprovision  remove the lab objects from Citadel (audit trail kept)
 #   scripts/test-lab.sh users        create lab users (operator, viewer, custom role) + access keys
 #   scripts/test-lab.sh pause        stop the lab containers (state kept, Citadel unchanged)
 #   scripts/test-lab.sh resume       start them again (same k3s token, nothing to re-provision)
@@ -112,6 +113,12 @@ provision() {
   docker compose exec -T backend rm -f /tmp/k3s.token /tmp/lab_provision.py
 }
 
+unprovision() {
+  docker compose cp scripts/lab/provision.py backend:/tmp/lab_provision.py >/dev/null 2>&1
+  docker compose exec -T backend python /tmp/lab_provision.py --remove
+  docker compose exec -T backend rm -f /tmp/lab_provision.py
+}
+
 users() {
   mkdir -p "$OUT" && chmod 700 "$OUT"
   docker compose cp scripts/lab/lab_users.py backend:/tmp/lab_users.py >/dev/null 2>&1
@@ -144,10 +151,11 @@ down() {
 case "${1:-}" in
   up) shift; up "$@" ;;
   provision) provision ;;
+  unprovision) unprovision ;;
   users) users ;;
   pause) pause ;;
   resume) resume ;;
   status) status ;;
   down) down ;;
-  *) sed -n '2,10p' "$0"; exit 1 ;;
+  *) sed -n '2,11p' "$0"; exit 1 ;;
 esac

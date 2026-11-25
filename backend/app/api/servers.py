@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user, require_role, has_perm, require_perm
@@ -267,7 +267,10 @@ async def delete_server(
     server, _ = await require_server(db, user, server_id)
     await db.execute(sa_delete(ServerMetric).where(ServerMetric.server_id == server_id))
     await db.execute(sa_delete(UpdateJob).where(UpdateJob.server_id == server_id))
-    await db.execute(sa_delete(AuditLog).where(AuditLog.server_id == server_id))
+    # The audit trail outlives the server: detach it, never delete it
+    await db.execute(sa_update(AuditLog).where(AuditLog.server_id == server_id).values(server_id=None))
+    db.add(AuditLog(user_id=user.id, action="server.delete",
+                    result=f"{server.name} ({server.ip_address}, {server.os_type.value}) id={server.id}"))
     await db.delete(server)
     await db.commit()
 

@@ -134,4 +134,53 @@ async def main():
             await db.commit()
 
 
-asyncio.run(main())
+async def remove():
+    """Remove the lab objects from Citadel (the audit trail is kept)."""
+    async with async_session() as db:
+        admin = (await db.execute(select(User).where(User.role == UserRole.ADMIN).order_by(User.created_at))).scalars().first()
+        prefix = secrets.token_hex(4)
+        key = f"ctk_{prefix}_{secrets.token_urlsafe(24)}"
+        db.add(AccessKey(user_id=admin.id, name="lab-provision", prefix=prefix, key_hash=hash_access_key(key), is_active=True))
+        await db.commit()
+    c = httpx.AsyncClient(base_url=API, headers={"Authorization": f"Bearer {key}"}, timeout=60)
+
+    async def rm(path, label):
+        r = await c.delete(path)
+        print(f"  {label:<28} {'supprimé' if r.status_code in (200, 204) else f'ERREUR {r.status_code} {r.text[:120]}'}")
+
+    try:
+        for p in (await c.get("/k8s/policies")).json():
+            if p["name"] == "Labo k8s":
+                await rm(f"/k8s/policies/{p['id']}", "règle k8s Labo k8s")
+        for p in (await c.get("/access-policies")).json():
+            if p["name"] == "Labo":
+                await rm(f"/access-policies/{p['id']}", "règle d'accès Labo")
+        for k in (await c.get("/k8s/clusters")).json():
+            if k["name"] == "lab-k3s":
+                await rm(f"/k8s/clusters/{k['id']}", "cluster lab-k3s")
+        for s in (await c.get("/servers/")).json():
+            if s["name"] in ("lab-linux", "lab-linux2", "lab-isolated", "lab-rdp"):
+                await rm(f"/servers/{s['id']}", f"serveur {s['name']}")
+        for z in (await c.get("/zones")).json():
+            if z["name"] == "Isolée":
+                for g in z.get("gateways", []):
+                    await rm(f"/gateways/{g['id']}", f"passerelle {g['name']}")
+                await rm(f"/zones/{z['id']}", "zone Isolée")
+        for cr in (await c.get("/servers/credentials/")).json():
+            if cr["name"] in ("lab-deploy", "lab-alice", "lab-gw", "lab-rdp") or cr["name"].startswith("lab-linux"):
+                await rm(f"/servers/credentials/{cr['id']}", f"identifiant {cr['name']}")
+        nodes = (await c.get("/nodes")).json()
+        labo = next((n for n in nodes if n["name"] == "Labo" and not n.get("parent_id")), None)
+        if labo:
+            for n in nodes:
+                if n.get("parent_id") == labo["id"] and n["name"] == "Web":
+                    await rm(f"/nodes/{n['id']}", "nœud Labo/Web")
+            await rm(f"/nodes/{labo['id']}", "nœud Labo")
+    finally:
+        await c.aclose()
+        async with async_session() as db:
+            await db.execute(delete(AccessKey).where(AccessKey.name == "lab-provision"))
+            await db.commit()
+
+
+asyncio.run(remove() if "--remove" in sys.argv else main())
