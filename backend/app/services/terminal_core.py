@@ -253,7 +253,11 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
                     if command:
                         async with async_session() as cdb:
                             from app.services.members import load_member
-                            cuser = await load_member(cdb, user_id, require_active=False) or await cdb.get(User, user_id)
+                            cuser = await load_member(cdb, user_id)
+                            if cuser is None:   # removed or suspended meanwhile
+                                await fe.send_output(_red("Vous n'avez plus accès à cette organisation : session fermée."))
+                                stop_event.set()
+                                break
                             cserver = acl_target or await cdb.get(Server, srv_id)
                             outcome = await check_command(cdb, cuser, cserver, account.username, command, ip,
                                                           source="terminal")

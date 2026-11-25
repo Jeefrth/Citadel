@@ -583,8 +583,10 @@ async def host_fingerprint() -> str | None:
 
 
 async def serve(stop: asyncio.Event) -> None:
-    async with async_session() as db:
-        key = await _host_key(db)
+    from app.core import tenancy
+    with tenancy.system():   # platform setting (org_id NULL): writable only in system mode
+        async with async_session() as db:
+            key = await _host_key(db)
     server = None
     while server is None and not stop.is_set():
         try:

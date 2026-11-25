@@ -70,7 +70,8 @@ async def notify(
     """
     if recipients is None:
         recipients = await admin_ids(db)
-    recipients = list(dict.fromkeys(recipients))
+    from app.services.members import filter_member_ids
+    recipients = await filter_member_ids(db, list(dict.fromkeys(recipients)))   # never outside the organisation
     for uid in recipients:
         db.add(Notification(user_id=uid, event=event, level=level, title=title[:255], body=body, link=link))
     task = asyncio.create_task(_dispatch(event, title, body, link, recipients, level))

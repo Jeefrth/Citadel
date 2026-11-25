@@ -19,4 +19,6 @@ async def get_me(user: User = Depends(get_current_user), db: AsyncSession = Depe
     me.is_platform_admin = user.is_platform_admin
     me.org = next((o for o in orgs if o.id == user.org_id), None)
     me.orgs = orgs
+    from app.services.orgs import my_invitations
+    me.pending_invitations = len(await my_invitations(db, user))
     return me

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, require_role, user_orgs
+from app.core.auth import get_current_user, get_identity, require_role, user_orgs
 from app.core.database import get_db
 from app.models.audit import AuditLog
 from app.models.base import UserRole
@@ -40,6 +40,31 @@ def _org_read(o: Organization, members: int | None = None) -> dict:
 async def my_orgs(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     return [{**_org_read(o), "role": m.role.value if m else UserRole.ADMIN.value, "current": o.id == user.org_id}
             for o, m in await user_orgs(db, user)]
+
+
+# ── My invitations (no organisation needed: someone without any can accept one) ──
+
+@router.get("/me/invitations")
+async def my_invitations(db: AsyncSession = Depends(get_db), user: User = Depends(get_identity)):
+    rows = await orgs_svc.my_invitations(db, user)
+    names = {o.id: o for o in (await db.execute(select(Organization).where(
+        Organization.id.in_([i.org_id for i in rows])))).scalars().all()} if rows else {}
+    return [{"id": str(i.id), "org": {"id": str(i.org_id), "name": names[i.org_id].name, "slug": names[i.org_id].slug},
+             "role": i.role.value, "created_at": i.created_at} for i in rows]
+
+
+@router.post("/me/invitations/{invitation_id}/accept")
+async def accept_invitation(invitation_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_identity)):
+    if getattr(user, "_via_access_key", False):
+        raise HTTPException(status_code=403, detail="Not allowed with an access key")
+    return await orgs_svc.answer_invitation(db, user, invitation_id, True)
+
+
+@router.post("/me/invitations/{invitation_id}/decline")
+async def decline_invitation(invitation_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_identity)):
+    if getattr(user, "_via_access_key", False):
+        raise HTTPException(status_code=403, detail="Not allowed with an access key")
+    return await orgs_svc.answer_invitation(db, user, invitation_id, False)
 
 
 # ── Members of the current organisation ──

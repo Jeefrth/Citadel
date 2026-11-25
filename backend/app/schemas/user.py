@@ -36,6 +36,7 @@ class MeRead(UserRead):
     is_platform_admin: bool = False
     org: OrgRef | None = None
     orgs: list[OrgRef] = []
+    pending_invitations: int = 0
 
 
 class UserUpdate(BaseModel):

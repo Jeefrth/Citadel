@@ -173,11 +173,18 @@ def upgrade() -> None:
         op.execute(f"CREATE POLICY org_isolation ON {t} USING {POLICY} WITH CHECK {POLICY}")
     op.execute("ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE app_settings FORCE ROW LEVEL SECURITY")
-    op.execute(f"CREATE POLICY org_isolation ON app_settings USING {SETTINGS_POLICY} WITH CHECK {SETTINGS_POLICY}")
+    # platform rows (org_id NULL) are readable by every organisation, writable only in system()
+    op.execute(f"CREATE POLICY org_read ON app_settings FOR SELECT USING {SETTINGS_POLICY}")
+    for cmd in ("INSERT", "UPDATE", "DELETE"):
+        check = f"WITH CHECK {POLICY}" if cmd != "DELETE" else ""
+        using = f"USING {POLICY}" if cmd != "INSERT" else ""
+        op.execute(f"CREATE POLICY org_write_{cmd.lower()} ON app_settings FOR {cmd} {using} {check}")
 
 
 def downgrade() -> None:
     """Back to a single organisation: only the default organisation's data is kept."""
+    for p in ("org_read", "org_write_insert", "org_write_update", "org_write_delete"):
+        op.execute(f"DROP POLICY IF EXISTS {p} ON app_settings")
     for t in TENANT_TABLES + ["app_settings"]:
         op.execute(f"DROP POLICY IF EXISTS org_isolation ON {t}")
         op.execute(f"ALTER TABLE {t} NO FORCE ROW LEVEL SECURITY")

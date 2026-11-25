@@ -40,6 +40,18 @@ Décisions validées par JF le 25/11/2026 (objectif : SaaS) :
 - Une connexion Entra est journalisée dans l'org de la première requête de l'appareil.
 - Limitation de débit et liste d'adresses autorisées : réglages par org, mais le middleware n'en tient pas compte (comme avant).
 
+### Revue de sécurité (25/11/2026, 4 relecteurs + vérification adverse)
+Corrigé :
+- Invitations : un admin d'organisation ne fait plus entrer directement une personne existante (consentement exigé : acceptation depuis Mon compte, `/api/me/invitations`), réponse identique que l'adresse ait un compte ou non (pas d'énumération). Ajout direct réservé au super-admin (premier admin d'une nouvelle org). La revendication `email` d'Entra (modifiable, non vérifiée) n'est plus utilisée, les invités `#EXT#` sont refusés.
+- Retrait d'un membre de l'org par défaut annulé à la connexion suivante : l'adhésion automatique n'a lieu qu'à la création du compte. Le retrait supprime aussi les liens groupes / règles de l'org, désactive les clés d'accès de l'org et termine les sessions ouvertes ; une session ouverte se ferme à la commande suivante d'un membre retiré ou suspendu.
+- Afficher les appareils dans B révoquait les clés d'accès de A (rapprochement filtré par org) : recherche en `system()`.
+- Notifications : destinataires limités aux membres de l'org.
+- Sauvegardes de comptes : clé de stockage par org et unique.
+- RLS `app_settings` : lignes plateforme lisibles par tous, modifiables seulement en `system()`.
+- Identifiant d'org qui ressemblerait à un UUID refusé ; résolution de l'en-tête par id d'abord.
+- Front : organisation lue une fois par onglet ; changement dans un autre onglet = avertissement bloquant (pas d'action dans la mauvaise org).
+
+Non corrigé (faible) : numérotation des demandes de validation globale à la plateforme (le saut de numéros révèle l'activité des autres) ; règles Kubernetes et ACL acceptant des identifiants hors org (sans effet).
+
 ## Reste à faire
-7. Front (agent en cours) : sélecteur d'organisation, en-tête, org dans les WebSockets, Paramètres > Membres et invitations, page super-admin Organisations.
-8. Revue de sécurité multi-agents ciblée sur les fuites entre organisations, puis recette dans le navigateur, puis fusion dans `main` (migration à appliquer sur la vraie base, relancer `vault-bootstrap`).
+- Recette dans le navigateur, puis fusion dans `main` (sauvegarde de la base, migration, relancer `vault-bootstrap`).

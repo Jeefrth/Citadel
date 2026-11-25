@@ -156,7 +156,8 @@ async def run_backup(db: AsyncSession, *, trigger: str, destinations: list[str],
         if "storage" in destinations:
             try:
                 backend = await recording_storage.active_backend(db)
-                key = f"backups/{filename}"
+                import uuid as _uuid
+                key = f"backups/{require_org_id()}/{stamp}-{_uuid.uuid4().hex[:8]}-{filename}"
                 await backend.put(key, blob)
                 row.storage_type, row.storage_key = backend.type, key
             except Exception as e:  # noqa: BLE001

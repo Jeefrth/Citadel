@@ -105,7 +105,9 @@ async def _validate_token(token: str) -> dict:
 
 def _claim_email(claims: dict) -> str:
     # v2 access tokens often carry "upn" but not "preferred_username"
-    for k in ("preferred_username", "upn", "email", "unique_name"):
+    # Not the "email" claim: optional, editable and unverified in Entra (it would let
+    # someone claim an invitation sent to another address)
+    for k in ("preferred_username", "upn", "unique_name"):
         v = claims.get(k)
         if v and "@" in v:
             return v
@@ -141,38 +143,24 @@ async def _sync_user(claims: dict, db: AsyncSession) -> User:
         db.add(user)
         await db.flush()
         default = await _default_org(db)
-        if is_first_user and default is not None:
+        if default is not None and is_first_user:
             db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.ADMIN))
+        elif default is not None and settings.AUTO_JOIN_DEFAULT_ORG:
+            # single-tenant installs: newcomers are viewers of the default organisation,
+            # as before organisations existed. Only at account creation: someone
+            # removed from it later is not added back.
+            db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.VIEWER))
 
     user.last_login = datetime.now(timezone.utc)
     user.display_name = claims.get("name", user.display_name)
     if not user.email:
         user.email = _claim_email(claims)
-    await _accept_invitations(db, user)
     await db.commit()
     return user
 
 
 async def _default_org(db: AsyncSession) -> Organization | None:
     return (await db.execute(select(Organization).where(Organization.is_default.is_(True)))).scalar_one_or_none()
-
-
-async def _accept_invitations(db: AsyncSession, user: User) -> None:
-    """E-mail invitations become memberships at sign-in. Single-tenant installs
-    (AUTO_JOIN_DEFAULT_ORG) also put every new person in the default
-    organisation as viewer, as before organisations existed."""
-    email = (user.email or "").strip().lower()
-    have = {m.org_id for m in (await db.execute(select(OrgMembership).where(OrgMembership.user_id == user.id))).scalars()}
-    if email:
-        for inv in (await db.execute(select(OrgInvitation).where(func.lower(OrgInvitation.email) == email))).scalars().all():
-            if inv.org_id not in have:
-                db.add(OrgMembership(org_id=inv.org_id, user_id=user.id, role=inv.role))
-                have.add(inv.org_id)
-            await db.delete(inv)
-    if not have and settings.AUTO_JOIN_DEFAULT_ORG and not user.is_platform_admin:
-        default = await _default_org(db)
-        if default is not None:
-            db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.VIEWER))
 
 
 # ── Organisation binding ──
@@ -202,7 +190,7 @@ async def resolve_org(db: AsyncSession, user: User, wanted: str | None = None,
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cette clé n'est valable que dans son organisation")
     elif wanted:
         w = wanted.strip().lower()
-        match = [om for om in choices if str(om[0].id) == w or om[0].slug == w]
+        match = [om for om in choices if str(om[0].id) == w] or [om for om in choices if om[0].slug == w]
     else:
         match = choices[:1]
     if not match:
@@ -273,6 +261,25 @@ async def enforce_login_acl(db: AsyncSession, user: User, ip: str | None,
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access to Citadel denied by rule '{decision.rule}'",
         )
+
+
+async def get_identity(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """FastAPI dependency: the authenticated person, in NO organisation (no tenant
+    data reachable). Only for endpoints about the person themselves: their
+    organisations and pending invitations."""
+    from app.core.config import settings
+    if settings.DEV_MODE:
+        return await _get_or_create_dev_user(db)
+    if not credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    user = await authenticate_token(credentials.credentials, db)
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated")
+    return user
 
 
 async def get_current_user(

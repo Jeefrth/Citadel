@@ -85,6 +85,38 @@ async def main():
         # access key of acme refused with another org header
         check((await A.get("/servers/", headers={"X-Citadel-Org": "default"})).status_code == 403, "acme key refused in default")
 
+        # invitations: same answer for a known and an unknown address, no membership without consent
+        check((await A.post("/org/invitations", json={"email": "x@y.example", "role": "viewer"})).status_code == 403, "invitations refused with an access key")
+        from app.services.orgs import invite
+        from app.models.base import UserRole
+        async with async_session() as db:
+            o = await db.get(Organization, acme_id); jfu = await db.get(User, jf.id)
+            with tenancy.tenant(o):
+                await tenancy.apply_to_session(db)
+                r1 = await invite(db, o, "jean-francois.reithler@qiminfo.ch", UserRole.VIEWER, jfu)
+                r2 = await invite(db, o, "nobody@nowhere.example", UserRole.VIEWER, jfu)
+        check(r1.get("status") == "invited" and r2.get("status") == "invited", f"invite answers do not reveal accounts ({r1.get('status')}/{r2.get('status')})")
+        check(not any(o["slug"] == "acme-test" and o["role"] for o in (await D.get("/auth/me")).json()["orgs"]), "invited known user is not a member before accepting")
+        check((await D.get("/auth/me")).json().get("pending_invitations", 0) >= 1, "invited user sees a pending invitation")
+        from app.services.orgs import answer_invitation, my_invitations
+        async with async_session() as db:
+            jfu = await db.get(User, jf.id)
+            invs = [i for i in await my_invitations(db, jfu) if i.org_id == acme_id]
+            check(len(invs) == 1, "invitation listed for the invitee")
+            res = await answer_invitation(db, jfu, invs[0].id, True)
+            check(res["accepted"], "invitee accepts")
+        users_a = (await A.get("/users/")).json()
+        check(any(u["email"] == "jean-francois.reithler@qiminfo.ch" and u["role"] == "viewer" for u in users_a), "after acceptance: member with invited role")
+        rm = await A.delete(f"/org/members/{jf.id}")
+        check(rm.status_code == 400, f"cannot remove yourself ({rm.status_code})")
+        # platform settings: readable, not writable from an organisation (RLS)
+        async with async_session() as db:
+            async with db.begin():
+                await db.execute(text("select set_config('app.org_id', :o, true)"), {"o": str(default.id)})
+                n = (await db.execute(text("select count(*) from app_settings where org_id is null"))).scalar_one()
+                upd = (await db.execute(text("update app_settings set value = value where org_id is null"))).rowcount
+            check(n >= 1 and upd == 0, f"RLS: platform settings readable ({n}) but not writable ({upd}) from an org")
+
         # CA
         pub_a = (await A.get("/ca/public-key")).text; pub_d = (await D.get("/ca/public-key")).text
         check(pub_a != pub_d and pub_a.startswith("ssh-ed25519"), "acme has its own CA public key")

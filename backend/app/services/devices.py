@@ -137,8 +137,10 @@ async def reconcile_key_devices(db: AsyncSession, rows: list[UserDevice]) -> Non
     if not open_keys:
         return
     prefixes = [d.device_key.split(":", 1)[1] for d in open_keys]
-    active = {r[0] for r in (await db.execute(select(AccessKey.prefix).where(
-        AccessKey.prefix.in_(prefixes), AccessKey.is_active.is_(True)))).all()}
+    from app.core import tenancy
+    with tenancy.system():   # a key of another organisation is not "gone" (prefix only, nothing returned)
+        active = {r[0] for r in (await db.execute(select(AccessKey.prefix).where(
+            AccessKey.prefix.in_(prefixes), AccessKey.is_active.is_(True)))).all()}
     gone = [p for p in prefixes if p not in active]
     if gone:
         await close_key_devices(db, gone, "clé supprimée ou désactivée")

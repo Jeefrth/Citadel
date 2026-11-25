@@ -83,5 +83,21 @@ async def remove_member(db: AsyncSession, user_id, actor: User) -> None:
     if m.role == UserRole.ADMIN and not [a for a in await admin_ids(db) if a != u.id]:
         raise HTTPException(status_code=400, detail="Impossible : ce serait le dernier admin actif")
     await db.delete(m)
+    # Nothing of the organisation keeps reaching them: group and policy links,
+    # access keys of this organisation, open sessions here
+    from sqlalchemy import delete as sa_delete, update as sa_update
+    from app.models.pam import AccessKey, AccessPolicy, UserGroup, policy_users, user_group_members
+    await db.execute(sa_delete(user_group_members).where(
+        user_group_members.c.user_id == u.id,
+        user_group_members.c.group_id.in_(select(UserGroup.id).where(UserGroup.org_id == m.org_id))))
+    await db.execute(sa_delete(policy_users).where(
+        policy_users.c.user_id == u.id,
+        policy_users.c.policy_id.in_(select(AccessPolicy.id).where(AccessPolicy.org_id == m.org_id))))
+    await db.execute(sa_update(AccessKey).where(AccessKey.user_id == u.id).values(is_active=False))
     db.add(AuditLog(user_id=actor.id, action="user.remove", result=u.display_name))
     await db.commit()
+    from app.services import live
+    for meta in await live.list_active():   # this organisation's sessions only
+        if meta.get("user_id") == str(u.id):
+            await live.send_control(meta["session_id"], {"action": "kill", "by": actor.display_name,
+                                                         "reason": "retiré de l'organisation"})

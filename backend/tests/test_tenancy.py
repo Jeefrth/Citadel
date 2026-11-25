@@ -98,3 +98,16 @@ def test_ssh_proxy_org_prefix():
     assert split_org("web01") == (None, "web01")
     assert split_org("ACME:k8s/c/ns/pod") == ("acme", "k8s/c/ns/pod")
     assert split_org(None) == (None, None)
+
+
+@pytest.mark.parametrize("slug", ["12345678-1234-1234-1234-123456789abc", "12345678123412341234123456789abc", "default", "a", "Acme"])
+def test_slug_rejected(slug):
+    from fastapi import HTTPException
+    from app.services.orgs import check_slug
+    with pytest.raises(HTTPException):
+        check_slug(slug)
+
+
+def test_slug_accepted():
+    from app.services.orgs import check_slug
+    assert check_slug(" acme-corp ") == "acme-corp"
