@@ -549,7 +549,7 @@ function NodeFormModal({
 
 export default function Servers() {
   const navigate = useNavigate();
-  const { isAdmin } = useCurrentUser();
+  const isAdmin = useCurrentUser().can("servers");
 
   const [servers, setServers] = useState<ServerData[]>([]);
   const [nodes, setNodes] = useState<NodeData[]>([]);

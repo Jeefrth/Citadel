@@ -80,7 +80,9 @@ function KillDialog({
 }
 
 export default function LiveSessions() {
-  const { isAdmin, loading: userLoading } = useCurrentUser();
+  const { can, loading: userLoading } = useCurrentUser();
+  const isAdmin = can("audit");
+  const canKill = can("sessions");
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -198,14 +200,16 @@ export default function LiveSessions() {
                           <Button size="sm" onClick={() => setWatching(s)}>
                             <Eye /> Observer
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setKilling(s)}
-                            className="border-danger/30 text-danger hover:bg-danger/10 hover:text-danger"
-                          >
-                            <Power /> Terminer
-                          </Button>
+                          {canKill && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setKilling(s)}
+                              className="border-danger/30 text-danger hover:bg-danger/10 hover:text-danger"
+                            >
+                              <Power /> Terminer
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -224,7 +228,7 @@ export default function LiveSessions() {
             setWatching(null);
             load();
           }}
-          onKill={() => setKilling(watching)}
+          onKill={canKill ? () => setKilling(watching) : undefined}
         />
       )}
       {killing && (

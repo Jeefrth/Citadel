@@ -191,7 +191,8 @@ function ReportHeading({ report, usesPeriod }: { report: ReportData; usesPeriod:
 }
 
 export default function Reports() {
-  const { isAdmin, loading: userLoading } = useCurrentUser();
+  const { can, loading: userLoading } = useCurrentUser();
+  const isAdmin = can("audit");
   const [kind, setKind] = useState<ReportKind>("users");
   const [range, setRange] = useState(defaultRange);
   const [report, setReport] = useState<ReportData | null>(null);

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
-import { CloudCog, KeyRound, Laptop, Moon, Server, Sun, Terminal } from "lucide-react";
+import { AppWindow, Archive, CloudCog, EyeOff, KeyRound, Laptop, Moon, Server, ShieldAlert, Sun, Terminal, UserCog, UserPlus } from "lucide-react";
+import type { Requirement } from "@/services/permissions";
 import {
   CommandDialog,
   CommandEmpty,
@@ -42,11 +43,11 @@ export function useCommandPalette() {
 export default function CommandPalette({
   open,
   onOpenChange,
-  isAdmin,
+  allows,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  isAdmin: boolean;
+  allows: (req: Requirement | undefined) => boolean;
 }) {
   const navigate = useNavigate();
   const { resolvedTheme, setTheme } = useTheme();
@@ -107,7 +108,7 @@ export default function CommandPalette({
 
         <CommandSeparator />
         {NAV.map((group) => {
-          const items = group.items.filter((i) => isAdmin || !i.adminOnly);
+          const items = group.items.filter((i) => allows(i.perm));
           if (!items.length) return null;
           return (
             <CommandGroup key={group.label} heading={group.label}>
@@ -131,11 +132,47 @@ export default function CommandPalette({
             <Laptop />
             Gérer mes appareils
           </CommandItem>
-          {isAdmin && (
+          <CommandItem value="accès ssh proxy clé publique jeton de connexion mon compte" onSelect={() => go("/account#ssh")}>
+            <Terminal />
+            Préparer mon accès SSH
+          </CommandItem>
+          {allows("servers") && (
             <CommandItem value="valider nouvelles vm cloud azure à valider" onSelect={() => go("/infrastructure?tab=pending")}>
               <CloudCog />
               Valider les nouvelles VM cloud
             </CommandItem>
+          )}
+          {allows("secrets") && (
+            <CommandItem value="modèles de comptes pousser push compte" onSelect={() => go("/infrastructure?tab=templates")}>
+              <UserPlus />
+              Pousser un compte sur des serveurs
+            </CommandItem>
+          )}
+          {allows("audit") && (
+            <CommandItem value="risques analyser" onSelect={() => go("/risks")}>
+              <ShieldAlert />
+              Voir les risques
+            </CommandItem>
+          )}
+          {allows("admin") && (
+            <>
+              <CommandItem value="sauvegarde chiffrée des comptes sauvegarder" onSelect={() => go("/settings?tab=backups")}>
+                <Archive />
+                Sauvegarder les comptes
+              </CommandItem>
+              <CommandItem value="masquage des données terminal" onSelect={() => go("/settings?tab=masking")}>
+                <EyeOff />
+                Régler le masquage des données
+              </CommandItem>
+              <CommandItem value="applications api secrets clé" onSelect={() => go("/settings?tab=applications")}>
+                <AppWindow />
+                Gérer les applications
+              </CommandItem>
+              <CommandItem value="rôles personnalisés permissions" onSelect={() => go("/settings?tab=roles")}>
+                <UserCog />
+                Gérer les rôles
+              </CommandItem>
+            </>
           )}
           <CommandItem
             value="thème clair sombre"

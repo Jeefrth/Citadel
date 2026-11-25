@@ -50,7 +50,8 @@ function replayError(e: unknown): string {
 }
 
 export default function Sessions() {
-  const { isAdmin } = useCurrentUser();
+  const { isAdmin, can } = useCurrentUser();
+  const canVerify = can("audit");
   const [searchParams, setSearchParams] = useSearchParams();
   const [sessions, setSessions] = useState<SessionRecordingData[]>([]);
   const [protocol, setProtocol] = useState<"" | SessionProtocol>("");
@@ -367,7 +368,7 @@ export default function Sessions() {
                       </TableCell>
                       <TableCell className="pr-4">
                         <div className="flex items-center justify-end gap-1">
-                          {isAdmin && (
+                          {canVerify && (
                             <Tip content="Vérifier l'intégrité : relire l'objet stocké et contrôler son empreinte SHA-256">
                               <Button
                                 variant="ghost"

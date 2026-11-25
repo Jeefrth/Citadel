@@ -17,8 +17,12 @@ router = APIRouter()
 @router.get("/", response_model=list[UserRead])
 async def list_users(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(get_current_user),
 ):
+    """Admins, and custom roles that pick users (policies) or filter by user (audit)."""
+    from app.core.auth import has_perm
+    if not (has_perm(user, "policies") or has_perm(user, "audit") or has_perm(user, "kubernetes")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission 'policies' or 'audit' required")
     result = await db.execute(select(User).order_by(User.display_name))
     return result.scalars().all()
 

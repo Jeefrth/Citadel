@@ -1,7 +1,7 @@
 // Shared bits for the operations screens (files, jobs, playbooks, zones, cloud).
 import { Chip, type ChipTone } from "@/components/kit";
-import type { JobData, JobStatus, JobTargetStatus, ServerData } from "@/services/types";
-import { Cloud, CloudOff, Loader2, Route } from "lucide-react";
+import type { JobData, JobKind, JobStatus, JobTargetStatus, ServerData } from "@/services/types";
+import { Cloud, CloudOff, FileCode2, Loader2, Route, Terminal as TerminalIcon, UserPlus, type LucideIcon } from "lucide-react";
 
 /** Human readable size, French units ("12,4 Mo"). */
 export function formatSize(bytes: number | null | undefined): string {
@@ -46,6 +46,22 @@ export const TARGET_STATUS: Record<JobTargetStatus, { label: string; tone: ChipT
   skipped: { label: "Ignoré", tone: "orange" },
   cancelled: { label: "Annulé", tone: "default" },
 };
+
+export const JOB_KIND: Record<JobKind, { label: string; icon: LucideIcon }> = {
+  command: { label: "Commande", icon: TerminalIcon },
+  playbook: { label: "Playbook", icon: FileCode2 },
+  push: { label: "Push de compte", icon: UserPlus },
+};
+
+export function JobKindChip({ kind }: { kind: JobKind }) {
+  const k = JOB_KIND[kind] || { label: kind, icon: TerminalIcon };
+  return (
+    <Chip>
+      <k.icon className="size-3" />
+      {k.label}
+    </Chip>
+  );
+}
 
 export function JobStatusChip({ status }: { status: JobStatus }) {
   const s = JOB_STATUS[status] || { label: status, tone: "default" as ChipTone };

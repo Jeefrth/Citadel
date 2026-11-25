@@ -31,7 +31,7 @@ export default function NewJobDialog({
   onClose: () => void;
   onCreated: (job: JobDetail) => void;
 }) {
-  const [kind, setKind] = useState<JobKind>("command");
+  const [kind, setKind] = useState<Exclude<JobKind, "push">>("command");
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [playbookId, setPlaybookId] = useState("");
@@ -43,73 +43,14 @@ export default function NewJobDialog({
   const [parallelism, setParallelism] = useState(10);
   const [timeout, setTimeoutValue] = useState(60);
 
-  const [servers, setServers] = useState<ServerData[]>([]);
-  const [nodes, setNodes] = useState<NodeData[]>([]);
-  const [labelMap, setLabelMap] = useState<Record<string, string[]>>({});
-
-  const [preview, setPreview] = useState<TargetPreview[] | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.get<ServerData[]>("/api/servers/").then(setServers).catch(() => {});
-    api.get<NodeData[]>("/api/nodes").then(setNodes).catch(() => {});
-    api.get<Record<string, string[]>>("/api/servers/labels/").then(setLabelMap).catch(() => {});
-  }, []);
-
-  const serverOptions: Option[] = useMemo(
-    () => servers.map((s) => ({ id: s.id, label: s.name, sub: s.ip_address })),
-    [servers],
-  );
-  const nodeOptions: Option[] = useMemo(
-    () => nodes.map((n) => ({ id: n.id, label: n.path, sub: `${n.server_count} serveur${n.server_count > 1 ? "s" : ""}` })),
-    [nodes],
-  );
-  // "key" matches any value, "key=value" one value (same syntax as access rules)
-  const labelOptions: Option[] = useMemo(() => {
-    const out: Option[] = [];
-    Object.entries(labelMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .forEach(([k, values]) => {
-        out.push({ id: k, label: k, sub: "toutes les valeurs" });
-        values.forEach((v) => out.push({ id: `${k}=${v}`, label: `${k}=${v}` }));
-      });
-    return out;
-  }, [labelMap]);
 
   const selector: JobSelector = useMemo(
     () => ({ server_ids: serverIds, node_ids: nodeIds, labels, account: account.trim() || null }),
     [serverIds, nodeIds, labels, account],
   );
-  const hasSelection = serverIds.length + nodeIds.length + labels.length > 0;
-
-  // Live preview, debounced
-  useEffect(() => {
-    if (!hasSelection) {
-      setPreview(null);
-      setPreviewError(null);
-      return;
-    }
-    let alive = true;
-    setPreviewing(true);
-    const t = setTimeout(() => {
-      api
-        .post<TargetPreview[]>("/api/jobs/preview", selector)
-        .then((r) => {
-          if (!alive) return;
-          setPreview(r);
-          setPreviewError(null);
-        })
-        .catch((e) => alive && setPreviewError(errorMessage(e)))
-        .finally(() => alive && setPreviewing(false));
-    }, 350);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-  }, [selector, hasSelection]);
+  const { hasSelection, preview, previewing, previewError } = useTargetPreview(selector);
 
   const playbook = playbooks.find((p) => p.id === playbookId) || null;
   const [vars, varsError] = parseJsonObject(extraVars);
@@ -260,23 +201,14 @@ export default function NewJobDialog({
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Redémarrage nginx front" />
       </Field>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Cibles</p>
-        <p className="text-xs text-muted-foreground">
-          Un serveur est retenu s'il correspond à l'un des critères (serveurs, nœuds avec leurs sous-nœuds, étiquettes).
-        </p>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Field label="Serveurs">
-            <MultiSelect options={serverOptions} selected={serverIds} onChange={setServerIds} emptyText="Aucun serveur" />
-          </Field>
-          <Field label="Nœuds">
-            <MultiSelect options={nodeOptions} selected={nodeIds} onChange={setNodeIds} emptyText="Aucun nœud" />
-          </Field>
-          <Field label="Étiquettes">
-            <MultiSelect options={labelOptions} selected={labels} onChange={setLabels} emptyText="Aucune étiquette" />
-          </Field>
-        </div>
-      </div>
+      <TargetFields
+        serverIds={serverIds}
+        nodeIds={nodeIds}
+        labels={labels}
+        onServerIds={setServerIds}
+        onNodeIds={setNodeIds}
+        onLabels={setLabels}
+      />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Field label="Compte" hint="Vide = compte par défaut de chaque serveur.">
@@ -318,7 +250,115 @@ export default function NewJobDialog({
   );
 }
 
-function TargetPreviewPanel({
+/** Servers, nodes and labels to pick from (same data as the access rules). */
+export function useTargetOptions(): { serverOptions: Option[]; nodeOptions: Option[]; labelOptions: Option[] } {
+  const [servers, setServers] = useState<ServerData[]>([]);
+  const [nodes, setNodes] = useState<NodeData[]>([]);
+  const [labelMap, setLabelMap] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    api.get<ServerData[]>("/api/servers/").then(setServers).catch(() => {});
+    api.get<NodeData[]>("/api/nodes").then(setNodes).catch(() => {});
+    api.get<Record<string, string[]>>("/api/servers/labels/").then(setLabelMap).catch(() => {});
+  }, []);
+
+  const serverOptions: Option[] = useMemo(
+    () => servers.map((s) => ({ id: s.id, label: s.name, sub: s.ip_address })),
+    [servers],
+  );
+  const nodeOptions: Option[] = useMemo(
+    () => nodes.map((n) => ({ id: n.id, label: n.path, sub: `${n.server_count} serveur${n.server_count > 1 ? "s" : ""}` })),
+    [nodes],
+  );
+  // "key" matches any value, "key=value" one value (same syntax as access rules)
+  const labelOptions: Option[] = useMemo(() => {
+    const out: Option[] = [];
+    Object.entries(labelMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([k, values]) => {
+        out.push({ id: k, label: k, sub: "toutes les valeurs" });
+        values.forEach((v) => out.push({ id: `${k}=${v}`, label: `${k}=${v}` }));
+      });
+    return out;
+  }, [labelMap]);
+
+  return { serverOptions, nodeOptions, labelOptions };
+}
+
+/** Server / node / label pickers, shared by "Nouvelle tâche" and the account push. */
+export function TargetFields({
+  serverIds,
+  nodeIds,
+  labels,
+  onServerIds,
+  onNodeIds,
+  onLabels,
+}: {
+  serverIds: string[];
+  nodeIds: string[];
+  labels: string[];
+  onServerIds: (v: string[]) => void;
+  onNodeIds: (v: string[]) => void;
+  onLabels: (v: string[]) => void;
+}) {
+  const { serverOptions, nodeOptions, labelOptions } = useTargetOptions();
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium">Cibles</p>
+      <p className="text-xs text-muted-foreground">
+        Un serveur est retenu s'il correspond à l'un des critères (serveurs, nœuds avec leurs sous-nœuds, étiquettes).
+      </p>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <Field label="Serveurs">
+          <MultiSelect options={serverOptions} selected={serverIds} onChange={onServerIds} emptyText="Aucun serveur" />
+        </Field>
+        <Field label="Nœuds">
+          <MultiSelect options={nodeOptions} selected={nodeIds} onChange={onNodeIds} emptyText="Aucun nœud" />
+        </Field>
+        <Field label="Étiquettes">
+          <MultiSelect options={labelOptions} selected={labels} onChange={onLabels} emptyText="Aucune étiquette" />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+/** Live preview of the resolved targets (POST /api/jobs/preview), debounced. */
+export function useTargetPreview(selector: JobSelector) {
+  const hasSelection = selector.server_ids.length + selector.node_ids.length + selector.labels.length > 0;
+  const [preview, setPreview] = useState<TargetPreview[] | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasSelection) {
+      setPreview(null);
+      setPreviewError(null);
+      return;
+    }
+    let alive = true;
+    setPreviewing(true);
+    const t = setTimeout(() => {
+      api
+        .post<TargetPreview[]>("/api/jobs/preview", selector)
+        .then((r) => {
+          if (!alive) return;
+          setPreview(r);
+          setPreviewError(null);
+        })
+        .catch((e) => alive && setPreviewError(errorMessage(e)))
+        .finally(() => alive && setPreviewing(false));
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [selector, hasSelection]);
+
+  return { hasSelection, preview, previewing, previewError };
+}
+
+export function TargetPreviewPanel({
   hasSelection,
   loading,
   error,

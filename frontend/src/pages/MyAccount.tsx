@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { AlertTriangle, Check, Copy, History, KeyRound, Laptop, Plus, ShieldCheck, Trash2 } from "lucide-react";
@@ -13,6 +14,7 @@ import {
   type ServerAccess,
 } from "@/services/types";
 import { DevicesTable, LoginEventsTable, RevokeDeviceText } from "@/components/identityUi";
+import SshAccessCard from "@/components/SshAccessCard";
 import { AccessTable } from "@/pages/Access";
 import {
   Chip,
@@ -195,6 +197,7 @@ function initials(name: string | undefined): string {
 
 export default function MyAccount() {
   const { user, isAdmin } = useCurrentUser();
+  const { hash } = useLocation();
   const [access, setAccess] = useState<ServerAccess[] | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [keys, setKeys] = useState<AccessKeyData[]>([]);
@@ -212,6 +215,13 @@ export default function MyAccount() {
   const [deviceLoading, setDeviceLoading] = useState(false);
   const [logins, setLogins] = useState<LoginEventPage | null>(null);
   const [loginsError, setLoginsError] = useState<string | null>(null);
+
+  // Deep link (Cmd+K "Préparer mon accès SSH"): bring the section into view
+  useEffect(() => {
+    if (hash !== "#ssh") return;
+    const t = setTimeout(() => document.getElementById("ssh")?.scrollIntoView({ block: "start" }), 50);
+    return () => clearTimeout(t);
+  }, [hash]);
 
   useEffect(() => {
     api
@@ -298,7 +308,7 @@ export default function MyAccount() {
     <div className="space-y-6">
       <PageHeader
         title="Mon compte"
-        description="Votre profil, vos accès, vos appareils, vos connexions et vos clés API."
+        description="Votre profil, vos accès, votre accès SSH, vos appareils, vos connexions et vos clés API."
       />
 
       {/* Profile */}
@@ -319,7 +329,14 @@ export default function MyAccount() {
             </div>
           )}
         </div>
-        {user && <Chip tone={user.role === "admin" ? "amber" : "primary"}>{ROLE_LABELS[user.role] || user.role}</Chip>}
+        {user && (
+          <div className="flex flex-wrap justify-end gap-1">
+            <Chip tone={user.role === "admin" ? "amber" : "primary"}>{ROLE_LABELS[user.role] || user.role}</Chip>
+            {user.custom_role_name && user.role !== "admin" && (
+              <Chip title={`Permissions : ${(user.permissions || []).join(", ") || "aucune"}`}>{user.custom_role_name}</Chip>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* My access */}
@@ -346,6 +363,8 @@ export default function MyAccount() {
         )}
         {access && <AccessTable rows={access} />}
       </Card>
+
+      <SshAccessCard />
 
       {/* API keys */}
       <Card className="overflow-hidden">

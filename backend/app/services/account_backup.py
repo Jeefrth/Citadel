@@ -182,7 +182,7 @@ async def run_backup(db: AsyncSession, *, trigger: str, destinations: list[str],
                     result=f"{trigger} -> {','.join(destinations)} : {row.message}"[:500]))
     if row.status in ("failed", "partial") and trigger == "scheduled":
         from app.services.notifications import notify
-        await notify(db, "backup.failed", "Échec de la sauvegarde des comptes", row.message or "", link="/settings",
+        await notify(db, "backup.failed", "Échec de la sauvegarde des comptes", row.message or "", link="/settings?tab=backups",
                      level="warning")
     await db.commit()
     return row, blob

@@ -3,12 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronRight, CircleStop, FileCode2, ListChecks, Loader2, Terminal as TerminalIcon } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleStop, ListChecks, Loader2 } from "lucide-react";
 import { ApiError, api } from "@/services/api";
-import { useCurrentUser } from "@/services/useCurrentUser";
-import { errorMessage, type JobDetail as JobDetailData, type JobTarget, type PlaybookData, type UserData } from "@/services/types";
+import { errorMessage, type AccountTemplateData, type JobDetail as JobDetailData, type JobTarget, type PlaybookData } from "@/services/types";
 import { Chip, ConfirmModal, EmptyState, ErrorBox, PageHeader, formatDate } from "@/components/kit";
-import { JobStatusChip, TargetStatusChip, durationBetween, isJobActive, targetsSummary } from "@/components/opsUi";
+import { JOB_KIND, JobStatusChip, TargetStatusChip, durationBetween, isJobActive, targetsSummary } from "@/components/opsUi";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -16,12 +15,11 @@ import { cn } from "@/lib/utils";
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const { isAdmin } = useCurrentUser();
   const [job, setJob] = useState<JobDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [playbook, setPlaybook] = useState<PlaybookData | null>(null);
-  const [owner, setOwner] = useState<string | null>(null);
+  const [template, setTemplate] = useState<AccountTemplateData | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -56,16 +54,17 @@ export default function JobDetail() {
       .then((list) => setPlaybook(list.find((p) => p.id === job.playbook_id) || null))
       .catch(() => {});
   }, [job?.playbook_id, playbook]);
+  // Account push: the template, when the user may read templates ("secrets")
+  const templateId = job?.kind === "push" ? String(job.extra_vars?.template_id ?? "") : "";
   useEffect(() => {
-    if (!isAdmin || !job?.user_id || owner) return;
+    if (!templateId || template) return;
     api
-      .get<UserData[]>("/api/admin/users")
-      .then((list) => {
-        const u = list.find((x) => x.id === job.user_id);
-        if (u) setOwner(u.display_name || u.email);
-      })
+      .get<AccountTemplateData[]>("/api/account-templates")
+      .then((list) => setTemplate(list.find((t) => t.id === templateId) || null))
       .catch(() => {});
-  }, [isAdmin, job?.user_id, owner]);
+  }, [templateId, template]);
+  const owner = job?.user_name || null;
+  const kindInfo = job ? JOB_KIND[job.kind] : null;
 
   const cancel = async () => {
     if (!jobId) return;
@@ -108,7 +107,7 @@ export default function JobDetail() {
             </Button>
           }
         >
-          Elle a peut-être été lancée par un autre utilisateur : seuls les administrateurs voient toutes les tâches.
+          Elle a peut-être été lancée par un autre utilisateur : seuls les administrateurs et les auditeurs voient toutes les tâches.
         </EmptyState>
       </div>
     );
@@ -152,8 +151,8 @@ export default function JobDetail() {
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="flex items-center gap-1">
-              {job.kind === "command" ? <TerminalIcon className="size-3.5" /> : <FileCode2 className="size-3.5" />}
-              {job.kind === "command" ? "Commande" : `Playbook ${playbook?.name ?? ""}`}
+              {kindInfo && <kindInfo.icon className="size-3.5" />}
+              {job.kind === "playbook" ? `Playbook ${playbook?.name ?? ""}` : kindInfo?.label ?? job.kind}
             </span>
             <span aria-hidden>·</span>
             <span className="tabular">Lancée le {formatDate(job.created_at)}</span>
@@ -187,6 +186,20 @@ export default function JobDetail() {
         )}
         <p className="tabular -mt-3 text-xs text-muted-foreground">
           Parallélisme {job.parallelism} · délai {job.timeout} s
+          {job.kind === "push" && (
+            <>
+              {" "}
+              · modèle{" "}
+              {template ? (
+                <>
+                  {template.name} (compte <span className="font-mono">{template.username}</span>)
+                </>
+              ) : (
+                <span className="font-mono">{templateId.slice(0, 8) || "-"}</span>
+              )}
+              {job.extra_vars?.update_existing ? " · comptes déjà gérés mis à jour" : " · comptes déjà gérés ignorés"}
+            </>
+          )}
           {job.selector?.account && (
             <>
               {" "}

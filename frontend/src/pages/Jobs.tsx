@@ -1,13 +1,13 @@
 // Jobs (lot 5, E2/E3): commands and playbooks run on several servers.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FileCode2, ListChecks, Play, Terminal as TerminalIcon } from "lucide-react";
+import { FileCode2, ListChecks, Play } from "lucide-react";
 import { api } from "@/services/api";
 import { useCurrentUser } from "@/services/useCurrentUser";
-import { errorMessage, type JobData, type PlaybookData, type UserData } from "@/services/types";
-import { Chip, EmptyState, ErrorBox, PageHeader, Tabs, formatDate } from "@/components/kit";
+import { errorMessage, type JobData, type PlaybookData } from "@/services/types";
+import { EmptyState, ErrorBox, PageHeader, Tabs, formatDate } from "@/components/kit";
 import { TableSkeleton } from "@/components/auditUi";
-import { JobStatusChip, durationBetween, isJobActive, targetsSummary } from "@/components/opsUi";
+import { JobKindChip, JobStatusChip, durationBetween, isJobActive, targetsSummary } from "@/components/opsUi";
 import NewJobDialog from "@/components/NewJobDialog";
 import PlaybooksPanel from "@/components/PlaybooksPanel";
 import { Button } from "@/components/ui/button";
@@ -19,13 +19,13 @@ export default function Jobs() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get("tab") === "playbooks" ? "playbooks" : "jobs";
-  const { user, isAdmin } = useCurrentUser();
+  const { user, can } = useCurrentUser();
+  const seesAll = can("audit");
   const canLaunch = !!user && user.role !== "viewer";
 
   const [jobs, setJobs] = useState<JobData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playbooks, setPlaybooks] = useState<PlaybookData[] | null>(null);
-  const [users, setUsers] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
 
   const loadJobs = useCallback(async () => {
@@ -49,15 +49,6 @@ export default function Jobs() {
     loadJobs();
     loadPlaybooks();
   }, [loadJobs, loadPlaybooks]);
-
-  // Admins see everyone's jobs: map user ids to names
-  useEffect(() => {
-    if (!isAdmin) return;
-    api
-      .get<UserData[]>("/api/admin/users")
-      .then((list) => setUsers(Object.fromEntries(list.map((u) => [u.id, u.display_name || u.email]))))
-      .catch(() => {});
-  }, [isAdmin]);
 
   // Poll while something runs
   const anyActive = !!jobs?.some((j) => isJobActive(j.status));
@@ -122,14 +113,14 @@ export default function Jobs() {
                     <TableHead>Type</TableHead>
                     <TableHead>Nom</TableHead>
                     <TableHead>Cibles</TableHead>
-                    {isAdmin && <TableHead>Lancée par</TableHead>}
+                    {seesAll && <TableHead>Lancée par</TableHead>}
                     <TableHead>Lancée le</TableHead>
                     <TableHead className="pr-4 text-right">Durée</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {!jobs ? (
-                    <TableSkeleton cols={isAdmin ? 7 : 6} />
+                    <TableSkeleton cols={seesAll ? 7 : 6} />
                   ) : (
                     jobs.map((j) => (
                       <TableRow
@@ -143,10 +134,7 @@ export default function Jobs() {
                           <JobStatusChip status={j.status} />
                         </TableCell>
                         <TableCell>
-                          <Chip>
-                            {j.kind === "command" ? <TerminalIcon className="size-3" /> : <FileCode2 className="size-3" />}
-                            {j.kind === "command" ? "Commande" : "Playbook"}
-                          </Chip>
+                          <JobKindChip kind={j.kind} />
                         </TableCell>
                         <TableCell className="max-w-sm">
                           <p className="truncate font-medium">{j.name}</p>
@@ -158,8 +146,8 @@ export default function Jobs() {
                           )}
                         </TableCell>
                         <TableCell className="tabular text-xs">{targetsSummary(j)}</TableCell>
-                        {isAdmin && (
-                          <TableCell className="text-xs text-muted-foreground">{users[j.user_id] || "-"}</TableCell>
+                        {seesAll && (
+                          <TableCell className="text-xs text-muted-foreground">{j.user_name || "-"}</TableCell>
                         )}
                         <TableCell className="tabular text-xs text-muted-foreground">{formatDate(j.created_at)}</TableCell>
                         <TableCell className="tabular pr-4 text-right text-xs text-muted-foreground">
@@ -174,7 +162,7 @@ export default function Jobs() {
           )}
         </>
       ) : (
-        <PlaybooksPanel playbooks={playbooks} isAdmin={isAdmin} onChanged={loadPlaybooks} />
+        <PlaybooksPanel playbooks={playbooks} isAdmin={can("playbooks")} onChanged={loadPlaybooks} />
       )}
 
       {creating && (

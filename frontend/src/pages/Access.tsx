@@ -703,8 +703,13 @@ const rowExit = {
 // ── Page ─────────────────────────────────────────────────────
 
 export default function Access() {
-  const { isAdmin, loading: userLoading } = useCurrentUser();
-  const [tab, setTab] = useState<Tab>("policies");
+  // Rules, groups, ACL: permission "policies"; discovered accounts: "secrets"
+  const { can, loading: userLoading } = useCurrentUser();
+  const canPolicies = can("policies");
+  const canDiscovered = can("secrets");
+  const isAdmin = canPolicies || canDiscovered;
+  const [tabChoice, setTab] = useState<Tab>("policies");
+  const tab: Tab = canPolicies ? tabChoice : "discovered";
   const [policies, setPolicies] = useState<AccessPolicyData[]>([]);
   const [refs, setRefs] = useState<RefData>({ users: [], groups: [], servers: [], nodes: [], labels: {} });
   const [loading, setLoading] = useState(true);
@@ -725,10 +730,11 @@ export default function Access() {
 
   const load = useCallback(async () => {
     try {
+      // The user list is admin-only: a custom role gets an empty list instead of an error
       const [p, g, u, s, n, l] = await Promise.all([
-        api.get<AccessPolicyData[]>("/api/access-policies"),
-        api.get<UserGroupData[]>("/api/user-groups"),
-        api.get<UserData[]>("/api/users/"),
+        canPolicies ? api.get<AccessPolicyData[]>("/api/access-policies") : Promise.resolve([] as AccessPolicyData[]),
+        canPolicies ? api.get<UserGroupData[]>("/api/user-groups") : Promise.resolve([] as UserGroupData[]),
+        api.get<UserData[]>("/api/users/").catch(() => [] as UserData[]),
         api.get<ServerData[]>("/api/servers/"),
         api.get<NodeData[]>("/api/nodes"),
         api.get<Record<string, string[]>>("/api/servers/labels/"),
@@ -741,7 +747,7 @@ export default function Access() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canPolicies]);
 
   useEffect(() => {
     if (isAdmin) load();
@@ -862,12 +868,20 @@ export default function Access() {
 
       <Tabs<Tab>
         tabs={[
-          { id: "policies", label: "Règles d'accès", icon: ShieldCheck },
-          { id: "groups", label: "Groupes d'utilisateurs", icon: Users },
-          { id: "effective", label: "Accès effectifs", icon: Eye },
-          { id: "discovered", label: "Comptes découverts", icon: Radar },
-          { id: "acl-connection", label: "ACL de connexion", icon: ShieldBan },
-          { id: "acl-command", label: "ACL de commandes", icon: TerminalSquare },
+          ...(canPolicies
+            ? [
+                { id: "policies" as Tab, label: "Règles d'accès", icon: ShieldCheck },
+                { id: "groups" as Tab, label: "Groupes d'utilisateurs", icon: Users },
+                { id: "effective" as Tab, label: "Accès effectifs", icon: Eye },
+              ]
+            : []),
+          ...(canDiscovered ? [{ id: "discovered" as Tab, label: "Comptes découverts", icon: Radar }] : []),
+          ...(canPolicies
+            ? [
+                { id: "acl-connection" as Tab, label: "ACL de connexion", icon: ShieldBan },
+                { id: "acl-command" as Tab, label: "ACL de commandes", icon: TerminalSquare },
+              ]
+            : []),
         ]}
         active={tab}
         onChange={setTab}

@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Trash2,
   Undo2,
+  UserPlus,
   X,
 } from "lucide-react";
 import { api } from "@/services/api";
@@ -52,6 +53,7 @@ import {
 } from "@/components/kit";
 import { RowsSkeleton, SettingsCard, StatusDot, TableSkeleton, Tip } from "@/components/auditUi";
 import { AuthModePicker, RowAction } from "@/components/AccountsSection";
+import AccountTemplatesPanel from "@/components/AccountTemplates";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -60,13 +62,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type Tab = "zones" | "azure" | "pending";
-const TABS: Tab[] = ["zones", "azure", "pending"];
+type Tab = "zones" | "azure" | "pending" | "templates";
 
 export default function Infrastructure() {
-  const { isAdmin, loading: userLoading } = useCurrentUser();
+  // Zones, Azure, VM: permission "servers"; account templates: "secrets"
+  const { can, loading: userLoading } = useCurrentUser();
+  const isAdmin = can("servers");
+  const canTemplates = can("secrets");
   const [params, setParams] = useSearchParams();
-  const tab: Tab = TABS.find((t) => t === params.get("tab")) ?? "zones";
+  const tabs: Tab[] = [...(isAdmin ? (["zones", "azure", "pending"] as Tab[]) : []), ...(canTemplates ? (["templates"] as Tab[]) : [])];
+  const tab: Tab = tabs.find((t) => t === params.get("tab")) ?? tabs[0] ?? "zones";
   const [zones, setZones] = useState<ZoneData[] | null>(null);
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [credentials, setCredentials] = useState<CredentialData[]>([]);
@@ -93,22 +98,27 @@ export default function Infrastructure() {
   }, [isAdmin, loadZones]);
 
   if (userLoading) return null;
-  if (!isAdmin) return <Navigate to="/" replace />;
+  if (!isAdmin && !canTemplates) return <Navigate to="/" replace />;
 
   return (
     <div>
       <PageHeader
         title="Infrastructure"
-        description="Passerelles SSH vers les réseaux isolés et import automatique des machines virtuelles Azure."
+        description="Passerelles SSH vers les réseaux isolés, import automatique des machines virtuelles Azure et modèles de comptes à pousser sur les serveurs."
       />
       <Tabs
         tabs={[
-          { id: "zones", label: "Zones et passerelles", icon: Route },
-          { id: "azure", label: "Azure", icon: Cloud },
-          { id: "pending", label: "VM à valider", icon: CloudCog },
+          ...(isAdmin
+            ? [
+                { id: "zones" as Tab, label: "Zones et passerelles", icon: Route },
+                { id: "azure" as Tab, label: "Azure", icon: Cloud },
+                { id: "pending" as Tab, label: "VM à valider", icon: CloudCog },
+              ]
+            : []),
+          ...(canTemplates ? [{ id: "templates" as Tab, label: "Modèles de comptes", icon: UserPlus }] : []),
         ]}
         active={tab}
-        onChange={(t) => setParams(t === "zones" ? {} : { tab: t }, { replace: true })}
+        onChange={(t) => setParams(t === tabs[0] ? {} : { tab: t }, { replace: true })}
       />
       <ErrorBox message={error} />
       {tab === "zones" && <ZonesPanel zones={zones} credentials={credentials} onChanged={loadZones} />}
@@ -116,6 +126,7 @@ export default function Infrastructure() {
         <AzurePanel nodes={nodes} zones={zones || []} onShowPending={() => setParams({ tab: "pending" }, { replace: true })} />
       )}
       {tab === "pending" && <PendingPanel />}
+      {tab === "templates" && <AccountTemplatesPanel />}
     </div>
   );
 }

@@ -64,7 +64,7 @@ function FilterSelect({
 }
 
 export default function Logins() {
-  const { isAdmin, loading: userLoading } = useCurrentUser();
+  const { isAdmin, can, loading: userLoading } = useCurrentUser();
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get("tab") === "devices" ? "devices" : "events";
   const [users, setUsers] = useState<UserData[]>([]);
@@ -74,7 +74,7 @@ export default function Logins() {
   }, [isAdmin]);
 
   if (userLoading) return null;
-  if (!isAdmin) return <Navigate to="/account" replace />;
+  if (!can("audit")) return <Navigate to="/account" replace />;
 
   return (
     <div>
@@ -267,6 +267,7 @@ function LoginEventsPanel({ users }: { users: UserData[] }) {
 // ── Devices ──────────────────────────────────────────────
 
 function DevicesPanel({ users }: { users: UserData[] }) {
+  const canRevoke = useCurrentUser().can("sessions");
   const [userId, setUserId] = useState("");
   const [activeOnly, setActiveOnly] = useState(true);
   const [devices, setDevices] = useState<DeviceData[]>([]);
@@ -337,7 +338,7 @@ function DevicesPanel({ users }: { users: UserData[] }) {
         </EmptyState>
       ) : (
         <div className="overflow-hidden rounded-lg border bg-card">
-          <DevicesTable devices={devices} loading={loading} showUser onRevoke={setRevoking} />
+          <DevicesTable devices={devices} loading={loading} showUser onRevoke={canRevoke ? setRevoking : undefined} />
         </div>
       )}
       {devices.length >= 500 && (

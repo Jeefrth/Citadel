@@ -208,7 +208,7 @@ function AllClear({ children }: { children: ReactNode }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { isAdmin } = useCurrentUser();
+  const isAdmin = useCurrentUser().can("audit");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

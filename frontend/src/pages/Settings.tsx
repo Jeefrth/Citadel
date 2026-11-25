@@ -1,4 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import type { CustomRoleData } from "@/services/types";
+import { errorMessage } from "@/services/types";
+import MaskingPanel from "@/components/settings/MaskingPanel";
+import BackupsPanel from "@/components/settings/BackupsPanel";
+import ApplicationsPanel from "@/components/settings/ApplicationsPanel";
+import RolesPanel, { BaseRoleCapNote } from "@/components/settings/RolesPanel";
 import { api } from "@/services/api";
 import SecretsVaultCard from "@/components/SecretsVaultCard";
 import NotificationChannelsPanel from "@/components/NotificationChannels";
@@ -24,8 +32,13 @@ import {
   Bell,
   FileSearch,
   Archive,
+  EyeOff,
+  DatabaseBackup,
+  AppWindow,
+  UserCog,
+  ShieldAlert,
 } from "lucide-react";
-import { ConfirmModal, PageHeader, Tabs } from "@/components/kit";
+import { ConfirmModal, ErrorBox, PageHeader, Tabs } from "@/components/kit";
 import { FactRow, SettingsCard, Tip } from "@/components/auditUi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +63,8 @@ const SETTING_LABELS: Record<string, string> = {
   command_log_retention_days: "Rétention du journal des commandes (jours)",
   notify_user_on_monitor: "Prévenir l'utilisateur observé",
   access_expiry_notice_days: "Rappel avant la fin d'une règle d'accès (jours)",
+  risk_secret_max_age_days: "Âge maximal d'un mot de passe géré (jours)",
+  risk_dormant_days: "Utilisateur inactif après (jours)",
 };
 
 function settingLabel(key: string): string {
@@ -72,6 +87,9 @@ interface UserData {
   role: string;
   is_active: boolean;
   last_login: string | null;
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
+  permissions?: string[];
 }
 
 interface CaInfo {
@@ -89,10 +107,31 @@ interface SystemInfo {
   alert_rules: number;
 }
 
-type Tab = "security" | "commands" | "network" | "ca" | "vault" | "notifications" | "audit" | "users" | "system";
+type Tab =
+  | "security"
+  | "commands"
+  | "masking"
+  | "network"
+  | "ca"
+  | "vault"
+  | "backups"
+  | "applications"
+  | "notifications"
+  | "audit"
+  | "users"
+  | "roles"
+  | "system";
+const TAB_IDS: Tab[] = [
+  "security", "commands", "masking", "network", "ca", "vault", "backups",
+  "applications", "notifications", "audit", "users", "roles", "system",
+];
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<Tab>("security");
+  const [params, setParams] = useSearchParams();
+  const activeTab: Tab = TAB_IDS.find((t) => t === params.get("tab")) ?? "security";
+  const setActiveTab = (t: Tab) => setParams(t === "security" ? {} : { tab: t }, { replace: true });
+  const [customRoles, setCustomRoles] = useState<CustomRoleData[]>([]);
+  const [userError, setUserError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Record<string, SettingMeta>>({});
   const [users, setUsers] = useState<UserData[]>([]);
   const [caInfo, setCaInfo] = useState<CaInfo | null>(null);
@@ -131,6 +170,25 @@ export default function Settings() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadCustomRoles = useCallback(() => {
+    api.get<CustomRoleData[]>("/api/custom-roles").then(setCustomRoles).catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadCustomRoles();
+  }, [loadCustomRoles]);
+
+  /** Re-read every setting (after a panel saved one of them). */
+  const reloadSettings = useCallback(async () => {
+    const fresh = await api.get<Record<string, SettingMeta>>("/api/admin/settings").catch(() => null);
+    if (!fresh) return;
+    setSettings(fresh);
+    setEditValues((prev) => {
+      const vals = { ...prev };
+      for (const [k, meta] of Object.entries(fresh)) vals[k] = meta.value;
+      return vals;
+    });
+  }, []);
+
   const saveSetting = async (key: string) => {
     setSaving(key);
     try {
@@ -166,27 +224,22 @@ export default function Settings() {
     }
   };
 
-  const updateUserRole = async (userId: string, role: string) => {
+  /** PATCH a user; the response (UserRead) carries the resulting role, custom role and permissions. */
+  const patchUser = async (userId: string, body: Record<string, unknown>, done?: string) => {
+    setUserError(null);
     try {
-      await api.patch(`/api/admin/users/${userId}`, { role });
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role } : u))
-      );
-    } catch {
-      // ignore
+      const updated = await api.patch<UserData>(`/api/admin/users/${userId}`, body);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...updated } : u)));
+      if (done) toast.success(done);
+      loadCustomRoles();
+    } catch (e) {
+      setUserError(errorMessage(e));
     }
   };
-
-  const toggleUserActive = async (userId: string, isActive: boolean) => {
-    try {
-      await api.patch(`/api/admin/users/${userId}`, { is_active: isActive });
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, is_active: isActive } : u))
-      );
-    } catch {
-      // ignore
-    }
-  };
+  const updateUserRole = (userId: string, role: string) => patchUser(userId, { role }, "Rôle modifié");
+  const updateUserCustomRole = (userId: string, id: string) =>
+    patchUser(userId, { custom_role_id: id === "none" ? null : id }, "Rôle personnalisé modifié");
+  const toggleUserActive = (userId: string, isActive: boolean) => patchUser(userId, { is_active: isActive });
 
   const deleteUser = async (userId: string) => {
     try {
@@ -269,19 +322,23 @@ export default function Settings() {
   const tabs: { id: Tab; icon: typeof SettingsIcon; label: string }[] = [
     { id: "security", icon: Shield, label: "Sécurité" },
     { id: "commands", icon: Terminal, label: "Commandes" },
+    { id: "masking", icon: EyeOff, label: "Masquage" },
     { id: "network", icon: Globe, label: "Réseau" },
     { id: "ca", icon: Key, label: "Certificats" },
     { id: "vault", icon: Vault, label: "Coffre de secrets" },
+    { id: "backups", icon: DatabaseBackup, label: "Sauvegardes" },
+    { id: "applications", icon: AppWindow, label: "Applications" },
     { id: "notifications", icon: Bell, label: "Notifications" },
     { id: "audit", icon: FileSearch, label: "Audit" },
     { id: "users", icon: Users, label: "Utilisateurs" },
+    { id: "roles", icon: UserCog, label: "Rôles" },
     { id: "system", icon: Info, label: "Système" },
   ];
 
   if (loading) {
     return (
       <div>
-        <PageHeader title="Paramètres" description="Sécurité, réseau, certificats, coffre, notifications, audit et utilisateurs." />
+        <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, utilisateurs et rôles." />
         <div className="mb-6 flex gap-4 border-b pb-2.5">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-4 w-20" />
@@ -390,7 +447,7 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Paramètres" description="Sécurité, réseau, certificats, coffre, notifications, audit et utilisateurs." />
+      <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, utilisateurs et rôles." />
 
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
@@ -538,6 +595,14 @@ sudo systemctl restart sshd`}
 
         {activeTab === "vault" && <SecretsVaultCard />}
 
+        {activeTab === "masking" && <MaskingPanel value={settings["data_masking_rules"]?.value} onSaved={reloadSettings} />}
+
+        {activeTab === "backups" && <BackupsPanel settings={settings} onSettingsSaved={reloadSettings} />}
+
+        {activeTab === "applications" && <ApplicationsPanel />}
+
+        {activeTab === "roles" && <RolesPanel onChanged={loadCustomRoles} />}
+
         {activeTab === "notifications" && (
           <>
             <SettingsCard icon={Bell} title="Rappels" description="Prévenir avant la fin d'un accès accordé.">
@@ -560,11 +625,22 @@ sudo systemctl restart sshd`}
               {renderSettingRow("command_log_retention_days", "number")}
               {renderSettingRow("notify_user_on_monitor", "bool")}
             </SettingsCard>
+            <SettingsCard
+              icon={ShieldAlert}
+              title="Détection des risques"
+              description="Seuils de l'analyse quotidienne (Audit > Risques)."
+            >
+              {renderSettingRow("risk_secret_max_age_days", "number")}
+              {renderSettingRow("risk_dormant_days", "number")}
+            </SettingsCard>
             <SiemTargetsPanel />
           </>
         )}
 
         {activeTab === "users" && (
+          <>
+          <BaseRoleCapNote />
+          <ErrorBox message={userError} />
           <SettingsCard
             icon={Users}
             title={
@@ -580,6 +656,7 @@ sudo systemctl restart sshd`}
                   <TableHead className="pl-5">Nom</TableHead>
                   <TableHead>E-mail</TableHead>
                   <TableHead>Rôle</TableHead>
+                  <TableHead>Rôle personnalisé</TableHead>
                   <TableHead>Actif</TableHead>
                   <TableHead>Dernière connexion</TableHead>
                   <TableHead className="pr-5 text-right">Actions</TableHead>
@@ -588,7 +665,7 @@ sudo systemctl restart sshd`}
               <TableBody>
                 {users.length === 0 && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       Aucun utilisateur. Les comptes sont créés à la première connexion Entra ID.
                     </TableCell>
                   </TableRow>
@@ -603,11 +680,33 @@ sudo systemctl restart sshd`}
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="ADMIN">Admin</SelectItem>
-                          <SelectItem value="OPERATOR">Opérateur</SelectItem>
-                          <SelectItem value="VIEWER">Lecteur</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="operator">Opérateur</SelectItem>
+                          <SelectItem value="viewer">Lecteur</SelectItem>
                         </SelectContent>
                       </Select>
+                    </TableCell>
+                    <TableCell>
+                      {u.role === "admin" ? (
+                        <span className="text-xs text-muted-foreground">Toutes les permissions</span>
+                      ) : (
+                        <Select value={u.custom_role_id || "none"} onValueChange={(v) => updateUserCustomRole(u.id, v)}>
+                          <SelectTrigger className="h-8 w-44" title={(u.permissions || []).join(", ") || undefined}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Aucun</SelectItem>
+                            {customRoles.map((r) => (
+                              <SelectItem key={r.id} value={r.id}>
+                                {r.name}
+                              </SelectItem>
+                            ))}
+                            {u.custom_role_id && !customRoles.some((r) => r.id === u.custom_role_id) && (
+                              <SelectItem value={u.custom_role_id}>{u.custom_role_name || "Rôle inconnu"}</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Switch
@@ -637,6 +736,7 @@ sudo systemctl restart sshd`}
               </TableBody>
             </Table>
           </SettingsCard>
+          </>
         )}
 
         {activeTab === "system" && systemInfo && (

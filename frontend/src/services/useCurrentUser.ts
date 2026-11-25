@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/services/api";
 import type { UserData } from "@/services/types";
+import { hasPerm, meets, type Perm, type Requirement } from "@/services/permissions";
 
 // Module-level cache: /api/auth/me is fetched once per page load.
 let cached: UserData | null = null;
@@ -23,7 +24,17 @@ function loadCurrentUser(): Promise<UserData> {
   return pending;
 }
 
-export function useCurrentUser(): { user: UserData | null; isAdmin: boolean; loading: boolean } {
+export interface CurrentUser {
+  user: UserData | null;
+  isAdmin: boolean;
+  loading: boolean;
+  /** hasPerm(user, perm): admin, or a custom role granting it. */
+  can: (perm: Perm) => boolean;
+  /** Requirement check (permission, any of several, or "admin"). */
+  allows: (req: Requirement | undefined) => boolean;
+}
+
+export function useCurrentUser(): CurrentUser {
   const [user, setUser] = useState<UserData | null>(cached);
   const [loading, setLoading] = useState(!cached);
 
@@ -39,5 +50,11 @@ export function useCurrentUser(): { user: UserData | null; isAdmin: boolean; loa
     };
   }, []);
 
-  return { user, isAdmin: user?.role === "admin", loading };
+  return {
+    user,
+    isAdmin: user?.role === "admin",
+    loading,
+    can: (perm) => hasPerm(user, perm),
+    allows: (req) => meets(user, req),
+  };
 }

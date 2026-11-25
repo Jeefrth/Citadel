@@ -145,7 +145,9 @@ export default function ServerDetail() {
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const { isAdmin } = useCurrentUser();
+  const { can } = useCurrentUser();
+  // Accounts: inventory ("servers") or secrets lifecycle ("secrets"); the API checks each action
+  const isAdmin = can("servers") || can("secrets");
   // Bumped when managed accounts change, so both account blocks reload
   const [accountsVersion, setAccountsVersion] = useState(0);
 

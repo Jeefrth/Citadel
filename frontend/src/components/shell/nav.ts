@@ -12,16 +12,19 @@ import {
   RefreshCw,
   ScrollText,
   Server,
+  ShieldAlert,
   Settings,
   Shield,
   Terminal,
 } from "lucide-react";
+import type { Requirement } from "@/services/permissions";
 
 export interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
-  adminOnly?: boolean;
+  /** Who sees the entry: a permission, any of several, or "admin". None: everyone. */
+  perm?: Requirement;
   badge?: "approvals";
 }
 
@@ -46,25 +49,26 @@ export const NAV: NavGroup[] = [
     label: "Gouvernance",
     items: [
       { to: "/approvals", label: "Validations", icon: ClipboardCheck, badge: "approvals" },
-      { to: "/access", label: "Accès", icon: KeyRound, adminOnly: true },
+      { to: "/access", label: "Accès", icon: KeyRound, perm: ["policies", "secrets"] },
     ],
   },
   {
     label: "Audit",
     items: [
-      { to: "/live", label: "Sessions en direct", icon: Activity, adminOnly: true },
+      { to: "/live", label: "Sessions en direct", icon: Activity, perm: "audit" },
       { to: "/sessions", label: "Enregistrements", icon: Film },
       { to: "/commands", label: "Journal des commandes", icon: ScrollText },
       { to: "/audit", label: "Journal d'audit", icon: Shield },
-      { to: "/logins", label: "Connexions", icon: LogIn, adminOnly: true },
-      { to: "/reports", label: "Rapports", icon: FileBarChart, adminOnly: true },
+      { to: "/logins", label: "Connexions", icon: LogIn, perm: "audit" },
+      { to: "/reports", label: "Rapports", icon: FileBarChart, perm: "audit" },
+      { to: "/risks", label: "Risques", icon: ShieldAlert, perm: "audit" },
     ],
   },
   {
     label: "Administration",
     items: [
-      { to: "/infrastructure", label: "Infrastructure", icon: Network, adminOnly: true },
-      { to: "/settings", label: "Paramètres", icon: Settings, adminOnly: true },
+      { to: "/infrastructure", label: "Infrastructure", icon: Network, perm: ["servers", "secrets"] },
+      { to: "/settings", label: "Paramètres", icon: Settings, perm: "admin" },
     ],
   },
 ];

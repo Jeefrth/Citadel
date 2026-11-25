@@ -218,6 +218,10 @@ export interface UserData {
   is_active: boolean;
   last_login: string | null;
   created_at?: string;
+  /** Lot 7: custom role and resulting permissions (an admin has them all). */
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
+  permissions?: string[];
 }
 
 export interface UserBrief {
@@ -733,7 +737,7 @@ export interface TargetPreview {
   reason: string | null;
 }
 
-export type JobKind = "command" | "playbook";
+export type JobKind = "command" | "playbook" | "push";
 export type JobStatus = "pending" | "running" | "success" | "partial" | "failed" | "cancelled";
 export type JobTargetStatus = "pending" | "running" | "success" | "failed" | "skipped" | "cancelled";
 
@@ -748,6 +752,8 @@ export interface JobData {
   timeout: number;
   status: JobStatus;
   user_id: string;
+  user_name?: string | null;
+  extra_vars?: Record<string, unknown>;
   counts: Partial<Record<JobTargetStatus, number>>;
   target_count: number;
   created_at: string;
@@ -924,4 +930,167 @@ export interface PolicyImportReport {
   updated: string[];
   skipped: string[];
   errors: { name: string; problems: string[] }[];
+}
+
+// ── Lot 7: SSH proxy, account templates, backups, applications, risks, roles, masking ──
+
+export interface SshProxyInfo {
+  enabled: boolean;
+  host: string;
+  port: number;
+  login: string;
+  host_key_fingerprint: string | null;
+  example: string;
+  example_direct: string;
+}
+
+export interface SshKeyData {
+  id: string;
+  name: string;
+  fingerprint: string;
+  algorithm: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface SshTokenData {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+}
+
+export interface SshTokenCreated {
+  token: string;
+  expires_at: string;
+}
+
+export type TemplateOsScope = "any" | "linux" | "windows";
+export type TemplateSecretType = "password" | "ssh_key" | "cert";
+export type TemplateSudo = "none" | "password" | "nopasswd";
+
+export interface AccountTemplateInput {
+  name: string;
+  description: string | null;
+  username: string;
+  os_scope: TemplateOsScope;
+  secret_type: TemplateSecretType;
+  password_length: number;
+  privileged: boolean;
+  sudo: TemplateSudo;
+  groups: string[];
+  rotation_enabled: boolean;
+  rotation_interval_days: number;
+}
+
+export interface AccountTemplateData extends AccountTemplateInput {
+  id: string;
+  created_at: string;
+}
+
+export type BackupDestination = "download" | "storage" | "email";
+export type BackupStatus = "success" | "partial" | "failed" | "running";
+
+export interface BackupEntry {
+  id: string;
+  created_at: string;
+  trigger: string;
+  destinations: string[];
+  status: BackupStatus;
+  message: string | null;
+  accounts: number | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  storage_type?: string | null;
+  storage_key: string | null;
+}
+
+export interface BackupState {
+  has_passphrase: boolean;
+  history: BackupEntry[];
+}
+
+export interface ApplicationInput {
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  expires_in_days: number | null;
+  allowed_ips: string[];
+  server_ids: string[];
+  node_ids: string[];
+  labels: string[];
+  accounts: string[];
+}
+
+export interface ApplicationData {
+  id: string;
+  name: string;
+  description: string | null;
+  key_prefix: string;
+  is_active: boolean;
+  expires_at: string | null;
+  allowed_ips: string[];
+  server_ids: string[];
+  node_ids: string[];
+  labels: string[];
+  accounts: string[];
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  created_at: string;
+}
+
+export interface ApplicationCreated extends ApplicationData {
+  key: string;
+}
+
+export type RiskSeverity = "high" | "medium" | "low";
+export type RiskStatus = "open" | "ignored" | "resolved";
+
+export interface RiskItem {
+  id: string;
+  key?: string;
+  category: string;
+  severity: RiskSeverity;
+  title: string;
+  detail: string | null;
+  link: string | null;
+  first_seen: string;
+  last_seen: string;
+  resolved_at: string | null;
+  ignored: boolean;
+  ignored_by: string | null;
+  ignored_reason: string | null;
+}
+
+export interface RiskList {
+  last_scan: string | null;
+  counts: Partial<Record<RiskSeverity, number>>;
+  items: RiskItem[];
+}
+
+export interface CustomRoleData {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  members: number;
+  created_at: string;
+}
+
+export interface MaskingRule {
+  name: string;
+  pattern: string;
+  replacement: string;
+  enabled: boolean;
+}
+
+export interface MaskingPreset {
+  name: string;
+  pattern: string;
+  replacement: string;
+}
+
+export interface MaskingTestResult {
+  result: string;
+  hits: number;
 }

@@ -104,7 +104,8 @@ export function DevicesTable({
   devices: DeviceData[];
   loading: boolean;
   showUser: boolean;
-  onRevoke: (d: DeviceData) => void;
+  /** Omitted: no "Déconnecter" button (permission "sessions" missing). */
+  onRevoke?: (d: DeviceData) => void;
 }) {
   const cols = showUser ? 8 : 7;
   return (
@@ -159,7 +160,7 @@ export function DevicesTable({
                   <DeviceState d={d} />
                 </TableCell>
                 <TableCell className="py-1.5 pr-4 text-right">
-                  {!d.revoked_at && (
+                  {!d.revoked_at && onRevoke && (
                     <Button variant="outline" size="sm" onClick={() => onRevoke(d)}>
                       <LogOut /> Déconnecter
                     </Button>

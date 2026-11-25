@@ -78,7 +78,9 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export default function CommandJournal() {
-  const { isAdmin } = useCurrentUser();
+  // "audit" sees everyone's commands; the user list itself is admin-only
+  const { isAdmin: realAdmin, can } = useCurrentUser();
+  const isAdmin = can("audit");
   const [q, setQ] = useState("");
   const dq = useDebounced(q.trim(), 350);
   const [filters, setFilters] = useState<Filters>(EMPTY);
@@ -95,8 +97,8 @@ export default function CommandJournal() {
     api.get<ServerData[]>("/api/servers/").then(setServers).catch(() => {});
   }, []);
   useEffect(() => {
-    if (isAdmin) api.get<UserData[]>("/api/users/").then(setUsers).catch(() => {});
-  }, [isAdmin]);
+    if (realAdmin) api.get<UserData[]>("/api/users/").then(setUsers).catch(() => {});
+  }, [realAdmin]);
 
   /** Shared by the search and the CSV export. */
   const filterQuery = useMemo(() => {
@@ -181,7 +183,7 @@ export default function CommandJournal() {
             className="h-8 pl-8 font-mono"
           />
         </div>
-        {isAdmin && (
+        {isAdmin && users.length > 0 && (
           <FilterSelect
             value={filters.user_id}
             onChange={set("user_id")}

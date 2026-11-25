@@ -40,6 +40,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCurrentUser } from "@/services/useCurrentUser";
+import type { Requirement } from "@/services/permissions";
 import NotificationBell, { usePolledCount } from "@/components/NotificationBell";
 import LiveIndicator from "@/components/shell/LiveIndicator";
 import CommandPalette, { useCommandPalette } from "@/components/shell/CommandPalette";
@@ -66,7 +67,7 @@ function CitadelMark({ className = "" }: { className?: string }) {
   );
 }
 
-function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
+function AppSidebar({ allows }: { allows: (req: Requirement | undefined) => boolean }) {
   const { pathname } = useLocation();
   const [pendingApprovals] = usePolledCount("/api/approvals/pending-count");
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`));
@@ -86,7 +87,7 @@ function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
 
       <SidebarContent>
         {NAV.map((group) => {
-          const items = group.items.filter((i) => isAdmin || !i.adminOnly);
+          const items = group.items.filter((i) => allows(i.perm));
           if (!items.length) return null;
           return (
             <SidebarGroup key={group.label}>
@@ -150,7 +151,8 @@ function UserMenu() {
               </Avatar>
               <span className="grid flex-1 text-left leading-tight">
                 <span className="truncate text-sm font-medium text-sidebar-accent-foreground">{name}</span>
-                <span className="truncate text-xs">{user?.role === "admin" ? "Administrateur" : user?.role === "operator" ? "Opérateur" : "Lecteur"}</span>
+                <span className="truncate text-xs">{user?.role === "admin" ? "Administrateur" : user?.role === "operator" ? "Opérateur" : "Lecteur"}
+                  {user?.custom_role_name && user.role !== "admin" ? `, ${user.custom_role_name}` : ""}</span>
               </span>
               <ChevronsUpDown className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -183,13 +185,13 @@ function UserMenu() {
 
 export default function Layout() {
   const { pathname } = useLocation();
-  const { isAdmin } = useCurrentUser();
+  const { can, allows } = useCurrentUser();
   const palette = useCommandPalette();
   const trail = trailFor(pathname);
 
   return (
     <SidebarProvider>
-      <AppSidebar isAdmin={isAdmin} />
+      <AppSidebar allows={allows} />
       <SidebarInset className="min-w-0">
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
           <SidebarTrigger className="-ml-1" />
@@ -216,7 +218,7 @@ export default function Layout() {
           </Breadcrumb>
 
           <div className="ml-auto flex items-center gap-2">
-            {isAdmin && <LiveIndicator />}
+            {can("audit") && <LiveIndicator />}
             <Button
               variant="outline"
               size="sm"
@@ -237,7 +239,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </SidebarInset>
-      <CommandPalette open={palette.open} onOpenChange={palette.setOpen} isAdmin={isAdmin} />
+      <CommandPalette open={palette.open} onOpenChange={palette.setOpen} allows={allows} />
     </SidebarProvider>
   );
 }
