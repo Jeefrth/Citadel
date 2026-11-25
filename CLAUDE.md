@@ -35,6 +35,8 @@
 - Gouvernance (ACL, validations, notifications) : `docs/governance.md`
 - Audit (enregistrements, journal, direct, SIEM) : `docs/audit.md`
 - Opérations (fichiers, tâches, passerelles, Azure) : `docs/operations.md`
+- Kubernetes : `docs/kubernetes.md`
+- Plan de test manuel (recette) : `docs/plan-de-test.md`, laboratoire `scripts/test-lab.sh up|users|status|down`
 - Design de l'interface : `docs/design.md`
 - README complet : `README.md`
 
