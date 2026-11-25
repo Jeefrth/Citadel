@@ -36,6 +36,7 @@ from app.models.server import Server
 from app.models.settings import AppSetting
 from app.models.user import User
 from app.services.enforcement import GovernanceDenied, enforce_connect
+from app.services import tui_select
 from app.services.terminal_core import SessionOpenError, SessionSpec, run_session
 
 logger = logging.getLogger("citadel.ssh_proxy")
@@ -219,61 +220,74 @@ async def _visible_linux(db, user: User, name: str | None = None) -> list[Server
             if grants is None or (s.id in grants and PolicyAction.CONNECT.value in grants[s.id].actions)]
 
 
-async def _pick_server(process, db, user: User, preset: list[Server] | None = None) -> Server | None:
+async def _node_paths(db) -> dict:
+    from app.models.pam import Node
+    nodes = {n.id: n for n in (await db.execute(select(Node))).scalars().all()}
+
+    def path(nid):
+        parts, seen = [], set()
+        while nid in nodes and nid not in seen:
+            seen.add(nid)
+            parts.append(nodes[nid].name)
+            nid = nodes[nid].parent_id
+        return "/".join(reversed(parts))
+    return {nid: path(nid) for nid in nodes}
+
+
+async def _pick_server(process, db, user: User, preset: list[Server] | None = None, title: str | None = None):
+    """Interactive server list. Returns a Server, or None to quit."""
     servers = preset if preset is not None else await _visible_linux(db, user)
     if not servers:
         _w(process, "Aucun serveur Linux ne vous est accordé.\n")
         return None
-    query = ""
-    while True:
-        shown = [s for s in servers if query.lower() in f"{s.name} {s.ip_address} {s.hostname or ''}".lower()][:MENU_LIMIT]
-        _w(process, "\n")
-        for i, s in enumerate(shown, 1):
-            _w(process, f"  {i:>3}  {s.name:<32} {s.ip_address}\n")
-        if not shown:
-            _w(process, "  (aucun serveur ne correspond)\n")
-        answer = await _read_line(process, "\nNuméro, texte pour filtrer, q pour quitter : ")
-        if answer is None or answer.lower() in ("q", "quit", "exit"):
-            return None
-        if answer.isdigit() and 1 <= int(answer) <= len(shown):
-            return shown[int(answer) - 1]
-        query = answer
+    paths = await _node_paths(db)
+    items = []
+    for s in servers:
+        tags = " ".join(f"{k}={v}" for k, v in sorted((s.tags or {}).items()) if not k.startswith("azure_"))
+        detail = "   ".join(x for x in (s.ip_address, paths.get(s.node_id, ""), tags) if x)
+        items.append(tui_select.Item(s.name, detail, s))
+    sel = tui_select.Selector(title or f"Citadel : bonjour {user.display_name}. Choisissez un serveur", items,
+                              hint="↑↓ choisir   Entrée se connecter   Échap quitter   tapez pour filtrer")
+    choice = await tui_select.select(process, sel)
+    return choice.value if isinstance(choice, tui_select.Item) else None
 
 
-async def _pick_account(process, server: Server, grant, user: User, wanted: str | None, ask: bool = True):
-    """Returns resolve_for_user kwargs, or None to quit."""
+async def _pick_account(process, server: Server, grant, user: User, wanted: str | None, ask: bool = True,
+                        can_go_back: bool = False):
+    """resolve_for_user kwargs, "back" (Esc, when a server list is behind), or None to quit."""
     options = []
     for a in server.accounts:
         if a.is_active and grant.allows_account(a.username):
-            options.append((a.username + (" (par défaut)" if a.is_default else ""), {"account_id": str(a.id)}, a.username))
+            options.append(tui_select.Item(a.username, "compte par défaut" if a.is_default else "",
+                                           ({"account_id": str(a.id)}, a.username, a.is_default)))
     if ACCOUNT_USER in grant.accounts:
-        options.append(("@USER (certificat à votre nom)", {"virtual": ACCOUNT_USER}, ACCOUNT_USER))
+        options.append(tui_select.Item("@USER", "certificat éphémère à votre nom", ({"virtual": ACCOUNT_USER}, ACCOUNT_USER, False)))
     if ACCOUNT_INPUT in grant.accounts:
-        options.append(("@INPUT (identifiants saisis)", {"virtual": ACCOUNT_INPUT}, ACCOUNT_INPUT))
+        options.append(tui_select.Item("@INPUT", "identifiants saisis à la connexion", ({"virtual": ACCOUNT_INPUT}, ACCOUNT_INPUT, False)))
     if wanted:
-        match = next((o for o in options if o[2] == wanted), None)
-        if match is None:
+        choice = next((o for o in options if o.value[1] == wanted), None)
+        if choice is None:
             _w(process, f"Compte « {wanted} » non accordé sur {server.name}.\n")
             return None
-        choice = match
     elif not options:
         _w(process, f"Aucun compte accordé sur {server.name}.\n")
-        return None
+        return "back" if can_go_back else None
     elif len(options) == 1:
         choice = options[0]
-    elif not ask and any("par défaut" in o[0] for o in options):
-        choice = next(o for o in options if "par défaut" in o[0])  # direct target: default account
+    elif not ask and any(o.value[2] for o in options):
+        choice = next(o for o in options if o.value[2])  # direct target: default account
     else:
-        _w(process, f"\nComptes sur {server.name} :\n")
-        for i, o in enumerate(options, 1):
-            _w(process, f"  {i:>3}  {o[0]}\n")
-        answer = await _read_line(process, "Numéro du compte : ")
-        if not answer or not answer.isdigit() or not 1 <= int(answer) <= len(options):
+        sel = tui_select.Selector(f"{server.name} : choisissez un compte", options,
+                                  hint="↑↓ choisir   Entrée se connecter   Échap "
+                                       + ("retour aux serveurs" if can_go_back else "quitter"))
+        choice = await tui_select.select(process, sel)
+        if choice == "back":
+            return "back" if can_go_back else None
+        if not isinstance(choice, tui_select.Item):
             return None
-        choice = options[int(answer) - 1]
-    kwargs = dict(choice[1])
+    kwargs = dict(choice.value[0])
     if kwargs.get("virtual") == ACCOUNT_INPUT:
-        name = await _read_line(process, "Utilisateur : ")
+        name = await _read_line(process, f"Utilisateur sur {server.name} : ")
         pwd = await _read_line(process, "Mot de passe : ", echo=False)
         if not name or not pwd:
             return None
@@ -332,38 +346,43 @@ async def _handle(process) -> None:
             if user is None or not user.is_active:
                 process.exit(1)
                 return
-            _w(process, f"Citadel : bonjour {user.display_name}.\n")
-            server = None
+            preset = None
             if wanted_server:
                 matches = await _visible_linux(db, user, name=wanted_server)
                 if not matches:
                     _w(process, f"Serveur « {wanted_server} » introuvable.\n")
                     process.exit(1)
                     return
-                if len(matches) == 1:
+                if len(matches) > 1:  # names are not unique: let the user pick
+                    preset = matches
+            menu = not wanted_server or preset is not None
+            while True:
+                if menu:
+                    title = f"Plusieurs serveurs s'appellent « {wanted_server} »" if preset else None
+                    server = await _pick_server(process, db, user, preset=preset, title=title)
+                    if server is None:
+                        process.exit(0)
+                        return
+                else:
                     server = matches[0]
-                else:  # names are not unique: let the user pick
-                    _w(process, f"Plusieurs serveurs s'appellent « {wanted_server} ».\n")
-                    server = await _pick_server(process, db, user, preset=matches)
-            else:
-                server = await _pick_server(process, db, user)
-                if server is None:
-                    process.exit(0)
+                try:
+                    server, grant = await require_server(db, user, server.id, PolicyAction.CONNECT.value)
+                except HTTPException:
+                    _w(process, f"Serveur « {server.name} » introuvable.\n")  # same answer as an unknown server
+                    process.exit(1)
                     return
-            try:
-                server, grant = await require_server(db, user, server.id, PolicyAction.CONNECT.value)
-            except HTTPException:
-                _w(process, f"Serveur « {server.name} » introuvable.\n")  # same answer as an unknown server
-                process.exit(1)
-                return
-            if server.os_type != OSType.LINUX:
-                _w(process, "Ce serveur est sous Windows : utilisez le RDP depuis l'interface web.\n")
-                process.exit(1)
-                return
-            kwargs = await _pick_account(process, server, grant, user, wanted_account, ask=not wanted_server)
-            if kwargs is None:
-                process.exit(1)
-                return
+                if server.os_type != OSType.LINUX:
+                    _w(process, "Ce serveur est sous Windows : utilisez le RDP depuis l'interface web.\n")
+                    process.exit(1)
+                    return
+                kwargs = await _pick_account(process, server, grant, user, wanted_account,
+                                             ask=menu, can_go_back=menu)
+                if kwargs == "back":
+                    continue
+                if kwargs is None:
+                    process.exit(1)
+                    return
+                break
             try:
                 account = resolve_for_user(server, grant, user, **kwargs)
                 await enforce_connect(db, user, server, account.username, owner.ip)
@@ -375,6 +394,7 @@ async def _handle(process) -> None:
                 _w(process, f"{e.message}\n")
                 process.exit(1)
                 return
+        cols, rows = process.get_terminal_size()[:2]  # may have changed during the menu
         _w(process, f"Connexion à {server.name} ({account.label})...\n")
         spec = SessionSpec(user=user, server=server, account=account, ip=owner.ip, cols=cols or 80, rows=rows or 24,
                            channel="ssh-proxy")

@@ -56,6 +56,8 @@ ssh -p 2222 'prenom.nom@domaine.ch#root#web-01'@citadel     compte précis
 ```
 
 - Identifiant : l'e-mail, ou sa partie avant `@` si elle est unique.
+- **Menu interactif** (sans serveur dans l'identifiant) : flèches haut / bas (ou Ctrl+P / Ctrl+N), Page haut / bas, Début / Fin, frappe directe pour filtrer (sans tenir compte des majuscules ni des accents, plusieurs mots possibles : `labo app`), Entrée pour choisir, Échap pour effacer le filtre puis revenir (des comptes à la liste des serveurs), Ctrl+C pour quitter. Chaque serveur affiche son adresse, son nœud et ses étiquettes ; le menu s'ouvre sur un écran séparé, le terminal est restauré à la connexion.
+- Raccourci conseillé dans `~/.ssh/config` : `Host citadel`, `HostName <hôte>`, `Port 2222`, `User <e-mail>`, `IdentityFile ~/.ssh/citadel_ed25519`, puis `ssh citadel`.
 - Authentification, à préparer dans Mon compte > Accès SSH :
   - **clé publique** (ed25519 conseillée, RSA 3072 bits au moins) ;
   - **jeton de connexion** : un mot de passe affiché une seule fois, valable de 1 minute à 24 heures, réutilisable jusqu'à son expiration, révocable.
