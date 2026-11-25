@@ -20,6 +20,7 @@ scripts/test-lab.sh up --rdp         # idem + bureau RDP (image d'environ 1 Go)
 scripts/test-lab.sh provision        # enregistre le labo dans Citadel (relançable, sans doublon) : voir 0.3
 scripts/test-lab.sh users            # utilisateurs de test non-admin + clés d'accès (data/lab/keys.txt)
 scripts/test-lab.sh status           # rappel des cibles et identifiants
+scripts/test-lab.sh pause            # arrête les conteneurs (rien n'est perdu) ; resume pour reprendre
 ```
 
 | Cible | Adresse (depuis Citadel) | Comptes |

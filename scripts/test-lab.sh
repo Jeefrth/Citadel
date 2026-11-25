@@ -3,6 +3,8 @@
 #   scripts/test-lab.sh up [--rdp]   start the lab (RDP desktop optional: ~1 GB image)
 #   scripts/test-lab.sh provision    register the lab in Citadel (nodes, credentials, zone, servers, cluster, rules)
 #   scripts/test-lab.sh users        create lab users (operator, viewer, custom role) + access keys
+#   scripts/test-lab.sh pause        stop the lab containers (state kept, Citadel unchanged)
+#   scripts/test-lab.sh resume       start them again (same k3s token, nothing to re-provision)
 #   scripts/test-lab.sh status       show targets and credentials
 #   scripts/test-lab.sh down         remove everything (containers, isolated network, data/lab)
 # Never point this at production: passwords are fixed and printed.
@@ -119,6 +121,17 @@ users() {
   column -t -s $'\t' "$OUT/keys.txt"
 }
 
+pause() {
+  for c in $CONTAINERS; do docker stop "$c" >/dev/null 2>&1 && echo "  $c en pause"; done
+  echo "Labo en pause. Reprise : scripts/test-lab.sh resume"
+}
+
+resume() {
+  for c in $CONTAINERS; do docker start "$c" >/dev/null 2>&1 && echo "  $c relancé"; done
+  for _ in $(seq 1 40); do docker exec lab-k3s kubectl get nodes 2>/dev/null | grep -q " Ready" && break; sleep 3; done
+  echo "Labo relancé (k3s prêt)."
+}
+
 down() {
   docker compose cp scripts/lab/lab_users.py backend:/tmp/lab_users.py >/dev/null 2>&1 \
     && docker compose exec -T backend python /tmp/lab_users.py --down || true
@@ -132,7 +145,9 @@ case "${1:-}" in
   up) shift; up "$@" ;;
   provision) provision ;;
   users) users ;;
+  pause) pause ;;
+  resume) resume ;;
   status) status ;;
   down) down ;;
-  *) sed -n '2,8p' "$0"; exit 1 ;;
+  *) sed -n '2,10p' "$0"; exit 1 ;;
 esac
