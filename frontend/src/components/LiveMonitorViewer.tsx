@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import Guacamole from "guacamole-common-js";
 import { Eye, Loader2, Power } from "lucide-react";
 import { api, getAuthToken, wsBaseUrl } from "@/services/api";
+import { orgAuthFields } from "@/services/org";
 import { errorMessage, type LiveSession, type MonitorMessage, type MonitorTicket } from "@/services/types";
 import { ProtocolBadge, READONLY_XTERM_OPTIONS, StatusDot, TERMINAL_BG, b64ToBytes } from "@/components/auditUi";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,7 @@ function SshMonitor({ session, onState }: { session: LiveSession } & StateProps)
       }
       if (disposed) return;
       ws = new WebSocket(`${wsBaseUrl()}/ws/monitor/${encodeURIComponent(session.session_id)}`);
-      ws.onopen = () => ws?.send(JSON.stringify({ type: "auth", token }));
+      ws.onopen = () => ws?.send(JSON.stringify({ type: "auth", token, ...orgAuthFields() }));
       ws.onmessage = (event) => {
         let msg: MonitorMessage;
         try {

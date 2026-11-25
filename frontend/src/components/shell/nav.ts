@@ -1,5 +1,6 @@
 import {
   Activity,
+  Building2,
   ClipboardCheck,
   Container,
   FileBarChart,
@@ -20,8 +21,11 @@ import {
 } from "lucide-react";
 import type { Requirement } from "@/services/permissions";
 
-/** Nav requirement: a permission requirement, or "k8s" (resolved by the layout). */
-export type NavRequirement = Requirement | "k8s";
+/**
+ * Nav requirement: a permission requirement, "k8s" or "platform" (platform admin),
+ * the last two resolved by the layout.
+ */
+export type NavRequirement = Requirement | "k8s" | "platform";
 
 export interface NavItem {
   to: string;
@@ -77,6 +81,7 @@ export const NAV: NavGroup[] = [
     items: [
       { to: "/infrastructure", label: "Infrastructure", icon: Network, perm: ["servers", "secrets"] },
       { to: "/settings", label: "Paramètres", icon: Settings, perm: "admin" },
+      { to: "/platform/orgs", label: "Organisations", icon: Building2, perm: "platform" },
     ],
   },
 ];

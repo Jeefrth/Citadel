@@ -27,6 +27,8 @@ function loadCurrentUser(): Promise<UserData> {
 export interface CurrentUser {
   user: UserData | null;
   isAdmin: boolean;
+  /** Platform super-admin (organisations page); independent from the role in the current org. */
+  isPlatformAdmin: boolean;
   loading: boolean;
   /** hasPerm(user, perm): admin, or a custom role granting it. */
   can: (perm: Perm) => boolean;
@@ -53,6 +55,7 @@ export function useCurrentUser(): CurrentUser {
   return {
     user,
     isAdmin: user?.role === "admin",
+    isPlatformAdmin: !!user?.is_platform_admin,
     loading,
     can: (perm) => hasPerm(user, perm),
     allows: (req) => meets(user, req),

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
 import type { CustomRoleData } from "@/services/types";
-import { errorMessage } from "@/services/types";
 import MaskingPanel from "@/components/settings/MaskingPanel";
 import BackupsPanel from "@/components/settings/BackupsPanel";
 import ApplicationsPanel from "@/components/settings/ApplicationsPanel";
-import RolesPanel, { BaseRoleCapNote } from "@/components/settings/RolesPanel";
+import RolesPanel from "@/components/settings/RolesPanel";
+import MembersPanel from "@/components/settings/MembersPanel";
 import { api } from "@/services/api";
 import SecretsVaultCard from "@/components/SecretsVaultCard";
 import NotificationChannelsPanel from "@/components/NotificationChannels";
@@ -22,7 +21,6 @@ import {
   Save,
   RotateCcw,
   Loader2,
-  Trash2,
   Plus,
   X,
   Copy,
@@ -38,14 +36,12 @@ import {
   UserCog,
   ShieldAlert,
 } from "lucide-react";
-import { ConfirmModal, ErrorBox, PageHeader, Tabs } from "@/components/kit";
+import { PageHeader, Tabs } from "@/components/kit";
 import { FactRow, SettingsCard, Tip } from "@/components/auditUi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 /** Readable labels for the known setting keys (fallback: the key in sentence case). */
 const SETTING_LABELS: Record<string, string> = {
@@ -78,18 +74,6 @@ interface SettingMeta {
   value: string;
   description: string;
   is_default: boolean;
-}
-
-interface UserData {
-  id: string;
-  email: string;
-  display_name: string;
-  role: string;
-  is_active: boolean;
-  last_login: string | null;
-  custom_role_id?: string | null;
-  custom_role_name?: string | null;
-  permissions?: string[];
 }
 
 interface CaInfo {
@@ -131,15 +115,12 @@ export default function Settings() {
   const activeTab: Tab = TAB_IDS.find((t) => t === params.get("tab")) ?? "security";
   const setActiveTab = (t: Tab) => setParams(t === "security" ? {} : { tab: t }, { replace: true });
   const [customRoles, setCustomRoles] = useState<CustomRoleData[]>([]);
-  const [userError, setUserError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Record<string, SettingMeta>>({});
-  const [users, setUsers] = useState<UserData[]>([]);
   const [caInfo, setCaInfo] = useState<CaInfo | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [deleting, setDeleting] = useState<UserData | null>(null);
 
   // Editable state
   const [editValues, setEditValues] = useState<Record<string, string>>({});
@@ -153,16 +134,14 @@ export default function Settings() {
   useEffect(() => {
     Promise.all([
       api.get<Record<string, SettingMeta>>("/api/admin/settings"),
-      api.get<UserData[]>("/api/admin/users"),
       api.get<CaInfo>("/api/admin/ca/info").catch(() => null),
       api.get<SystemInfo>("/api/admin/system").catch(() => null),
     ])
-      .then(([s, u, ca, sys]) => {
+      .then(([s, ca, sys]) => {
         setSettings(s);
         const vals: Record<string, string> = {};
         for (const [key, meta] of Object.entries(s)) vals[key] = meta.value;
         setEditValues(vals);
-        setUsers(u);
         setCaInfo(ca);
         setSystemInfo(sys);
       })
@@ -221,32 +200,6 @@ export default function Settings() {
       // ignore
     } finally {
       setSaving(null);
-    }
-  };
-
-  /** PATCH a user; the response (UserRead) carries the resulting role, custom role and permissions. */
-  const patchUser = async (userId: string, body: Record<string, unknown>, done?: string) => {
-    setUserError(null);
-    try {
-      const updated = await api.patch<UserData>(`/api/admin/users/${userId}`, body);
-      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...updated } : u)));
-      if (done) toast.success(done);
-      loadCustomRoles();
-    } catch (e) {
-      setUserError(errorMessage(e));
-    }
-  };
-  const updateUserRole = (userId: string, role: string) => patchUser(userId, { role }, "Rôle modifié");
-  const updateUserCustomRole = (userId: string, id: string) =>
-    patchUser(userId, { custom_role_id: id === "none" ? null : id }, "Rôle personnalisé modifié");
-  const toggleUserActive = (userId: string, isActive: boolean) => patchUser(userId, { is_active: isActive });
-
-  const deleteUser = async (userId: string) => {
-    try {
-      await api.delete(`/api/admin/users/${userId}`);
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
-    } catch {
-      // ignore
     }
   };
 
@@ -330,7 +283,7 @@ export default function Settings() {
     { id: "applications", icon: AppWindow, label: "Applications" },
     { id: "notifications", icon: Bell, label: "Notifications" },
     { id: "audit", icon: FileSearch, label: "Audit" },
-    { id: "users", icon: Users, label: "Utilisateurs" },
+    { id: "users", icon: Users, label: "Membres" },
     { id: "roles", icon: UserCog, label: "Rôles" },
     { id: "system", icon: Info, label: "Système" },
   ];
@@ -338,7 +291,7 @@ export default function Settings() {
   if (loading) {
     return (
       <div>
-        <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, utilisateurs et rôles." />
+        <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres et rôles." />
         <div className="mb-6 flex gap-4 border-b pb-2.5">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-4 w-20" />
@@ -447,7 +400,7 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, utilisateurs et rôles." />
+      <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres et rôles." />
 
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
@@ -637,107 +590,7 @@ sudo systemctl restart sshd`}
           </>
         )}
 
-        {activeTab === "users" && (
-          <>
-          <BaseRoleCapNote />
-          <ErrorBox message={userError} />
-          <SettingsCard
-            icon={Users}
-            title={
-              <>
-                Utilisateurs <span className="tabular font-normal text-muted-foreground">({users.length})</span>
-              </>
-            }
-            className="[&>div:last-child]:p-0"
-          >
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="pl-5">Nom</TableHead>
-                  <TableHead>E-mail</TableHead>
-                  <TableHead>Rôle</TableHead>
-                  <TableHead>Rôle personnalisé</TableHead>
-                  <TableHead>Actif</TableHead>
-                  <TableHead>Dernière connexion</TableHead>
-                  <TableHead className="pr-5 text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.length === 0 && (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                      Aucun utilisateur. Les comptes sont créés à la première connexion Entra ID.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {users.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="pl-5 font-medium">{u.display_name}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{u.email || "-"}</TableCell>
-                    <TableCell>
-                      <Select value={u.role} onValueChange={(v) => updateUserRole(u.id, v)}>
-                        <SelectTrigger className="h-8 w-32">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="operator">Opérateur</SelectItem>
-                          <SelectItem value="viewer">Lecteur</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      {u.role === "admin" ? (
-                        <span className="text-xs text-muted-foreground">Toutes les permissions</span>
-                      ) : (
-                        <Select value={u.custom_role_id || "none"} onValueChange={(v) => updateUserCustomRole(u.id, v)}>
-                          <SelectTrigger className="h-8 w-44" title={(u.permissions || []).join(", ") || undefined}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Aucun</SelectItem>
-                            {customRoles.map((r) => (
-                              <SelectItem key={r.id} value={r.id}>
-                                {r.name}
-                              </SelectItem>
-                            ))}
-                            {u.custom_role_id && !customRoles.some((r) => r.id === u.custom_role_id) && (
-                              <SelectItem value={u.custom_role_id}>{u.custom_role_name || "Rôle inconnu"}</SelectItem>
-                            )}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={u.is_active}
-                        onCheckedChange={(v) => toggleUserActive(u.id, v)}
-                        aria-label={u.is_active ? "Désactiver l'utilisateur" : "Activer l'utilisateur"}
-                      />
-                    </TableCell>
-                    <TableCell className="tabular whitespace-nowrap text-muted-foreground">
-                      {u.last_login ? new Date(u.last_login).toLocaleString("fr-FR") : "Jamais"}
-                    </TableCell>
-                    <TableCell className="pr-5 text-right">
-                      <Tip content="Supprimer l'utilisateur">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-muted-foreground hover:bg-danger/10 hover:text-danger"
-                          onClick={() => setDeleting(u)}
-                          aria-label="Supprimer"
-                        >
-                          <Trash2 />
-                        </Button>
-                      </Tip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </SettingsCard>
-          </>
-        )}
+        {activeTab === "users" && <MembersPanel customRoles={customRoles} onChanged={loadCustomRoles} />}
 
         {activeTab === "system" && systemInfo && (
           <SettingsCard icon={Info} title="Système">
@@ -759,23 +612,6 @@ sudo systemctl restart sshd`}
         )}
       </div>
 
-      {deleting && (
-        <ConfirmModal
-          title="Supprimer l'utilisateur"
-          confirmLabel="Supprimer"
-          danger
-          onConfirm={() => {
-            const id = deleting.id;
-            setDeleting(null);
-            deleteUser(id);
-          }}
-          onClose={() => setDeleting(null)}
-        >
-          <p>
-            <strong>{deleting.display_name}</strong> perdra l'accès à Citadel. La suppression est journalisée dans l'audit.
-          </p>
-        </ConfirmModal>
-      )}
     </div>
   );
 }

@@ -40,8 +40,8 @@ export function BaseRoleCapNote() {
       <p className="text-foreground">
         Un rôle personnalisé ajoute des permissions d'administration à un opérateur ou un lecteur. Le rôle de base
         plafonne toujours les actions sur les serveurs (un lecteur n'exécute jamais rien) et l'accès aux serveurs reste
-        donné par les règles d'accès. Utilisateurs, rôles, paramètres, coffre, sauvegardes et applications restent
-        réservés aux administrateurs.
+        donné par les règles d'accès. Membres, rôles, paramètres, coffre, sauvegardes et applications restent
+        réservés aux administrateurs de l'organisation.
       </p>
     </div>
   );
@@ -176,7 +176,7 @@ export default function RolesPanel({ onChanged }: { onChanged?: () => void }) {
       <SettingsCard
         icon={UserCog}
         title="Rôles personnalisés"
-        description="Attribuez-les dans l'onglet Utilisateurs."
+        description="Attribuez-les dans l'onglet Membres."
         actions={
           <Button onClick={() => setEditing(null)}>
             <Plus /> Nouveau rôle

@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { isReviewMessage, type ConnectionChoice } from "@/services/types";
 import { GovernanceNotice } from "@/components/governanceUi";
 import { wsBaseUrl as defaultWsBaseUrl } from "@/services/api";
+import { orgAuthFields } from "@/services/org";
 
 /** Refusals from the connection ACL (deny or review) get a banner above the terminal. */
 function isGovernanceMessage(msg: string): boolean {
@@ -121,6 +122,7 @@ export default function Terminal({
       const dims = fitAddon.proposeDimensions();
       const authMsg: Record<string, unknown> = {
         ...(authExtraRef.current || {}),
+        ...orgAuthFields(),
         type: "auth",
         token,
         cols: dims?.cols || 80,

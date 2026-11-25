@@ -322,6 +322,12 @@ export default function MyAccount() {
             <>
               <p className="truncate font-medium">{user.display_name}</p>
               <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+              {user.org && (
+                <p className="truncate text-xs text-muted-foreground">
+                  Organisation : <span className="text-foreground">{user.org.name}</span>
+                  {user.is_platform_admin && " · administrateur de la plateforme"}
+                </p>
+              )}
             </>
           ) : (
             <div className="space-y-1.5">
@@ -332,7 +338,12 @@ export default function MyAccount() {
         </div>
         {user && (
           <div className="flex flex-wrap justify-end gap-1">
-            <Chip tone={user.role === "admin" ? "amber" : "primary"}>{ROLE_LABELS[user.role] || user.role}</Chip>
+            <Chip
+              tone={user.role === "admin" ? "amber" : "primary"}
+              title={user.org ? `Rôle dans ${user.org.name}` : undefined}
+            >
+              {ROLE_LABELS[user.role] || user.role}
+            </Chip>
             {user.custom_role_name && user.role !== "admin" && (
               <Chip title={`Permissions : ${(user.permissions || []).join(", ") || "aucune"}`}>{user.custom_role_name}</Chip>
             )}

@@ -222,6 +222,53 @@ export interface UserData {
   custom_role_id?: string | null;
   custom_role_name?: string | null;
   permissions?: string[];
+  /** SaaS phase 1 (/api/auth/me only): role and permissions above are those in `org`. */
+  is_platform_admin?: boolean;
+  org?: OrgBrief | null;
+  orgs?: OrgBrief[];
+}
+
+export type BaseRole = "admin" | "operator" | "viewer";
+
+/** Organisation the user can switch to; role null = platform admin without membership (acts as admin). */
+export interface OrgBrief {
+  id: string;
+  name: string;
+  slug: string;
+  is_default: boolean;
+  role: BaseRole | null;
+}
+
+/** /api/platform/orgs row (platform admin). */
+export interface PlatformOrg {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  is_default: boolean;
+  has_own_key: boolean;
+  has_own_ca: boolean;
+  created_at: string;
+  members: number;
+}
+
+/** /api/orgs/mine row. */
+export interface MyOrg extends PlatformOrg {
+  role: BaseRole | null;
+  current: boolean;
+}
+
+export interface OrgInvitation {
+  id: string;
+  email: string;
+  role: BaseRole;
+  created_at: string;
+}
+
+export interface OrgInviteResult {
+  status: "member" | "invited";
+  email: string;
+  role: BaseRole;
 }
 
 export interface UserBrief {

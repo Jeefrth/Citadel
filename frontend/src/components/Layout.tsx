@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useTheme } from "next-themes";
 import { motion } from "motion/react";
-import { ChevronsUpDown, LogOut, Moon, Search, Sun, UserCog } from "lucide-react";
+import { Building2, Check, ChevronsUpDown, LogOut, Moon, Search, Sun, UserCog } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -40,6 +40,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCurrentUser } from "@/services/useCurrentUser";
+import { roleLabel, switchOrg } from "@/services/org";
 import { useHasK8sClusters } from "@/services/k8s";
 import NotificationBell, { usePolledCount } from "@/components/NotificationBell";
 import LiveIndicator from "@/components/shell/LiveIndicator";
@@ -84,6 +85,7 @@ function AppSidebar({ allows }: { allows: (req: NavRequirement | undefined) => b
             Citadel
           </span>
         </Link>
+        <OrgSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
@@ -131,6 +133,90 @@ function AppSidebar({ allows }: { allows: (req: NavRequirement | undefined) => b
   );
 }
 
+/**
+ * Current organisation; with several, a dropdown to switch. Switching stores the slug
+ * and reloads the app on the dashboard (every loaded view belongs to the previous org).
+ */
+function OrgSwitcher() {
+  const { user } = useCurrentUser();
+  const current = user?.org;
+  if (!current) return null;
+  const orgs = user?.orgs || [];
+
+  const label = (
+    <>
+      <Building2 />
+      <span className="min-w-0 flex-1 truncate text-left">{current.name}</span>
+    </>
+  );
+
+  if (orgs.length <= 1) {
+    return (
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            tooltip={`Organisation : ${current.name}`}
+            className="cursor-default text-muted-foreground hover:bg-transparent hover:text-muted-foreground active:bg-transparent"
+            asChild
+          >
+            <div>{label}</div>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    );
+  }
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              tooltip={`Organisation : ${current.name}`}
+              className="border data-[state=open]:bg-sidebar-accent"
+              aria-label={`Organisation : ${current.name}. Changer d'organisation`}
+            >
+              {label}
+              <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="bottom" align="start" className="w-[--radix-dropdown-menu-trigger-width] min-w-64">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Changer d'organisation</DropdownMenuLabel>
+            {orgs.map((o) => {
+              const isCurrent = o.id === current.id;
+              return (
+                <DropdownMenuItem
+                  key={o.id}
+                  onSelect={() => {
+                    if (!isCurrent) switchOrg(o.slug);
+                  }}
+                  className="gap-2"
+                >
+                  <Check className={isCurrent ? "size-4" : "size-4 opacity-0"} aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm">{o.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {o.role ? roleLabel(o.role) : "Administrateur (plateforme)"}
+                    </span>
+                  </span>
+                  {!o.role && (
+                    <span
+                      className="shrink-0 rounded border border-info/25 bg-info/10 px-1 text-[10px] font-medium text-info"
+                      title="Accès en tant qu'administrateur de la plateforme, sans appartenance"
+                    >
+                      Plateforme
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
 function UserMenu() {
   const { instance, accounts } = useMsal();
   const account = accounts[0];
@@ -152,7 +238,7 @@ function UserMenu() {
               </Avatar>
               <span className="grid flex-1 text-left leading-tight">
                 <span className="truncate text-sm font-medium text-sidebar-accent-foreground">{name}</span>
-                <span className="truncate text-xs">{user?.role === "admin" ? "Administrateur" : user?.role === "operator" ? "Opérateur" : "Lecteur"}
+                <span className="truncate text-xs">{roleLabel(user?.role || "viewer")}
                   {user?.custom_role_name && user.role !== "admin" ? `, ${user.custom_role_name}` : ""}</span>
               </span>
               <ChevronsUpDown className="ml-auto size-4" />
@@ -162,6 +248,11 @@ function UserMenu() {
             <DropdownMenuLabel className="font-normal">
               <div className="text-sm font-medium">{name}</div>
               <div className="truncate text-xs text-muted-foreground">{email}</div>
+              {user?.org && (
+                <div className="mt-1 truncate text-xs text-muted-foreground">
+                  {roleLabel(user.role)} dans {user.org.name}
+                </div>
+              )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
@@ -186,10 +277,10 @@ function UserMenu() {
 
 export default function Layout() {
   const { pathname } = useLocation();
-  const { can, allows: allowsPerm } = useCurrentUser();
+  const { can, allows: allowsPerm, isPlatformAdmin } = useCurrentUser();
   const hasClusters = useHasK8sClusters();
   const allows = (req: NavRequirement | undefined) =>
-    req === "k8s" ? hasClusters || can("kubernetes") : allowsPerm(req);
+    req === "k8s" ? hasClusters || can("kubernetes") : req === "platform" ? isPlatformAdmin : allowsPerm(req);
   const palette = useCommandPalette();
   const [shortcut] = useShortcut();
   const trail = trailFor(pathname);
