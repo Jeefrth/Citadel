@@ -40,11 +40,71 @@ Non couvert par le laboratoire : cibles Windows / WinRM (mises à jour Windows, 
 
 Les tests de droits marqués **(API)** se font avec ces clés ; ceux marqués **(2e compte)** demandent une session Entra.
 
-### 0.3 Jeu de données de départ
+### 0.3 Ajouter les serveurs du laboratoire
 
-- [ ] **P1** Serveurs > Ajouter : `lab-linux` (Linux, `lab-linux:22`) et `lab-linux2`, étiquettes `env=labo`, nœud « Labo ».
-- [ ] **P2** Fiche serveur > Comptes : `deploy` (mot de passe, **par défaut**, à privilèges), `alice` (mot de passe). Bouton « Tester » : connexion OK.
-- [ ] **P3** Accès > Règles d'accès : règle « Labo » pour le 2e compte / `lab-operator` : nœud « Labo », actions connect, execute, upload, download, comptes `alice`, `@USER`.
+Toutes ces étapes se font avec ton compte admin. Les noms `lab-*` sont résolus par Citadel (même réseau Docker) : on les saisit tels quels dans le champ « Adresse IP ».
+
+#### 0.3.1 Nœud et identifiants
+
+- [ ] **P1** Serveurs > colonne des nœuds > « Nouveau nœud racine » : nom `Labo` > « Créer le nœud ». Puis, sur `Labo`, « Nouveau sous-nœud » : `Web`.
+- [ ] **P2** Serveurs > bouton **Credentials** (en haut à droite) : créer les identifiants, un par un.
+
+  | Nom | Type | Utilisateur | Mot de passe |
+  |---|---|---|---|
+  | `lab-deploy` | SSH (mot de passe) | `deploy` | `Lab-Admin-2026` |
+  | `lab-alice` | SSH (mot de passe) | `alice` | `Lab-User-2026` |
+  | `lab-gw` | SSH (mot de passe) | `gw` | `Lab-Gw-2026` |
+  | `lab-rdp` | WinRM | `ubuntu` | `ubuntu` (seulement si `up --rdp`) |
+
+  Attendu : les mots de passe ne sont plus jamais affichés ; ils sont chiffrés dans le coffre (`vault:v1:...` en base).
+
+#### 0.3.2 Serveur Linux `lab-linux`
+
+- [ ] **P3** Serveurs > **Ajouter un serveur** :
+
+  | Champ | Valeur |
+  |---|---|
+  | Nom | `lab-linux` |
+  | Nom d'hôte | `lab-linux` |
+  | Adresse IP | `lab-linux` |
+  | Système | Linux |
+  | Port SSH | `22` |
+  | Nœud | `Labo` |
+  | Zone réseau | aucune |
+  | Étiquettes | `env=labo`, `role=web` |
+  | Créer un compte par défaut | coché : utilisateur `deploy`, **Compte privilégié** coché, Authentification « Credential enregistré » > `lab-deploy` |
+
+  « Ajouter le serveur ». Attendu : le serveur apparaît sous `Labo`, statut inconnu.
+- [ ] **P4** Ligne du serveur > **Tester la connexion** : OK. Puis **Infos système** : Debian 12, uptime, noyau.
+- [ ] **P5** Ouvrir la fiche `lab-linux` > section **Comptes** > **Ajouter un compte** : utilisateur `alice`, « Credential enregistré » > `lab-alice`, ni par défaut ni privilégié > enregistrer. Sur la ligne d'`alice` : **Vérifier**. Attendu : OK.
+- [ ] **P6** Compte en certificat : **Ajouter un compte**, utilisateur = ton identifiant (la partie avant `@` de ton e-mail, par exemple `jean-francois.reithler`), Authentification **Certificat éphémère (CA Citadel, Linux uniquement)**. Attendu : aucun secret demandé. (Les comptes virtuels `@USER` et `@INPUT` n'ont pas besoin d'être créés : ils viennent des règles d'accès.)
+
+#### 0.3.3 Deuxième serveur `lab-linux2`
+
+- [ ] **P7** Même chose que P3 avec Nom, Nom d'hôte et Adresse IP = `lab-linux2`, nœud `Labo > Web`, étiquettes `env=labo`, `role=app`, compte par défaut `deploy` / `lab-deploy`. Ajouter `alice` comme en P5. Tester la connexion : OK.
+
+#### 0.3.4 Zone, passerelle et serveur isolé `lab-isolated`
+
+- [ ] **P8** Infrastructure > **Zones et passerelles** > **Ajouter une zone** : nom `Isolée`.
+- [ ] **P9** Dans la zone `Isolée` > **Ajouter une passerelle** : nom `lab-gw`, Hôte `lab-gw`, Port SSH `22`, Compte `gw`, Authentification « Credential enregistré » > `lab-gw`, Priorité `10`, active. Bouton **Tester** : OK.
+- [ ] **P10** Serveurs > **Ajouter un serveur** : Nom, Nom d'hôte et Adresse IP = `lab-isolated`, Linux, port 22, nœud `Labo`, **Zone réseau `Isolée`**, compte par défaut `deploy` / `lab-deploy` privilégié. Tester la connexion : OK (passe par la passerelle).
+- [ ] **P11** Contre-test : modifier `lab-isolated`, retirer la zone, Tester la connexion. Attendu : échec (hôte injoignable sans passerelle). Remettre la zone `Isolée`.
+
+#### 0.3.5 Bureau RDP `lab-rdp` (si `up --rdp`)
+
+- [ ] **P12** Serveurs > **Ajouter un serveur** : Nom, Nom d'hôte et Adresse IP = `lab-rdp`, **Système Windows** (c'est le type qui active le RDP), Port RDP `3389`, nœud `Labo`, compte par défaut `ubuntu` / « Credential enregistré » `lab-rdp`.
+  Attendu : connexion RDP possible depuis le Terminal. Le bureau de test est un Linux avec xrdp : « Tester la connexion », les infos système et les mises à jour (WinRM) échouent, c'est normal.
+
+#### 0.3.6 Vérifications après ajout
+
+- [ ] **P13** Serveurs : 3 ou 4 serveurs, filtre étiquette `env=labo`, filtre nœud `Labo` (sous-nœud `Web` inclus), recherche `isolated`.
+- [ ] **P14** Fiche `lab-linux` > métriques : CPU, RAM et disque remontent après quelques minutes (compte par défaut).
+- [ ] **P15** Traces : la page Journal d'audit n'a pas encore d'écran, vérifier en base : `docker compose exec db psql -U citadel -d citadel -c "select action, result from audit_logs order by timestamp desc limit 20"`. Attendu : création des credentials, des comptes, `server.test_connection`.
+
+#### 0.3.7 Règle d'accès de test
+
+- [ ] **P16** Accès > **Règles d'accès** > nouvelle règle `Labo` : utilisateurs = le 2e compte Entra et `Lab Operator`, nœud `Labo`, actions `connect`, `execute`, `upload`, `download`, comptes `alice` et `@USER`, sans fin de validité. Attendu : statut « Active ».
+- [ ] **P17** Accès > **Accès effectifs** > `Lab Operator` : `lab-linux`, `lab-linux2`, `lab-isolated` (et `lab-rdp`) avec la règle `Labo` comme source.
 
 ---
 
@@ -122,7 +182,7 @@ Les tests de droits marqués **(API)** se font avec ces clés ; ceux marqués **
 - [ ] **O2 [E]** Tâches > Nouvelle tâche « commande » `uptime` sur l'étiquette `env=labo` : aperçu des cibles, exécution parallèle, sortie par serveur. Avec la règle « validation » de G4 : serveur ignoré avec la raison.
 - [ ] **O3** Playbook (admin) `hosts: all` avec une variable par défaut ; lancement : journal Ansible en direct, résultat par serveur.
 - [ ] **O4 (API)** Variables refusées : `ansible_connection=local`, `{{ lookup(...) }}`, une variable non déclarée (operator). Attendu : 400 avec la raison.
-- [ ] **O5 [E]** Zones : zone « Isolée » avec passerelle `lab-gw` (compte `gw`), Tester : OK. Serveur `lab-isolated` dans cette zone : terminal, commande, fichiers fonctionnent ; hors zone : injoignable.
+- [ ] **O5 [E]** Zone `Isolée` (préparée en P8 à P11) : sur `lab-isolated`, terminal, commande (Tâches) et fichiers fonctionnent à travers la passerelle. Désactiver la passerelle `lab-gw` : tout échoue avec un message clair ; la réactiver.
 - [ ] **O6** Mises à jour : scanner `lab-linux` ; appliquer un paquet (`less`). (API) Nom de paquet `vim; id` : 400. Règle de commandes « validation » sur `system-update` : l'application part en validation.
 - [ ] **O7** Azure (si un compte de service de test existe) : synchro, groupes de ressources en sous-nœuds, étiquettes ; option « revue des nouvelles VM » : VM dans Infrastructure > VM à valider, importer / ignorer / remettre à valider.
 
