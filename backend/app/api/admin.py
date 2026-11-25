@@ -119,8 +119,8 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    result = await db.execute(select(User).order_by(User.display_name))
-    return result.scalars().all()
+    from app.services.roles import list_members
+    return await list_members(db)
 
 
 @router.patch("/users/{user_id}", response_model=UserRead)
@@ -130,11 +130,8 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
+    from app.services.roles import get_member
+    user, _ = await get_member(db, user_id)
     return await apply_user_update(db, user, data, actor)
 
 
@@ -147,13 +144,8 @@ async def delete_user(
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    await db.delete(user)
-    await db.commit()
+    from app.services.roles import remove_member
+    await remove_member(db, user_id, current_user)
 
 
 # ── CA Info ──────────────────────────────────────────────
@@ -187,7 +179,8 @@ async def get_system_info(
     from sqlalchemy import func
 
     server_count = (await db.execute(select(func.count(Server.id)))).scalar_one()
-    user_count = (await db.execute(select(func.count(User.id)))).scalar_one()
+    from app.services.members import member_ids_subquery
+    user_count = (await db.execute(select(func.count(User.id)).where(User.id.in_(member_ids_subquery())))).scalar_one()
     session_count = (await db.execute(select(func.count(SessionRecording.id)))).scalar_one()
     audit_count = (await db.execute(select(func.count(AuditLog.id)))).scalar_one()
     alert_count = (await db.execute(select(func.count(AlertRule.id)))).scalar_one()

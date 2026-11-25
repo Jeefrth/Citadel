@@ -34,7 +34,11 @@ admin_only = require_role(UserRole.ADMIN)
 async def _load_many(db: AsyncSession, model, ids: list[uuid.UUID], label: str):
     if not ids:
         return []
-    rows = (await db.execute(select(model).where(model.id.in_(ids)))).scalars().all()
+    q = select(model).where(model.id.in_(ids))
+    if model is User:   # people of another organisation do not exist here
+        from app.services.members import is_member_clause
+        q = q.where(is_member_clause())
+    rows = (await db.execute(q)).scalars().all()
     if len(rows) != len(set(ids)):
         raise HTTPException(status_code=400, detail=f"Unknown {label} in request")
     return list(rows)
@@ -301,7 +305,8 @@ async def delete_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 @router.get("/users/{user_id}/access", response_model=list[MyServerAccess])
 async def user_effective_access(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("policies"))):
     """Effective access of any user (admin troubleshooting: 'why can X see Y?')."""
-    target = await db.get(User, user_id)
+    from app.services.members import load_member
+    target = await load_member(db, user_id, require_active=False)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     return await _effective_access(db, target)

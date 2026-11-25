@@ -265,10 +265,11 @@ async def approver_ids(db: AsyncSession, approver_group_ids: list, exclude=None)
             select(user_group_members.c.user_id)
             .where(user_group_members.c.group_id.in_([uuid.UUID(str(g)) for g in approver_group_ids]))
         )
-        ids = [r[0] for r in rows.all()]
+        from app.services.members import filter_member_ids
+        ids = await filter_member_ids(db, [r[0] for r in rows.all()])
     else:
-        ids = [r[0] for r in (await db.execute(
-            select(User.id).where(User.role == UserRole.ADMIN, User.is_active.is_(True)))).all()]
+        from app.services.members import admin_ids
+        ids = await admin_ids(db)
     return [i for i in dict.fromkeys(ids) if exclude is None or str(i) != str(exclude)]
 
 

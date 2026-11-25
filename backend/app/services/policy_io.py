@@ -61,7 +61,8 @@ async def import_policies(db: AsyncSession, payload: dict, *, overwrite: bool, d
         raise ValueError("« policies » doit être une liste (2000 au plus)")
 
     users = {}
-    for u in (await db.execute(select(User))).scalars().all():
+    from app.services.members import members_query
+    for u in (await db.execute(members_query(active_only=False))).scalars().all():
         users[f"oid:{u.entra_object_id}".lower()] = u
         if u.email:
             users[u.email.lower()] = u

@@ -379,9 +379,6 @@ async def _audit(db: AsyncSession, actor_id, server_id, action: str, status: str
 
 async def _system_user_id(db: AsyncSession):
     """AuditLog.user_id is mandatory: attribute scheduled jobs to the first admin."""
-    from app.models.base import UserRole
-    from app.models.user import User
-    row = (await db.execute(
-        select(User.id).where(User.role == UserRole.ADMIN).order_by(User.created_at).limit(1)
-    )).first()
-    return row[0] if row else None
+    from app.services.members import admin_ids
+    ids = await admin_ids(db)
+    return ids[0] if ids else None

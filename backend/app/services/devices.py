@@ -19,6 +19,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenancy import current_org_id
 from app.models.identity import LoginEvent, UserDevice
 from app.models.user import User
 from app.services import live
@@ -103,7 +104,7 @@ async def touch(db: AsyncSession, user: User, request: Request, ip: str | None,
     if ua:
         dev.user_agent, dev.label = ua, device_label(ua)
     if new_login:
-        db.add(LoginEvent(user_id=user.id, user_name=user.display_name, device_id=dev.id,
+        db.add(LoginEvent(user_id=user.id, user_name=user.display_name, device_id=dev.id, org_id=current_org_id(),
                           method="access_key" if kind == "access_key" else "entra",
                           ip_address=ip, user_agent=ua))
     await db.commit()
@@ -113,7 +114,7 @@ async def touch(db: AsyncSession, user: User, request: Request, ip: str | None,
 async def record_denied(db: AsyncSession, user: User | None, ip: str | None, reason: str,
                         method: str = "entra", user_agent: str | None = None) -> None:
     db.add(LoginEvent(user_id=user.id if user else None, user_name=user.display_name if user else "",
-                      method=method, result="denied", reason=reason[:255], ip_address=ip,
+                      org_id=current_org_id(), method=method, result="denied", reason=reason[:255], ip_address=ip,
                       user_agent=(user_agent or "")[:500] or None))
 
 

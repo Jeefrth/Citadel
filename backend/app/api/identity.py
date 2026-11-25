@@ -47,7 +47,9 @@ async def my_devices(request: Request, db: AsyncSession = Depends(get_db), user:
 @router.get("/devices")
 async def all_devices(request: Request, user_id: uuid.UUID | None = None, active_only: bool = True,
                       db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("audit"))):
-    stmt = select(UserDevice).order_by(UserDevice.last_seen.desc()).limit(500)
+    from app.services.members import is_member_clause
+    stmt = (select(UserDevice).join(User, User.id == UserDevice.user_id).where(is_member_clause())
+            .order_by(UserDevice.last_seen.desc()).limit(500))
     if user_id:
         stmt = stmt.where(UserDevice.user_id == user_id)
     if active_only:
@@ -56,7 +58,8 @@ async def all_devices(request: Request, user_id: uuid.UUID | None = None, active
     await devices.reconcile_key_devices(db, rows)
     if active_only:
         rows = [d for d in rows if d.revoked_at is None]
-    names = dict((await db.execute(select(User.id, User.display_name))).all())
+    from app.services.members import names as member_names
+    names = await member_names(db)
     cur = _current_key(request, user)
     return [_device_read(d, names, cur if d.user_id == user.id else None) for d in rows]
 
@@ -82,11 +85,17 @@ async def revoke_my_device(device_id: uuid.UUID, request: Request, db: AsyncSess
 @router.post("/devices/{device_id}/revoke")
 async def revoke_device(device_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db),
                         user: User = Depends(require_perm("sessions"))):
-    return await _revoke(db, await db.get(UserDevice, device_id), user, request)
+    from app.services.members import membership
+    dev = await db.get(UserDevice, device_id)
+    if dev is not None and await membership(db, dev.user_id) is None:
+        dev = None
+    return await _revoke(db, dev, user, request)
 
 
-def _login_query(user_id, result, method, date_from, date_to):
-    stmt = select(LoginEvent)
+def _login_query(user_id, result, method, date_from, date_to, mine: bool = False):
+    from app.core.tenancy import require_org_id
+    # someone's own sign-ins: every organisation; otherwise this organisation's only
+    stmt = select(LoginEvent) if mine else select(LoginEvent).where(LoginEvent.org_id == require_org_id())
     if user_id:
         stmt = stmt.where(LoginEvent.user_id == user_id)
     if result:
@@ -116,8 +125,8 @@ async def login_events(
 ):
     """Audit permission: everyone. Others, or mine=true: their own sign-ins only."""
     if mine or not has_perm(user, "audit"):
-        user_id = user.id
-    stmt = _login_query(user_id, result, method, date_from, date_to)
+        user_id, mine = user.id, True
+    stmt = _login_query(user_id, result, method, date_from, date_to, mine)
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
     rows = (await db.execute(stmt.order_by(LoginEvent.created_at.desc()).limit(limit).offset(offset))).scalars().all()
     return {"total": total, "items": [_login_read(e) for e in rows]}
@@ -206,7 +215,8 @@ async def add_ssh_key(data: SSHKeyIn, request: Request, db: AsyncSession = Depen
 async def delete_ssh_key(key_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db),
                          user: User = Depends(get_current_user)):
     k = await db.get(UserSSHKey, key_id)
-    if not k or (k.user_id != user.id and user.role != UserRole.ADMIN):
+    from app.services.members import membership
+    if not k or (k.user_id != user.id and (user.role != UserRole.ADMIN or await membership(db, k.user_id) is None)):
         raise HTTPException(status_code=404, detail="Key not found")
     db.add(AuditLog(user_id=user.id, action="ssh_key.delete", ip_address=getattr(request.state, "client_ip", None),
                     result=f"{k.name} {k.fingerprint} (utilisateur {k.user_id})"))
@@ -216,8 +226,10 @@ async def delete_ssh_key(key_id: uuid.UUID, request: Request, db: AsyncSession =
 
 @router.get("/ssh-keys")
 async def all_ssh_keys(db: AsyncSession = Depends(get_db), _: User = Depends(require_perm("audit"))):
-    names = dict((await db.execute(select(User.id, User.display_name))).all())
-    rows = (await db.execute(select(UserSSHKey).order_by(UserSSHKey.created_at.desc()))).scalars().all()
+    from app.services.members import is_member_clause, names as member_names
+    names = await member_names(db)
+    rows = (await db.execute(select(UserSSHKey).join(User, User.id == UserSSHKey.user_id).where(is_member_clause())
+                             .order_by(UserSSHKey.created_at.desc()))).scalars().all()
     return [{**_key_read(k), "user_id": str(k.user_id), "user_name": names.get(k.user_id, "")} for k in rows]
 
 

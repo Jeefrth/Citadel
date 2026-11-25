@@ -178,7 +178,8 @@ async def forward_once(db, target: SiemTarget) -> int:
 
     sent = 0
     cursors = dict(target.cursors or {})
-    user_names = {str(i): n for i, n in (await db.execute(select(User.id, User.display_name))).all()}
+    from app.services.members import names as _member_names
+    user_names = {str(i): n for i, n in (await _member_names(db)).items()}
     for stream in target.streams or []:
         if stream == "audit":
             q = select(AuditLog).options(selectinload(AuditLog.server)).order_by(AuditLog.timestamp, AuditLog.id)

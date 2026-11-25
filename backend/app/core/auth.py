@@ -11,8 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core import tenancy
+from app.models.organization import OrgInvitation, OrgMembership, Organization
 from app.models.user import User
 from app.models.base import UserRole
+
+ORG_HEADER = "X-Citadel-Org"
 
 security = HTTPBearer(auto_error=False)
 
@@ -131,18 +135,105 @@ async def _sync_user(claims: dict, db: AsyncSession) -> User:
             entra_object_id=oid,
             email=_claim_email(claims),
             display_name=claims.get("name", "Unknown"),
-            role=UserRole.ADMIN if is_first_user else UserRole.VIEWER,
+            is_platform_admin=is_first_user,
             is_active=True,
         )
         db.add(user)
+        await db.flush()
+        default = await _default_org(db)
+        if is_first_user and default is not None:
+            db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.ADMIN))
 
     user.last_login = datetime.now(timezone.utc)
     user.display_name = claims.get("name", user.display_name)
     if not user.email:
         user.email = _claim_email(claims)
+    await _accept_invitations(db, user)
     await db.commit()
-    await db.refresh(user)
     return user
+
+
+async def _default_org(db: AsyncSession) -> Organization | None:
+    return (await db.execute(select(Organization).where(Organization.is_default.is_(True)))).scalar_one_or_none()
+
+
+async def _accept_invitations(db: AsyncSession, user: User) -> None:
+    """E-mail invitations become memberships at sign-in. Single-tenant installs
+    (AUTO_JOIN_DEFAULT_ORG) also put every new person in the default
+    organisation as viewer, as before organisations existed."""
+    email = (user.email or "").strip().lower()
+    have = {m.org_id for m in (await db.execute(select(OrgMembership).where(OrgMembership.user_id == user.id))).scalars()}
+    if email:
+        for inv in (await db.execute(select(OrgInvitation).where(func.lower(OrgInvitation.email) == email))).scalars().all():
+            if inv.org_id not in have:
+                db.add(OrgMembership(org_id=inv.org_id, user_id=user.id, role=inv.role))
+                have.add(inv.org_id)
+            await db.delete(inv)
+    if not have and settings.AUTO_JOIN_DEFAULT_ORG and not user.is_platform_admin:
+        default = await _default_org(db)
+        if default is not None:
+            db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.VIEWER))
+
+
+# ── Organisation binding ──
+
+async def user_orgs(db: AsyncSession, user: User) -> list[tuple[Organization, OrgMembership | None]]:
+    """Organisations the user can work in: active memberships of active
+    organisations; a platform admin can enter every organisation."""
+    rows = (await db.execute(
+        select(OrgMembership).join(Organization, Organization.id == OrgMembership.org_id)
+        .where(OrgMembership.user_id == user.id, OrgMembership.is_active.is_(True), Organization.is_active.is_(True))
+    )).scalars().all()
+    out = {m.org_id: (m.organization, m) for m in rows}
+    if user.is_platform_admin:
+        for o in (await db.execute(select(Organization))).scalars().all():
+            out.setdefault(o.id, (o, None))
+    return sorted(out.values(), key=lambda om: (not om[0].is_default, om[0].name.lower()))
+
+
+async def resolve_org(db: AsyncSession, user: User, wanted: str | None = None,
+                      org_id=None) -> tuple[Organization, OrgMembership | None]:
+    """Pick the organisation of a request: a forced org_id (access key, ticket),
+    else the X-Citadel-Org header (slug or id), else the first one."""
+    choices = await user_orgs(db, user)
+    if org_id is not None:
+        match = [om for om in choices if str(om[0].id) == str(org_id)]
+        if wanted and match and wanted.strip().lower() not in (str(match[0][0].id), match[0][0].slug):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cette clé n'est valable que dans son organisation")
+    elif wanted:
+        w = wanted.strip().lower()
+        match = [om for om in choices if str(om[0].id) == w or om[0].slug == w]
+    else:
+        match = choices[:1]
+    if not match:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Organisation inconnue ou non autorisée" if (wanted or org_id) else "Aucune organisation pour ce compte")
+    return match[0]
+
+
+async def bind_user(db: AsyncSession, user: User, org: Organization, membership: OrgMembership | None) -> None:
+    """Enter the organisation: tenant context + RLS for this transaction, and the
+    user's role in it. A platform admin without membership is admin."""
+    from app.models.identity import CustomRole
+    tenancy.set_context(tenancy.TenantContext(org_id=org.id, transit_key=org.transit_key))
+    await tenancy.apply_to_session(db)
+    user.org = org
+    user.custom_role = None
+    if membership is not None:
+        user.role = UserRole.ADMIN if user.is_platform_admin else membership.role
+        if membership.custom_role_id:
+            user.custom_role = (await db.execute(
+                select(CustomRole).where(CustomRole.id == membership.custom_role_id))).scalar_one_or_none()
+    elif user.is_platform_admin:
+        user.role = UserRole.ADMIN
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pas membre de cette organisation")
+
+
+async def bind_request(db: AsyncSession, user: User, wanted: str | None = None, org_id=None) -> Organization:
+    org, membership = await resolve_org(db, user, wanted, org_id)
+    await bind_user(db, user, org, membership)
+    return org
 
 
 async def _get_or_create_dev_user(db: AsyncSession) -> User:
@@ -156,12 +247,11 @@ async def _get_or_create_dev_user(db: AsyncSession) -> User:
             entra_object_id=dev_oid,
             email="dev@localhost",
             display_name="Dev Admin",
-            role=UserRole.ADMIN,
+            is_platform_admin=True,
             is_active=True,
         )
         db.add(user)
         await db.commit()
-        await db.refresh(user)
 
     return user
 
@@ -194,7 +284,9 @@ async def get_current_user(
     from app.core.config import settings
 
     if settings.DEV_MODE:
-        return await _get_or_create_dev_user(db)
+        user = await _get_or_create_dev_user(db)
+        await bind_request(db, user, request.headers.get(ORG_HEADER))
+        return user
 
     if not credentials:
         raise HTTPException(
@@ -218,6 +310,8 @@ async def get_current_user(
             detail="User account is deactivated",
         )
 
+    # Organisation: an access key works only in its own organisation
+    await bind_request(db, user, request.headers.get(ORG_HEADER), getattr(user, "_access_key_org", None))
     await enforce_login_acl(db, user, ip, method=method, user_agent=request.headers.get("user-agent"))
     await devices.touch(db, user, request, ip, getattr(user, "_access_key_prefix", None))
     return user
@@ -237,7 +331,8 @@ async def _authenticate_access_key(token: str, db: AsyncSession) -> User:
     parts = token.split("_", 2)
     if len(parts) != 3:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed access key")
-    key = (await db.execute(select(AccessKey).where(AccessKey.prefix == parts[1]))).scalar_one_or_none()
+    with tenancy.system():   # the key tells the organisation
+        key = (await db.execute(select(AccessKey).where(AccessKey.prefix == parts[1]))).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if (
         key is None
@@ -246,11 +341,13 @@ async def _authenticate_access_key(token: str, db: AsyncSession) -> User:
         or (key.expires_at is not None and key.expires_at < now)
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired access key")
-    key.last_used_at = now
-    user = key.user
-    await db.commit()
+    with tenancy.system():
+        key.last_used_at = now
+        user = await db.get(User, key.user_id)
+        await db.commit()
     user._via_access_key = True  # lets sensitive endpoints refuse token-on-token
     user._access_key_prefix = key.prefix
+    user._access_key_org = key.org_id
     return user
 
 

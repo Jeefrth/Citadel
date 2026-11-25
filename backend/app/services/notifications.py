@@ -49,8 +49,9 @@ _background: set[asyncio.Task] = set()
 
 
 async def admin_ids(db: AsyncSession) -> list:
-    rows = await db.execute(select(User.id).where(User.role == UserRole.ADMIN, User.is_active.is_(True)))
-    return [r[0] for r in rows.all()]
+    """Admins of the current organisation."""
+    from app.services.members import admin_ids as _admins
+    return await _admins(db)
 
 
 def _url(link: str | None) -> str | None:

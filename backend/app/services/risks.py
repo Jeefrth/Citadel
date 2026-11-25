@@ -73,14 +73,17 @@ async def detect(db: AsyncSession, now: datetime) -> list[Found]:
                              f"Compte à privilèges non géré : {d.username} sur {s.name}",
                              "Le gérer dans Citadel ou l'ignorer depuis la collecte des comptes.", f"/servers/{s.id}"))
 
-    for u in (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all():
-        if u.entra_object_id.startswith("dev-mode"):
+    from app.services.members import members_query, roles_by_user
+    roles = await roles_by_user(db)
+    for u in (await db.execute(members_query())).scalars().all():
+        if u.entra_object_id.startswith("dev-mode") or not roles[u.id].is_active:
             continue
+        u_role = roles[u.id].role
         last = u.last_login
         if (last is None and u.created_at and u.created_at < now - timedelta(days=dormant)) or (last and last < now - timedelta(days=dormant)):
-            out.append(Found(f"dormant_user:{u.id}", "dormant_user", "high" if u.role == UserRole.ADMIN else "medium",
+            out.append(Found(f"dormant_user:{u.id}", "dormant_user", "high" if u_role == UserRole.ADMIN else "medium",
                              f"Utilisateur inactif depuis plus de {dormant} jours : {u.display_name}",
-                             f"Rôle {u.role.value}. Désactiver le compte s'il n'est plus utilisé.", "/settings?tab=users"))
+                             f"Rôle {u_role.value}. Désactiver le compte s'il n'est plus utilisé.", "/settings?tab=users"))
 
     stale = now - timedelta(days=90)
     for k, u in (await db.execute(select(AccessKey, User).join(User, User.id == AccessKey.user_id)
@@ -91,7 +94,8 @@ async def detect(db: AsyncSession, now: datetime) -> list[Found]:
         elif (k.last_used_at or k.created_at) and (k.last_used_at or k.created_at) < stale:
             out.append(Found(f"key_unused:{k.id}", "access_key", "low",
                              f"Clé d'accès inutilisée depuis 90 jours : {k.name} ({u.display_name})", "", "/account"))
-    for k, u in (await db.execute(select(UserSSHKey, User).join(User, User.id == UserSSHKey.user_id))).all():
+    for k, u in (await db.execute(select(UserSSHKey, User).join(User, User.id == UserSSHKey.user_id)
+                                  .where(User.id.in_(members_query().with_only_columns(User.id))))).all():
         if (k.last_used_at or k.created_at) < stale:
             out.append(Found(f"ssh_key_unused:{k.id}", "ssh_key", "low",
                              f"Clé SSH inutilisée depuis 90 jours : {k.name} ({u.display_name})", k.fingerprint, "/account"))

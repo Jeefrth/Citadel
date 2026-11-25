@@ -252,7 +252,8 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
                     command = tracker.take_line()
                     if command:
                         async with async_session() as cdb:
-                            cuser = await cdb.get(User, user_id)
+                            from app.services.members import load_member
+                            cuser = await load_member(cdb, user_id, require_active=False) or await cdb.get(User, user_id)
                             cserver = acl_target or await cdb.get(Server, srv_id)
                             outcome = await check_command(cdb, cuser, cserver, account.username, command, ip,
                                                           source="terminal")

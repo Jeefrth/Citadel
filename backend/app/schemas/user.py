@@ -22,6 +22,22 @@ class UserRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OrgRef(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    is_default: bool = False
+    role: UserRole | None = None   # None: platform admin without membership
+
+    model_config = {"from_attributes": True}
+
+
+class MeRead(UserRead):
+    is_platform_admin: bool = False
+    org: OrgRef | None = None
+    orgs: list[OrgRef] = []
+
+
 class UserUpdate(BaseModel):
     role: UserRole | None = None
     is_active: bool | None = None

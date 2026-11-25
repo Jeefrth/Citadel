@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenancy import require_org_id
+from app.services.members import member_ids_subquery, members_query, roles_by_user
 from app.models.audit import AuditLog
 from app.models.audit_trail import CommandLog
 from app.models.identity import LoginEvent, UserDevice
@@ -29,10 +31,10 @@ def _in(col, start, end):
 
 async def users_report(db: AsyncSession, start: datetime, end: datetime) -> list[dict]:
     logins = dict((await db.execute(
-        select(LoginEvent.user_id, func.count()).where(_in(LoginEvent.created_at, start, end), LoginEvent.result == "success")
+        select(LoginEvent.user_id, func.count()).where(_in(LoginEvent.created_at, start, end), LoginEvent.result == "success", LoginEvent.org_id == require_org_id())
         .group_by(LoginEvent.user_id))).all())
     denied = dict((await db.execute(
-        select(LoginEvent.user_id, func.count()).where(_in(LoginEvent.created_at, start, end), LoginEvent.result == "denied")
+        select(LoginEvent.user_id, func.count()).where(_in(LoginEvent.created_at, start, end), LoginEvent.result == "denied", LoginEvent.org_id == require_org_id())
         .group_by(LoginEvent.user_id))).all())
     sessions = dict((await db.execute(
         select(SessionRecording.user_id, func.count()).where(_in(SessionRecording.started_at, start, end))
@@ -41,12 +43,14 @@ async def users_report(db: AsyncSession, start: datetime, end: datetime) -> list
         select(CommandLog.user_id, func.count(), func.sum(case((CommandLog.decision.in_(BLOCKED), 1), else_=0)))
         .where(_in(CommandLog.created_at, start, end)).group_by(CommandLog.user_id))).all()}
     devices = dict((await db.execute(
-        select(UserDevice.user_id, func.count()).where(UserDevice.revoked_at.is_(None)).group_by(UserDevice.user_id))).all())
+        select(UserDevice.user_id, func.count()).where(UserDevice.revoked_at.is_(None), UserDevice.user_id.in_(member_ids_subquery())).group_by(UserDevice.user_id))).all())
     rows = []
-    for u in (await db.execute(select(User).order_by(User.display_name))).scalars().all():
+    roles = await roles_by_user(db)
+    for u in (await db.execute(members_query(active_only=False).order_by(User.display_name))).scalars().all():
         c = cmds.get(u.id, (0, 0))
+        m = roles[u.id]
         rows.append({
-            "user": u.display_name, "email": u.email, "role": u.role.value, "active": u.is_active,
+            "user": u.display_name, "email": u.email, "role": m.role.value, "active": u.is_active and m.is_active,
             "last_login": u.last_login, "logins": logins.get(u.id, 0), "logins_denied": denied.get(u.id, 0),
             "sessions": sessions.get(u.id, 0), "commands": c[0] or 0, "commands_blocked": int(c[1] or 0),
             "devices": devices.get(u.id, 0),

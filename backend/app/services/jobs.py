@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.members import load_member
 from app.core.database import async_session
 from app.core.permissions import (
     ServerGrant, account_to_resolved, compute_grants, node_descendants, ADMIN_GRANT, ResolvedAccount,
@@ -226,13 +227,15 @@ async def _run_command_job(job_id) -> None:
                 job = await db.get(Job, job_id)
                 if job.status == "cancelled":
                     return
-                user = await db.get(User, user_id)
+                user = await load_member(db, user_id)
                 server = (await db.execute(select(Server).where(Server.id == t.server_id))).scalar_one_or_none()
                 t.status, t.started_at = "running", _now()
                 await db.commit()
                 try:
                     if server is None:
                         raise ValueError("Serveur supprimé")
+                    if user is None:
+                        raise ValueError("Le demandeur n'est plus membre actif de l'organisation")
                     grants = await compute_grants(db, user)
                     grant = ADMIN_GRANT if grants is None else grants.get(server.id)
                     if grant is None or PolicyAction.EXECUTE.value not in grant.actions:
@@ -394,7 +397,9 @@ async def _run_playbook_job(job_id) -> None:
             playbook = await db.get(Playbook, job.playbook_id) if job.playbook_id else None
             if playbook is None:
                 raise ValueError("Playbook supprimé")
-            user = await db.get(User, job.user_id)
+            user = await load_member(db, job.user_id)
+            if user is None:
+                raise ValueError("Le demandeur n'est plus membre de l'organisation")
             account_name = (job.selector or {}).get("account")
             ip = job.client_ip
             grants = await compute_grants(db, user)

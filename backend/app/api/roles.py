@@ -26,7 +26,9 @@ class RoleIn(BaseModel):
 
 
 async def _read(db: AsyncSession, r: CustomRole) -> dict:
-    members = (await db.execute(select(func.count(User.id)).where(User.custom_role_id == r.id))).scalar_one()
+    from app.models.organization import OrgMembership
+    members = (await db.execute(select(func.count(OrgMembership.id)).where(
+        OrgMembership.custom_role_id == r.id, OrgMembership.org_id == r.org_id))).scalar_one()
     return {"id": str(r.id), "name": r.name, "description": r.description, "permissions": r.permissions or [],
             "members": members, "created_at": r.created_at}
 

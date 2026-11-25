@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.members import names as _member_names
 from app.core.auth import get_current_user, require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.core.governance import (
@@ -41,7 +42,7 @@ RULE_LIST_FIELDS = ("user_ids", "group_ids", "server_ids", "node_ids", "approver
 
 async def _names(db: AsyncSession) -> dict[str, dict[str, str]]:
     return {
-        "users": {str(i): n for i, n in (await db.execute(select(User.id, User.display_name))).all()},
+        "users": {str(i): n for i, n in (await _member_names(db)).items()},
         "groups": {str(i): n for i, n in (await db.execute(select(UserGroup.id, UserGroup.name))).all()},
         "servers": {str(i): n for i, n in (await db.execute(select(Server.id, Server.name))).all()},
         "nodes": {str(i): n for i, n in (await db.execute(select(Node.id, Node.name))).all()},
@@ -202,7 +203,8 @@ async def delete_command_rule(rule_id: uuid.UUID, db: AsyncSession = Depends(get
 @router.post("/acl/command-rules/test", response_model=DecisionOut)
 async def test_command(data: CommandTestIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("policies"))):
     """Dry run: what would happen if this user ran this command on this server?"""
-    target_user = await db.get(User, data.user_id) if data.user_id else user
+    from app.services.members import load_member
+    target_user = await load_member(db, data.user_id, require_active=False) if data.user_id else user
     server = await db.get(Server, data.server_id)
     if not target_user or not server:
         raise HTTPException(status_code=404, detail="User or server not found")

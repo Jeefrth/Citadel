@@ -23,8 +23,8 @@ async def list_users(
     from app.core.auth import has_perm
     if not (has_perm(user, "policies") or has_perm(user, "audit") or has_perm(user, "kubernetes")):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission 'policies' or 'audit' required")
-    result = await db.execute(select(User).order_by(User.display_name))
-    return result.scalars().all()
+    from app.services.roles import list_members
+    return await list_members(db)
 
 
 @router.patch("/{user_id}", response_model=UserRead)
@@ -34,9 +34,6 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
+    from app.services.roles import get_member
+    user, _ = await get_member(db, user_id)
     return await apply_user_update(db, user, data, actor)

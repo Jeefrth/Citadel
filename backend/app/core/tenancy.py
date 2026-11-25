@@ -130,6 +130,8 @@ def _stamp_org(session: Session, flush_context, instances) -> None:
                 raise TenantError(f"{type(obj).__name__} written in system mode without org_id")
             continue
         if ctx is None or ctx.org_id is None:
+            if type(obj).__tenant_nullable__ and obj.org_id is None and obj in session.new:
+                continue   # platform event (sign-in refused before any organisation)
             raise TenantError(f"{type(obj).__name__} written without an organisation")
         if obj.org_id is None:
             obj.org_id = ctx.org_id

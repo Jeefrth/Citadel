@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     # Dev mode (bypass auth)
     DEV_MODE: bool = False
+    # Single-tenant installs: a new person signing in joins the default organisation as viewer
+    AUTO_JOIN_DEFAULT_ORG: bool = True
 
     # CORS
     BACKEND_CORS_ORIGINS: str = "http://localhost:5173"

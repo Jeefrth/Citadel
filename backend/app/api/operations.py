@@ -511,7 +511,8 @@ async def list_jobs(limit: int = Query(default=50, ge=1, le=200), db: AsyncSessi
     q = select(Job).order_by(Job.created_at.desc()).limit(limit)
     if not has_perm(user, "audit"):
         q = q.where(Job.user_id == user.id)
-    names = {str(i): n for i, n in (await db.execute(select(User.id, User.display_name))).all()}
+    from app.services.members import names as _member_names
+    names = {str(i): n for i, n in (await _member_names(db)).items()}
     return [_job_read(j, user_names=names) for j in (await db.execute(q)).scalars().all()]
 
 
