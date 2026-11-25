@@ -695,6 +695,18 @@ def _tpl_read(t: AccountTemplate) -> dict:
             "created_at": t.created_at}
 
 
+def _grants_privileges(t) -> bool:
+    return bool(t.privileged or t.sudo != "none" or t.groups)
+
+
+def _privileged_tpl_guard(user: User, *templates) -> None:
+    """A template that gives sudo, groups or the privileged flag makes whoever pushes it
+    root on the targets: creating, editing or pushing one is for admins only."""
+    if user.role != UserRole.ADMIN and any(t is not None and _grants_privileges(t) for t in templates):
+        raise HTTPException(status_code=403, detail="Modèle qui donne des privilèges (sudo, groupes, compte à privilèges) : "
+                                                    "réservé aux admins")
+
+
 def _check_tpl(data: TemplateIn) -> None:
     try:
         account_push.validate_template(data.username, data.os_scope, data.secret_type, data.sudo, data.groups)
@@ -711,6 +723,7 @@ async def list_templates(db: AsyncSession = Depends(get_db), _: User = Depends(r
 @router.post("/account-templates", status_code=201)
 async def create_template(data: TemplateIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_perm("secrets"))):
     _check_tpl(data)
+    _privileged_tpl_guard(user, data)
     if (await db.execute(select(AccountTemplate.id).where(AccountTemplate.name == data.name))).first():
         raise HTTPException(status_code=409, detail="A template with this name already exists")
     t = AccountTemplate(**data.model_dump())
@@ -727,6 +740,7 @@ async def update_template(template_id: uuid.UUID, data: TemplateIn, db: AsyncSes
     if not t:
         raise HTTPException(status_code=404, detail="Template not found")
     _check_tpl(data)
+    _privileged_tpl_guard(user, t, data)
     for k, v in data.model_dump().items():
         setattr(t, k, v)
     db.add(AuditLog(user_id=user.id, action="account_template.update", result=data.name))
@@ -756,6 +770,7 @@ async def push_template(template_id: uuid.UUID, data: PushIn, request: Request, 
     t = await db.get(AccountTemplate, template_id)
     if not t:
         raise HTTPException(status_code=404, detail="Template not found")
+    _privileged_tpl_guard(user, t)
     try:
         job = await jobs_svc.create_job(
             db, user, kind="push", name=f"Push du compte {t.username} ({t.name})",

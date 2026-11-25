@@ -14,6 +14,7 @@ Citadel donne accès aux clusters Kubernetes comme aux serveurs : chacun ne voit
 2. Kubernetes > Clusters > Ajouter : URL de l'API (`https://hote:6443`), CA (recommandé ; sinon les CA du système), jeton (chiffré dans le coffre, jamais réaffiché), nœud, zone, étiquettes. « Tester » vérifie la version et la lecture des espaces de noms.
    - Dans une **zone**, l'API est jointe par la passerelle SSH (redirection de port), le certificat est toujours vérifié avec le vrai nom de l'API.
    - « Ignorer la vérification TLS » existe pour un laboratoire ; à éviter.
+   - Changer l'URL, la CA, la vérification TLS ou la zone d'un cluster exige de **ressaisir le jeton** : le jeton enregistré n'est jamais envoyé ailleurs que là où il a été saisi.
 
 Gestion des clusters et des règles : admins, ou rôle personnalisé avec la permission `kubernetes`.
 
@@ -27,6 +28,8 @@ Une règle donne à des utilisateurs ou groupes, sur des clusters, des **espaces
 | `logs` | lire les logs d'un conteneur (dernières lignes, instance précédente) |
 | `exec` | ouvrir un shell dans un conteneur |
 | `manage` | redémarrer un pod (suppression), mettre à l'échelle, redémarrer une charge (rollout restart) |
+
+Chaque règle est évaluée **à part** : une action n'est permise dans un espace de noms que si une même règle donne les deux. « exec et manage sur `dev` » plus « view sur `*` » donnent la lecture partout, mais le shell et les actions seulement dans `dev`. L'écran d'un cluster affiche les boutons selon les droits de l'espace de noms choisi.
 
 Le rôle plafonne comme pour les serveurs : un viewer n'a jamais que `view` et `logs`. Validité dans le temps possible. Un cluster ou un espace de noms non accordé répond 404.
 

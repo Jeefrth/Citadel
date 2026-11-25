@@ -73,6 +73,8 @@ export interface K8sNamespace {
   name: string;
   status: string | null;
   age_seconds: number | null;
+  /** Actions granted in THIS namespace (a policy gives actions on its own namespaces only) */
+  actions?: K8sAction[];
 }
 
 export interface K8sPod {

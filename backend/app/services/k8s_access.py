@@ -24,15 +24,24 @@ VIEWER_ACTIONS = {"view", "logs"}
 
 @dataclass
 class ClusterGrant:
+    """Rights on one cluster. Each policy stays a separate (actions, namespaces)
+    rule: an action is allowed in a namespace only if ONE rule gives both (two
+    policies "exec on dev" + "view on *" must not give exec everywhere).
+    actions / namespaces are unions, for display only."""
     actions: set[str] = field(default_factory=set)
     namespaces: set[str] = field(default_factory=set)
     policies: set[str] = field(default_factory=set)
+    rules: list[tuple[frozenset, frozenset]] = field(default_factory=list)
 
     def can(self, action: str, ns: str | None = None) -> bool:
-        return action in self.actions and (ns is None or ns_allowed(self.namespaces, ns))
+        return any(action in acts and (ns is None or ns_allowed(set(nss), ns)) for acts, nss in self.rules)
+
+    def sees_namespace(self, ns: str) -> bool:
+        return self.can("view", ns)
 
 
-FULL = ClusterGrant(actions=set(K8S_ACTIONS), namespaces={"*"}, policies={"admin"})
+FULL = ClusterGrant(actions=set(K8S_ACTIONS), namespaces={"*"}, policies={"admin"},
+                    rules=[(frozenset(K8S_ACTIONS), frozenset({"*"}))])
 
 
 async def grants(db: AsyncSession, user: User) -> dict[str, ClusterGrant] | None:
@@ -52,11 +61,14 @@ async def grants(db: AsyncSession, user: User) -> dict[str, ClusterGrant] | None
             actions &= VIEWER_ACTIONS
         if "exec" in actions or "manage" in actions or "logs" in actions:
             actions.add("view")
+        if not actions:
+            continue
         for cid in p.cluster_ids or []:
             g = out.setdefault(str(cid), ClusterGrant())
             g.actions |= actions
             g.namespaces |= set(p.namespaces or [])
             g.policies.add(p.name)
+            g.rules.append((frozenset(actions), frozenset(p.namespaces or [])))
     return out
 
 
@@ -67,8 +79,9 @@ async def require_cluster(db: AsyncSession, user: User, cluster_id: uuid.UUID | 
     grant = FULL if g is None else g.get(str(cluster_id)) if cluster else None
     if cluster is None or grant is None or not cluster.is_active:
         raise HTTPException(status_code=404, detail="Cluster not found")
-    if ns is not None and not ns_allowed(grant.namespaces, ns):
+    if ns is not None and not grant.sees_namespace(ns):
         raise HTTPException(status_code=404, detail="Namespace not found")
-    if action not in grant.actions:
-        raise HTTPException(status_code=403, detail=f"Action '{action}' not granted on this cluster")
+    if not grant.can(action, ns):
+        raise HTTPException(status_code=403, detail=f"Action '{action}' not granted"
+                                                    + (f" in namespace '{ns}'" if ns else " on this cluster"))
     return cluster, grant

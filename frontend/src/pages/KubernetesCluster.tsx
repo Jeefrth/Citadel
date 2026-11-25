@@ -182,6 +182,9 @@ export default function KubernetesCluster() {
   }
 
   const ready = !!ns && !!namespaces?.some((n) => n.name === ns);
+  // Buttons follow the actions granted in the selected namespace, not on the whole cluster
+  const current = namespaces?.find((n) => n.name === ns);
+  const nsCluster = { ...cluster, actions: current?.actions ?? cluster.actions };
 
   return (
     <div>
@@ -233,11 +236,11 @@ export default function KubernetesCluster() {
       ) : !ready ? (
         <Skeleton className="h-64 w-full" />
       ) : tab === "pods" ? (
-        <PodsPanel cluster={cluster} ns={ns} refresh={refresh} />
+        <PodsPanel cluster={nsCluster} ns={ns} refresh={refresh} />
       ) : tab === "workloads" ? (
-        <WorkloadsPanel cluster={cluster} ns={ns} refresh={refresh} />
+        <WorkloadsPanel cluster={nsCluster} ns={ns} refresh={refresh} />
       ) : (
-        <EventsPanel cluster={cluster} ns={ns} refresh={refresh} />
+        <EventsPanel cluster={nsCluster} ns={ns} refresh={refresh} />
       )}
     </div>
   );

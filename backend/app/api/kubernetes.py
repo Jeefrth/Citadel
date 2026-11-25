@@ -104,6 +104,14 @@ async def update_cluster(cluster_id: uuid.UUID, data: ClusterIn, request: Reques
     c = await db.get(K8sCluster, cluster_id)
     if not c:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    # The stored token is only ever sent where it was entered for: changing where
+    # it goes (URL, trust, route) requires typing it again
+    moved = (data.api_url.rstrip("/") != c.api_url.rstrip("/") or data.skip_tls_verify != c.skip_tls_verify
+             or str(data.zone_id or "") != str(c.zone_id or "")
+             or (data.ca_cert is not None and (data.ca_cert or None) != c.ca_cert))
+    if moved and not data.token:
+        raise HTTPException(status_code=400, detail="L'adresse, la CA, la vérification TLS ou la zone changent : "
+                                                    "ressaisir le jeton du compte de service")
     for k, v in data.model_dump(exclude={"token", "ca_cert"}).items():
         setattr(c, k, v)
     if data.ca_cert is not None:
@@ -233,7 +241,12 @@ async def list_namespaces(cluster_id: uuid.UUID, db: AsyncSession = Depends(get_
         items = await k8s.namespaces(cluster)
     except k8s.K8sError as e:
         _err(e)
-    return [n for n in items if k8s.ns_allowed(grant.namespaces, n["name"])]
+    out = []
+    for n in items:
+        if grant.sees_namespace(n["name"]):
+            n["actions"] = sorted(a for a in K8S_ACTIONS if grant.can(a, n["name"]))  # per namespace
+            out.append(n)
+    return out
 
 
 @router.get("/k8s/clusters/{cluster_id}/namespaces/{ns}/pods")

@@ -59,7 +59,7 @@ ssh -p 2222 'prenom.nom@domaine.ch#root#web-01'@citadel     compte précis
 - Authentification, à préparer dans Mon compte > Accès SSH :
   - **clé publique** (ed25519 conseillée, RSA 3072 bits au moins) ;
   - **jeton de connexion** : un mot de passe affiché une seule fois, valable de 1 minute à 24 heures, réutilisable jusqu'à son expiration, révocable.
-- Chaque connexion entre dans le journal des connexions (méthode `ssh`), réussie ou refusée.
+- Chaque connexion entre dans le journal des connexions (méthode `ssh`), réussie ou refusée. Pour une clé, la réussite n'est enregistrée qu'après la vérification de la signature (le client SSH « présente » d'abord ses clés publiques sans rien prouver).
 - Un nom de serveur ambigu (plusieurs serveurs du même nom) affiche le menu filtré.
 - Volontairement absent : exécution directe (`ssh host commande`), SFTP/SCP, redirection de ports, transfert d'agent. Seul un shell interactif est ouvert.
 - Clé d'hôte : générée au premier démarrage, chiffrée dans le coffre (paramètre interne). Son empreinte est affichée dans Mon compte, à vérifier à la première connexion.
@@ -80,5 +80,7 @@ Sur chaque serveur, avec son compte par défaut (qui doit avoir les droits root 
   - Pour les clés et certificats, le mot de passe du compte est mis à `*` (aucun mot de passe, compte non verrouillé : un compte verrouillé `!` est refusé par sshd même avec une clé quand PAM est désactivé).
 - **Windows** : compte local (`New-LocalUser` / `Set-LocalUser`), mot de passe uniquement, groupes locaux (par exemple `Administrators`, `Remote Desktop Users`).
 - Puis Citadel **vérifie la connexion avec le nouveau secret** avant d'enregistrer le compte (identifiant dédié, chiffré dans le coffre). Le secret n'est jamais affiché.
+
+Un modèle qui **donne des privilèges** (sudo, groupes, compte à privilèges) ne peut être créé, modifié ni poussé que par un admin : le pousser revient à se donner root sur les cibles. La permission `secrets` suffit pour les modèles sans privilège.
 
 Un compte déjà géré par Citadel sur un serveur est ignoré, sauf avec « mettre à jour » (nouveau secret). Noms système refusés (`root`, `administrator`...).

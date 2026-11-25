@@ -40,6 +40,7 @@ from app.services.terminal_core import SessionOpenError, SessionSpec, run_sessio
 
 logger = logging.getLogger("citadel.ssh_proxy")
 HOST_KEY_SETTING = "_ssh_proxy_host_key"
+_background: set = set()
 SEP = "#"
 MENU_LIMIT = 200
 
@@ -87,11 +88,16 @@ async def _login_allowed(db, user: User, ip: str | None) -> bool:
 
 class _ProxyServer(asyncssh.SSHServer):
     def __init__(self):
+        self.conn = None
         self.ip: str | None = None
         self.user_id = None
         self.via: str = ""
+        # public key auth: asyncssh asks about a key BEFORE the client proves it holds
+        # the private key; nothing is decided or logged until auth_completed()
+        self._pending_key: dict[str, tuple] = {}
 
     def connection_made(self, conn):
+        self.conn = conn
         peer = conn.get_extra_info("peername")
         self.ip = peer[0] if peer else None
 
@@ -117,10 +123,32 @@ class _ProxyServer(asyncssh.SSHServer):
                 return False  # the client may try another key: no failure logged per key
             if not await _login_allowed(db, user, self.ip):
                 return False
-            row.last_used_at = datetime.now(timezone.utc)
-            await _record(db, user, self.ip, "success", f"clé {row.name}", login)
-            self.user_id, self.via = user.id, f"clé {row.name}"
-            return True
+        self._pending_key[username] = (user.id, row.id, row.name, login)
+        return True
+
+    def auth_completed(self) -> None:
+        """Called once the signature (or the password) has been verified."""
+        if self.user_id is not None:
+            return  # password: already recorded in validate_password
+        username = self.conn.get_extra_info("username") if self.conn else None
+        pending = self._pending_key.get(username or "")
+        if pending is None:
+            return
+        user_id, key_id, key_name, login = pending
+        self.user_id, self.via = user_id, f"clé {key_name}"
+        task = asyncio.get_running_loop().create_task(self._record_key_login(user_id, key_id, key_name, login))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+
+    async def _record_key_login(self, user_id, key_id, key_name, login) -> None:
+        try:
+            async with async_session() as db:
+                row = await db.get(UserSSHKey, key_id)
+                if row is not None:
+                    row.last_used_at = datetime.now(timezone.utc)
+                await _record(db, await db.get(User, user_id), self.ip, "success", f"clé {key_name}", login)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not record SSH key sign-in")
 
     async def validate_password(self, username: str, password: str) -> bool:
         login = parse_username(username)[0]
@@ -300,7 +328,7 @@ async def _handle(process) -> None:
         cols, rows = process.get_terminal_size()[:2]
         _login, wanted_account, wanted_server = parse_username(process.get_extra_info("username") or "")
         async with async_session() as db:
-            user = await db.get(User, owner.user_id)
+            user = await db.get(User, owner.user_id) if owner.user_id else None
             if user is None or not user.is_active:
                 process.exit(1)
                 return

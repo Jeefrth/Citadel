@@ -104,5 +104,5 @@ def test_ns_patterns(patterns, ns, ok):
 
 def test_cluster_grant_can():
     from app.services.k8s_access import ClusterGrant
-    g = ClusterGrant(actions={"view", "logs"}, namespaces={"dem*"})
+    g = ClusterGrant(rules=[(frozenset({"view", "logs"}), frozenset({"dem*"}))])
     assert g.can("view", "demo") and not g.can("exec", "demo") and not g.can("view", "prod")
