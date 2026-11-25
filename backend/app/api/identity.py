@@ -39,6 +39,7 @@ def _current_key(request: Request, user: User) -> str:
 async def my_devices(request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     rows = (await db.execute(select(UserDevice).where(UserDevice.user_id == user.id)
                              .order_by(UserDevice.last_seen.desc()))).scalars().all()
+    await devices.reconcile_key_devices(db, rows)
     cur = _current_key(request, user)
     return [_device_read(d, current=cur) for d in rows]
 
@@ -52,6 +53,9 @@ async def all_devices(request: Request, user_id: uuid.UUID | None = None, active
     if active_only:
         stmt = stmt.where(UserDevice.revoked_at.is_(None))
     rows = (await db.execute(stmt)).scalars().all()
+    await devices.reconcile_key_devices(db, rows)
+    if active_only:
+        rows = [d for d in rows if d.revoked_at is None]
     names = dict((await db.execute(select(User.id, User.display_name))).all())
     cur = _current_key(request, user)
     return [_device_read(d, names, cur if d.user_id == user.id else None) for d in rows]
@@ -107,10 +111,11 @@ async def login_events(
     user_id: uuid.UUID | None = None, result: str | None = Query(default=None, pattern="^(success|denied)$"),
     method: str | None = None, date_from: datetime | None = None, date_to: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=1000), offset: int = Query(default=0, ge=0),
+    mine: bool = Query(default=False, description="Only my own sign-ins (Mon compte), whatever my rights"),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    """Admins: everyone. Others: their own sign-ins only."""
-    if not has_perm(user, "audit"):
+    """Audit permission: everyone. Others, or mine=true: their own sign-ins only."""
+    if mine or not has_perm(user, "audit"):
         user_id = user.id
     stmt = _login_query(user_id, result, method, date_from, date_to)
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()

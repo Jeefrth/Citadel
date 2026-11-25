@@ -117,6 +117,33 @@ async def record_denied(db: AsyncSession, user: User | None, ip: str | None, rea
                       user_agent=(user_agent or "")[:500] or None))
 
 
+async def close_key_devices(db: AsyncSession, prefixes: list[str], by: str) -> None:
+    """Access key revoked or gone: its device is closed too."""
+    if not prefixes:
+        return
+    now = datetime.now(timezone.utc)
+    rows = (await db.execute(select(UserDevice).where(
+        UserDevice.device_key.in_([f"key:{p}" for p in prefixes]), UserDevice.revoked_at.is_(None)))).scalars().all()
+    for dev in rows:
+        dev.revoked_at, dev.revoked_by = now, by
+        await _cache_drop(_cache_key(dev.user_id, dev.device_key))
+
+
+async def reconcile_key_devices(db: AsyncSession, rows: list[UserDevice]) -> None:
+    """Devices of access keys that were deactivated or deleted outside the API."""
+    from app.models.pam import AccessKey
+    open_keys = [d for d in rows if d.kind == "access_key" and d.revoked_at is None]
+    if not open_keys:
+        return
+    prefixes = [d.device_key.split(":", 1)[1] for d in open_keys]
+    active = {r[0] for r in (await db.execute(select(AccessKey.prefix).where(
+        AccessKey.prefix.in_(prefixes), AccessKey.is_active.is_(True)))).all()}
+    gone = [p for p in prefixes if p not in active]
+    if gone:
+        await close_key_devices(db, gone, "clé supprimée ou désactivée")
+        await db.commit()
+
+
 async def revoke(db: AsyncSession, dev: UserDevice, by: str) -> None:
     dev.revoked_at, dev.revoked_by = datetime.now(timezone.utc), by
     if dev.kind == "access_key":

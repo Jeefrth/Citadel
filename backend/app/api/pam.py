@@ -373,5 +373,7 @@ async def revoke_access_key(key_id: uuid.UUID, db: AsyncSession = Depends(get_db
     if not key or (key.user_id != user.id and user.role != UserRole.ADMIN):
         raise HTTPException(status_code=404, detail="Access key not found")
     key.is_active = False
+    from app.services import devices
+    await devices.close_key_devices(db, [key.prefix], f"clé révoquée par {user.display_name}")
     db.add(AuditLog(user_id=user.id, action="access_key.revoke", result=f"{key.name} ({key.prefix})"))
     await db.commit()

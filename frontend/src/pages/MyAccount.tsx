@@ -261,7 +261,7 @@ export default function MyAccount() {
   useEffect(() => {
     loadDevices();
     api
-      .get<LoginEventPage>("/api/login-events?limit=20")
+      .get<LoginEventPage>("/api/login-events?mine=true&limit=20")
       .then(setLogins)
       .catch((e) => setLoginsError(errorMessage(e)));
   }, [loadDevices]);

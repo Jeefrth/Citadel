@@ -189,6 +189,7 @@ async def _write_op(db, user, request, server_id, body: PathIn, op: str, fn):
         async with sftp.open_sftp(server, account) as client:
             detail = await fn(client)
     except sftp.SftpError as e:
+        await _audit_file(user, server, op, body.path, ip, f"account={account.label} {e}", "failure")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001
         await _audit_file(user, server, op, body.path, ip, f"account={account.label} {e}", "failure")

@@ -301,11 +301,11 @@ Déroulée dans Chrome par Claude (pilotage du navigateur) et JF (préparation 0
 - G9 : canal de notification réel (e-mail ou Teams).
 
 ### Bugs
-- **B1** Une clé d'accès supprimée laisse son appareil « Actif » dans Appareils (lignes « Python »). Supprimer ou désactiver une clé devrait clore l'appareil.
+- **B1 (corrigé)** Une clé d'accès supprimée laisse son appareil « Actif » dans Appareils (lignes « Python »). Désormais, révoquer une clé ferme son appareil, et les appareils de clés supprimées ou désactivées hors de l'API sont fermés à l'affichage.
 
-- **B2** La suppression refusée d'un dossier non vide n'est pas journalisée dans l'audit (`file.delete` en échec absent), alors que la doc promet la trace des échecs.
+- **B2 (corrigé)** La suppression refusée d'un dossier non vide n'est pas journalisée dans l'audit (`file.delete` en échec absent), alors que la doc promet la trace des échecs. Corrigé : tout refus d'opération sur les fichiers est journalisé ; messages d'erreur SFTP traduits en français.
 
-- **B3** Mon compte > « Mes connexions » affiche les connexions de tous les utilisateurs quand on est admin (l'écran appelle `/api/login-events` sans filtre, qui renvoie tout aux détenteurs de la permission `audit`). Exemple : le refus de Lab Operator apparaît dans la liste de JF.
+- **B3 (corrigé)** Mon compte > « Mes connexions » affiche les connexions de tous les utilisateurs quand on est admin (l'écran appelle `/api/login-events` sans filtre, qui renvoie tout aux détenteurs de la permission `audit`). Exemple : le refus de Lab Operator apparaît dans la liste de JF. Corrigé : Mon compte demande `mine=true`.
 
 - **B4 (corrigé)** Supprimer un serveur effaçait tout son historique d'audit, sans tracer la suppression. Désormais l'historique est détaché du serveur (conservé) et `server.delete` est journalisé.
 

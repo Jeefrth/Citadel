@@ -59,7 +59,7 @@ def clean_path(path: str | None) -> str:
     if not path:
         return ""
     if "\x00" in path:
-        raise SftpError("Invalid path")
+        raise SftpError("Chemin invalide")
     # leading "//" is kept by normpath (POSIX allows it): always one root slash
     return posixpath.normpath("/" + path.lstrip("/"))
 
@@ -100,7 +100,7 @@ async def stat_file(client: asyncssh.SFTPClient, path: str) -> asyncssh.SFTPAttr
     try:
         return await client.stat(path)
     except asyncssh.SFTPNoSuchFile:
-        raise SftpError("No such file")
+        raise SftpError("Fichier ou dossier introuvable")
 
 
 async def write_stream(client: asyncssh.SFTPClient, path: str, chunks: AsyncIterator[bytes],
@@ -109,7 +109,7 @@ async def write_stream(client: asyncssh.SFTPClient, path: str, chunks: AsyncIter
     if not overwrite:
         try:
             await client.stat(path)
-            raise FileExists("A file with this name already exists")
+            raise FileExists("Un fichier de ce nom existe déjà")
         except asyncssh.SFTPNoSuchFile:
             pass
     digest, size = hashlib.sha256(), 0
@@ -118,7 +118,7 @@ async def write_stream(client: asyncssh.SFTPClient, path: str, chunks: AsyncIter
             async for chunk in chunks:
                 size += len(chunk)
                 if size > max_bytes:
-                    raise SftpError(f"File larger than the {max_bytes // (1024 * 1024)} MB limit")
+                    raise SftpError(f"Fichier plus gros que la limite de {max_bytes // (1024 * 1024)} Mo")
                 digest.update(chunk)
                 await f.write(chunk)
     except Exception:
@@ -136,7 +136,7 @@ async def remove(client: asyncssh.SFTPClient, path: str) -> str:
         try:
             await client.rmdir(path)  # empty directories only, on purpose
         except asyncssh.SFTPFailure:
-            raise SftpError("Directory is not empty: only empty directories can be deleted")
+            raise SftpError("Dossier non vide : seuls les dossiers vides peuvent être supprimés")
         return "dir"
     await client.remove(path)
     return "file"
