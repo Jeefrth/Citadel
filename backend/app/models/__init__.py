@@ -1,6 +1,7 @@
 from app.models.base import UserRole, OSType, CredentialType, ServerStatus, JobStatus
 from app.models.user import User
 from app.models.organization import Organization, OrgMembership, OrgInvitation
+from app.models.auth import IdentityProvider, UserIdentity, AuthSession
 from app.models.server import Server
 from app.models.pam import (
     AccountTemplate, AccountBackup, Application, RiskFinding,

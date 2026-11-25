@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.core.auth import authenticate_ws, enforce_login_acl
+from app.core.auth import authenticate_ws, enforce_login_acl, require_recent_auth
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.governance import client_ip
@@ -81,9 +81,10 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
     async with async_session() as db:
         if not settings.DEV_MODE and not msg.get("token"):
             return await _fail(websocket, "No token provided")
-        # Per-session MFA is enforced by an Entra ID Conditional Access policy
+        # Recent sign-in at the provider (re-authentication popup) required
         try:
             user = await authenticate_ws(db, msg)
+            await require_recent_auth(db, user)   # sign-in at the provider just before
         except Exception as e:  # noqa: BLE001
             return await _fail(websocket, f"Auth failed: {getattr(e, 'detail', e)}")
 

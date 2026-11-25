@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, WebSocket
 
-from app.core.auth import authenticate_ws, enforce_login_acl
+from app.core.auth import authenticate_ws, enforce_login_acl, require_recent_auth
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.governance import client_ip
@@ -33,6 +33,7 @@ async def k8s_exec(websocket: WebSocket, cluster_id: str):
     async with async_session() as db:
         try:
             user = await authenticate_ws(db, msg)
+            await require_recent_auth(db, user)   # sign-in at the provider just before
         except Exception as e:  # noqa: BLE001
             return await _fail(websocket, f"Auth failed: {getattr(e, 'detail', e)}")
         ip = client_ip(websocket.client.host if websocket.client else None, websocket.headers)

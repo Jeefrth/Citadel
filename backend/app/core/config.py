@@ -64,7 +64,10 @@ class Settings(BaseSettings):
     # Dev mode (bypass auth)
     DEV_MODE: bool = False
     # Single-tenant installs: a new person signing in joins the default organisation as viewer
-    AUTO_JOIN_DEFAULT_ORG: bool = True
+    AUTO_JOIN_DEFAULT_ORG: bool = True   # legacy (before phase 3): see IdentityProvider.jit_role
+    OIDC_ALLOW_HTTP: bool = False        # tests only: providers without TLS
+    SESSION_HOURS: int = 12              # Citadel session lifetime (refresh cookie)
+    AZURE_CLIENT_SECRET: str = ""        # Entra provider of the default organisation (web app secret)
 
     # CORS
     BACKEND_CORS_ORIGINS: str = "http://localhost:5173"

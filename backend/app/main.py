@@ -11,7 +11,7 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
 )
-from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations, identity, reports, backups, applications, risks, roles, kubernetes, orgs
+from app.api import auth, servers, users, commands, updates, monitoring, sessions, ca, admin, pam, secrets, governance, audit, operations, identity, reports, backups, applications, risks, roles, kubernetes, orgs, login, providers
 from app.websocket import terminal, rdp, monitor, k8s_exec
 
 # Structured logging
@@ -95,6 +95,8 @@ app.include_router(risks.router, prefix="/api", tags=["risks"])
 app.include_router(roles.router, prefix="/api", tags=["roles"])
 app.include_router(kubernetes.router, prefix="/api", tags=["kubernetes"])
 app.include_router(orgs.router, prefix="/api", tags=["organisations"])
+app.include_router(login.router, prefix="/api/auth", tags=["auth"])
+app.include_router(providers.router, prefix="/api", tags=["identity providers"])
 app.include_router(terminal.router, tags=["terminal"])
 app.include_router(rdp.router, tags=["rdp"])
 app.include_router(monitor.router, tags=["monitor"])

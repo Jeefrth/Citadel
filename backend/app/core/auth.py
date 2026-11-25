@@ -2,10 +2,8 @@ import hashlib
 import hmac
 from datetime import datetime, timezone
 
-import httpx
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,145 +17,6 @@ from app.models.base import UserRole
 ORG_HEADER = "X-Citadel-Org"
 
 security = HTTPBearer(auto_error=False)
-
-_jwks_cache: dict | None = None
-
-
-async def _get_jwks() -> dict:
-    global _jwks_cache
-    if _jwks_cache is None:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(settings.azure_jwks_url)
-            resp.raise_for_status()
-            _jwks_cache = resp.json()
-    return _jwks_cache
-
-
-def _clear_jwks_cache():
-    global _jwks_cache
-    _jwks_cache = None
-
-
-async def _validate_token(token: str) -> dict:
-    """Validate an Entra ID access token and return its claims."""
-    jwks = await _get_jwks()
-
-    try:
-        unverified_header = jwt.get_unverified_header(token)
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token header",
-        )
-
-    # Find the matching key
-    rsa_key = None
-    for key in jwks.get("keys", []):
-        if key["kid"] == unverified_header.get("kid"):
-            rsa_key = key
-            break
-
-    if rsa_key is None:
-        # Key not found, maybe keys rotated — clear cache and retry once
-        _clear_jwks_cache()
-        jwks = await _get_jwks()
-        for key in jwks.get("keys", []):
-            if key["kid"] == unverified_header.get("kid"):
-                rsa_key = key
-                break
-
-    if rsa_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unable to find matching signing key",
-        )
-
-    # Audience: api:// URI or raw client ID. Issuer: v2 or v1 format of OUR
-    # tenant only (Entra signing keys are shared across tenants, so the
-    # issuer check is what pins tokens to this tenant).
-    payload = None
-    last_error = None
-    for aud in [f"api://{settings.AZURE_CLIENT_ID}", settings.AZURE_CLIENT_ID]:
-        try:
-            payload = jwt.decode(token, rsa_key, algorithms=["RS256"], audience=aud,
-                                 options={"verify_iss": False})
-        except JWTError as e:
-            last_error = e
-            continue
-        if payload.get("iss") not in settings.azure_issuers:
-            last_error = JWTError(f"Untrusted issuer: {payload.get('iss')}")
-            payload = None
-            continue
-        if payload.get("tid") and payload["tid"] != settings.AZURE_TENANT_ID:
-            last_error = JWTError("Token from another tenant")
-            payload = None
-            continue
-        break
-
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token validation failed: {last_error}",
-        )
-
-    return payload
-
-
-def _claim_email(claims: dict) -> str:
-    # v2 access tokens often carry "upn" but not "preferred_username"
-    # Not the "email" claim: optional, editable and unverified in Entra (it would let
-    # someone claim an invitation sent to another address)
-    for k in ("preferred_username", "upn", "unique_name"):
-        v = claims.get(k)
-        if v and "@" in v:
-            return v
-    return ""
-
-
-async def _sync_user(claims: dict, db: AsyncSession) -> User:
-    """Find or create local user from Entra ID token claims."""
-    oid = claims.get("oid")
-    if not oid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing 'oid' claim",
-        )
-
-    result = await db.execute(select(User).where(User.entra_object_id == oid))
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        # First real user (non-dev) gets admin role automatically
-        existing_count = await db.execute(
-            select(func.count(User.id)).where(User.entra_object_id != "dev-mode-user-00000000")
-        )
-        is_first_user = existing_count.scalar_one() == 0
-
-        user = User(
-            entra_object_id=oid,
-            email=_claim_email(claims),
-            display_name=claims.get("name", "Unknown"),
-            is_platform_admin=is_first_user,
-            is_active=True,
-        )
-        db.add(user)
-        await db.flush()
-        default = await _default_org(db)
-        if default is not None and is_first_user:
-            db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.ADMIN))
-        elif default is not None and settings.AUTO_JOIN_DEFAULT_ORG:
-            # single-tenant installs: newcomers are viewers of the default organisation,
-            # as before organisations existed. Only at account creation: someone
-            # removed from it later is not added back.
-            db.add(OrgMembership(org_id=default.id, user_id=user.id, role=UserRole.VIEWER))
-
-    user.last_login = datetime.now(timezone.utc)
-    user.display_name = claims.get("name", user.display_name)
-    if not user.email:
-        user.email = _claim_email(claims)
-    await db.commit()
-    return user
-
 
 async def _default_org(db: AsyncSession) -> Organization | None:
     return (await db.execute(select(Organization).where(Organization.is_default.is_(True)))).scalar_one_or_none()
@@ -216,6 +75,22 @@ async def bind_user(db: AsyncSession, user: User, org: Organization, membership:
         user.role = UserRole.ADMIN
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pas membre de cette organisation")
+    await _enforce_org_sso(db, user, org)
+
+
+async def _enforce_org_sso(db: AsyncSession, user: User, org: Organization) -> None:
+    """An organisation that imposes its SSO only accepts sessions opened through
+    it. Platform admins keep a way in (break-glass); access keys, SSH proxy and
+    RDP tickets do not come from a browser session and are not concerned."""
+    if user.is_platform_admin or not hasattr(user, "_session_provider"):
+        return
+    from app.models.auth import IdentityProvider
+    enforced = (await db.execute(select(IdentityProvider).where(
+        IdentityProvider.org_id == org.id, IdentityProvider.enforced.is_(True),
+        IdentityProvider.is_active.is_(True)))).scalars().all()
+    if enforced and user._session_provider not in {p.id for p in enforced}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"Cette organisation exige la connexion par {enforced[0].name}")
 
 
 async def bind_request(db: AsyncSession, user: User, wanted: str | None = None, org_id=None) -> Organization:
@@ -307,7 +182,7 @@ async def get_current_user(
     from app.services import devices
     ip = client_ip(request.client.host if request.client else None, request.headers)
     request.state.client_ip = ip
-    method = "access_key" if getattr(user, "_via_access_key", False) else "entra"
+    method = "access_key" if getattr(user, "_via_access_key", False) else "sso"
 
     if not user.is_active:
         await devices.record_denied(db, user, ip, "compte désactivé", method, request.headers.get("user-agent"))
@@ -359,11 +234,22 @@ async def _authenticate_access_key(token: str, db: AsyncSession) -> User:
 
 
 async def authenticate_token(token: str, db: AsyncSession) -> User:
-    """Authenticate either an Entra ID access token or a Citadel access key."""
+    """A Citadel session access token (after a sign-in at a provider) or a
+    Citadel access key. Provider tokens are never accepted directly."""
     if token.startswith(ACCESS_KEY_PREFIX):
         return await _authenticate_access_key(token, db)
-    claims = await _validate_token(token)
-    return await _sync_user(claims, db)
+    from app.services import sessions
+    try:
+        s, claims = await sessions.verify(db, token)
+    except sessions.SessionError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
+    user = await db.get(User, s.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
+    user._session_id = s.id
+    user._session_provider = s.provider_id
+    user._auth_time = int(claims.get("auth_time") or 0)
+    return user
 
 
 # Administration capabilities a custom role can give (lot 7). Admins have them all.
@@ -421,3 +307,18 @@ async def authenticate_ws(db: AsyncSession, msg: dict) -> User:
     org = msg.get("org")
     await bind_request(db, user, str(org) if org else None, getattr(user, "_access_key_org", None))
     return user
+
+
+REAUTH_SECONDS = 300
+
+
+async def require_recent_auth(db: AsyncSession, user: User) -> None:
+    """Before opening a terminal: a sign-in at the provider in the last minutes
+    (mfa_required_for_terminal). Access keys have no interactive sign-in and
+    are refused when the setting is on."""
+    from app.services.settings_service import get_setting_bool
+    if settings.DEV_MODE or not await get_setting_bool(db, "mfa_required_for_terminal"):
+        return
+    auth_time = getattr(user, "_auth_time", None)
+    if not auth_time or datetime.now(timezone.utc).timestamp() - auth_time > REAUTH_SECONDS:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="reauth_required")

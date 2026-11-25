@@ -166,6 +166,20 @@ def _apply_rls(session: Session, transaction, connection) -> None:
     connection.execute(text(sql), params)
 
 
+@contextlib.asynccontextmanager
+async def system_in(db):
+    """system() inside an open transaction: row level security follows, and the
+    previous context is put back on the transaction afterwards (otherwise the
+    rest of the transaction would keep the bypass)."""
+    token = _ctx.set(TenantContext(bypass=True))
+    try:
+        await apply_to_session(db)
+        yield
+    finally:
+        _ctx.reset(token)
+        await apply_to_session(db)
+
+
 async def apply_to_session(db) -> None:
     """Re-apply the context inside an already open transaction (after a switch)."""
     if not db.in_transaction():
