@@ -47,6 +47,8 @@ Pour les ACL, la cible porte les étiquettes du cluster plus `k8s_cluster=<nom>`
 
 **Pas de validation à 4 yeux pour Kubernetes** : une règle « validation » qui correspond à un shell ou à une commande dans un conteneur **refuse**. Les demandes de validation désignent un serveur.
 
+Le même shell est accessible par le **proxy SSH** : `ssh citadel` liste les clusters dans le menu, ou `ssh -l '<login>#k8s/<cluster>/<espace de noms>/<pod>[/<conteneur>]' citadel` (voir docs/operations.md).
+
 Le shell lance `bash` s'il existe, sinon `sh`. Le journal Kubernetes de l'API (`pods/exec`) montre le compte de service de Citadel : c'est le journal de Citadel qui dit qui l'a ouvert.
 
 ## Logs et actions

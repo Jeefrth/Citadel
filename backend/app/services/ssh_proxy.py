@@ -36,7 +36,7 @@ from app.models.server import Server
 from app.models.settings import AppSetting
 from app.models.user import User
 from app.services.enforcement import GovernanceDenied, enforce_connect
-from app.services import tui_select
+from app.services import k8s, k8s_access, k8s_session, tui_select
 from app.services.terminal_core import SessionOpenError, SessionSpec, run_session
 
 logger = logging.getLogger("citadel.ssh_proxy")
@@ -234,11 +234,26 @@ async def _node_paths(db) -> dict:
     return {nid: path(nid) for nid in nodes}
 
 
+async def _k8s_targets(db, user: User) -> list[tuple]:
+    """(cluster, grant) for active clusters where the user may open a shell somewhere."""
+    from app.models.kubernetes import K8sCluster
+    grants = await k8s_access.grants(db, user)
+    out = []
+    for c in (await db.execute(select(K8sCluster).where(K8sCluster.is_active.is_(True))
+                               .order_by(K8sCluster.name))).scalars().all():
+        g = k8s_access.FULL if grants is None else grants.get(str(c.id))
+        if g is not None and any("exec" in acts for acts, _ in g.rules):
+            out.append((c, g))
+    return out
+
+
 async def _pick_server(process, db, user: User, preset: list[Server] | None = None, title: str | None = None):
-    """Interactive server list. Returns a Server, or None to quit."""
+    """Interactive list of servers (and Kubernetes clusters in the main menu).
+    Returns a Server, ("k8s", cluster, grant), or None to quit."""
     servers = preset if preset is not None else await _visible_linux(db, user)
-    if not servers:
-        _w(process, "Aucun serveur Linux ne vous est accordé.\n")
+    clusters = [] if preset is not None else await _k8s_targets(db, user)
+    if not servers and not clusters:
+        _w(process, "Aucun serveur Linux ni cluster Kubernetes ne vous est accordé.\n")
         return None
     paths = await _node_paths(db)
     items = []
@@ -246,7 +261,9 @@ async def _pick_server(process, db, user: User, preset: list[Server] | None = No
         tags = " ".join(f"{k}={v}" for k, v in sorted((s.tags or {}).items()) if not k.startswith("azure_"))
         detail = "   ".join(x for x in (s.ip_address, paths.get(s.node_id, ""), tags) if x)
         items.append(tui_select.Item(s.name, detail, s))
-    sel = tui_select.Selector(title or f"Citadel : bonjour {user.display_name}. Choisissez un serveur", items,
+    for c, g in clusters:
+        items.append(tui_select.Item(c.name, f"Kubernetes   {c.api_url}", ("k8s", c, g)))
+    sel = tui_select.Selector(title or f"Citadel : bonjour {user.display_name}. Choisissez un serveur ou un cluster", items,
                               hint="↑↓ choisir   Entrée se connecter   Échap quitter   tapez pour filtrer")
     choice = await tui_select.select(process, sel)
     return choice.value if isinstance(choice, tui_select.Item) else None
@@ -293,6 +310,68 @@ async def _pick_account(process, server: Server, grant, user: User, wanted: str 
             return None
         kwargs.update(input_username=name, input_password=pwd)
     return kwargs
+
+
+async def _k8s_pick(process, db, user: User, cluster, grant, ip, cols, rows, back_label: str):
+    """Namespace, then pod, then container. Returns a SessionSpec, "back", or None (quit / refused)."""
+    try:
+        namespaces = [n for n in await k8s.namespaces(cluster) if grant.can("exec", n["name"])]
+    except k8s.K8sError as e:
+        _w(process, f"Cluster {cluster.name} injoignable : {e}\n")
+        return None
+    if not namespaces:
+        _w(process, f"Aucun espace de noms de {cluster.name} ne vous permet d'ouvrir un shell.\n")
+        return "back"
+    hint = "↑↓ choisir   Entrée valider   Échap "
+    while True:
+        sel = tui_select.Selector(f"{cluster.name} : choisissez un espace de noms",
+                                  [tui_select.Item(n["name"], n.get("status") or "", n["name"]) for n in namespaces],
+                                  hint=hint + back_label)
+        ns = await tui_select.select(process, sel)
+        if ns == "back":
+            return "back"
+        if not isinstance(ns, tui_select.Item):
+            return None
+        ns = ns.value
+        while True:
+            try:
+                pods = [p for p in await k8s.pods(cluster, ns) if p["phase"] == "Running"]
+            except k8s.K8sError as e:
+                _w(process, f"{e}\n")
+                return None
+            if not pods:
+                sel = tui_select.Selector(f"{cluster.name}/{ns} : aucun pod en cours d'exécution", [],
+                                          hint=hint + "retour aux espaces de noms")
+                if await tui_select.select(process, sel) is None:
+                    return None
+                break
+            items = [tui_select.Item(p["name"], f"{p['ready']} prêts   {p['restarts']} redémarrage(s)   "
+                                                f"{', '.join(p['containers'])}", p) for p in pods]
+            sel = tui_select.Selector(f"{cluster.name}/{ns} : choisissez un pod", items,
+                                      hint=hint + "retour aux espaces de noms")
+            pod = await tui_select.select(process, sel)
+            if pod == "back":
+                break
+            if not isinstance(pod, tui_select.Item):
+                return None
+            pod = pod.value
+            container = pod["containers"][0] if pod["containers"] else None
+            if len(pod["containers"]) > 1:
+                sel = tui_select.Selector(f"{pod['name']} : choisissez un conteneur",
+                                          [tui_select.Item(c, "", c) for c in pod["containers"]],
+                                          hint=hint + "retour aux pods")
+                c = await tui_select.select(process, sel)
+                if c == "back":
+                    continue
+                if not isinstance(c, tui_select.Item):
+                    return None
+                container = c.value
+            try:
+                return await k8s_session.prepare(db, user, cluster.id, ns, pod["name"], container, ip,
+                                                 cols=cols, rows=rows, channel="k8s")
+            except k8s_session.K8sSessionDenied as e:
+                _w(process, f"Refusé : {e.message}\n")
+                return None
 
 
 class _SSHFrontend:
@@ -346,8 +425,27 @@ async def _handle(process) -> None:
             if user is None or not user.is_active:
                 process.exit(1)
                 return
+            k8s_spec = None
+            if wanted_server and wanted_server.startswith("k8s/"):
+                # direct: login#k8s/<cluster>/<namespace>/<pod>[/<container>]
+                parts = wanted_server.split("/")
+                from app.models.kubernetes import K8sCluster
+                cluster = (await db.execute(select(K8sCluster).where(
+                    func.lower(K8sCluster.name) == (parts[1] if len(parts) > 1 else "").lower()))).scalars().first()
+                if cluster is None or len(parts) not in (4, 5):
+                    _w(process, "Cible Kubernetes : <login>#k8s/<cluster>/<espace de noms>/<pod>[/<conteneur>]\n")
+                    process.exit(1)
+                    return
+                try:
+                    k8s_spec = await k8s_session.prepare(db, user, cluster.id, parts[2], parts[3],
+                                                         parts[4] if len(parts) == 5 else None, owner.ip,
+                                                         channel="k8s")
+                except k8s_session.K8sSessionDenied as e:
+                    _w(process, f"Refusé : {e.message}\n")
+                    process.exit(1)
+                    return
             preset = None
-            if wanted_server:
+            if wanted_server and k8s_spec is None:
                 matches = await _visible_linux(db, user, name=wanted_server)
                 if not matches:
                     _w(process, f"Serveur « {wanted_server} » introuvable.\n")
@@ -356,13 +454,24 @@ async def _handle(process) -> None:
                 if len(matches) > 1:  # names are not unique: let the user pick
                     preset = matches
             menu = not wanted_server or preset is not None
-            while True:
+            while k8s_spec is None:
                 if menu:
                     title = f"Plusieurs serveurs s'appellent « {wanted_server} »" if preset else None
                     server = await _pick_server(process, db, user, preset=preset, title=title)
                     if server is None:
                         process.exit(0)
                         return
+                    if isinstance(server, tuple):  # a Kubernetes cluster
+                        c, r = process.get_terminal_size()[:2]
+                        res = await _k8s_pick(process, db, user, server[1], server[2], owner.ip, c or 80, r or 24,
+                                              "retour au menu")
+                        if res == "back":
+                            continue
+                        if res is None:
+                            process.exit(1)
+                            return
+                        k8s_spec = res
+                        break
                 else:
                     server = matches[0]
                 try:
@@ -383,21 +492,27 @@ async def _handle(process) -> None:
                     process.exit(1)
                     return
                 break
-            try:
-                account = resolve_for_user(server, grant, user, **kwargs)
-                await enforce_connect(db, user, server, account.username, owner.ip)
-            except HTTPException as e:
-                _w(process, f"Refusé : {e.detail}\n")
-                process.exit(1)
-                return
-            except GovernanceDenied as e:
-                _w(process, f"{e.message}\n")
-                process.exit(1)
-                return
+            if k8s_spec is None:
+                try:
+                    account = resolve_for_user(server, grant, user, **kwargs)
+                    await enforce_connect(db, user, server, account.username, owner.ip)
+                except HTTPException as e:
+                    _w(process, f"Refusé : {e.detail}\n")
+                    process.exit(1)
+                    return
+                except GovernanceDenied as e:
+                    _w(process, f"{e.message}\n")
+                    process.exit(1)
+                    return
         cols, rows = process.get_terminal_size()[:2]  # may have changed during the menu
-        _w(process, f"Connexion à {server.name} ({account.label})...\n")
-        spec = SessionSpec(user=user, server=server, account=account, ip=owner.ip, cols=cols or 80, rows=rows or 24,
-                           channel="ssh-proxy")
+        if k8s_spec is not None:
+            spec = k8s_spec
+            spec.cols, spec.rows = cols or 80, rows or 24
+            _w(process, f"Connexion à {spec.server.name}...\n")
+        else:
+            _w(process, f"Connexion à {server.name} ({account.label})...\n")
+            spec = SessionSpec(user=user, server=server, account=account, ip=owner.ip, cols=cols or 80,
+                               rows=rows or 24, channel="ssh-proxy")
         try:
             await run_session(spec, _SSHFrontend(process))
         except SessionOpenError as e:
