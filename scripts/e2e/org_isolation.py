@@ -1,4 +1,6 @@
 """E2E isolation between two organisations (SaaS phase 1)."""
+# Run in the backend container on a migrated database, with the branch code on PYTHONPATH
+# and a test server on port 8001 (see docs/saas-phase1.md).
 import asyncio, os, secrets, subprocess, sys, tempfile
 sys.path.insert(0, "/tmp/saas")
 import httpx

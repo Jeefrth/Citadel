@@ -7,18 +7,39 @@ Décisions validées par JF le 25/11/2026 (objectif : SaaS) :
 - Paramètres, stockage, SIEM, masquage, notifications, sauvegardes par organisation ; plateforme et coffre globaux.
 - Phases suivantes : 2 paramètres/audit par org, 3 identité SaaS (Entra multi-tenant, OIDC, invitations), 4 connecteur sortant, 5 produit (inscription, sous-domaines, facturation, RGPD).
 
-## Fait (branche saas-phase1, non fonctionnel tant que la suite n'est pas faite)
-- `core/tenancy.py` : contexte (ContextVar TenantContext org_id/transit_key/bypass), `tenant()`, `system()`, TenantMixin (org_id FK organizations, `__tenant_nullable__` pour audit_logs), filtre `do_orm_execute` (with_loader_criteria, fail closed si pas d'org), `before_flush` (stamp org_id, refuse autre org), `after_begin` (SET LOCAL ROLE citadel_rls + set_config app.org_id / app.bypass), `apply_to_session`.
-- `models/organization.py` : Organization (slug, is_default, transit_key, ssh_ca_public/private, entra_tenant_id), OrgMembership (role, custom_role_id, is_active), OrgInvitation.
-- TenantMixin ajouté à : CommandLog, RecordingStorage, SiemTarget, AuditLog (nullable), Credential, ConnectionRule, CommandRule, ApprovalRequest, Notification, NotificationChannel, CustomRole, K8sCluster, K8sPolicy, ServerMetric, AlertRule, Zone, Gateway, Playbook, Job, JobTarget, CloudAccount, CloudPendingVM, Node, Account, SecretHistory, DiscoveredAccount, UserGroup, AccessPolicy, UserFavorite, AccessKey, AccountTemplate, AccountBackup, Application, RiskFinding, Server, SessionRecording, UpdateJob.
-- Unicités par organisation (uq_<table>_org_<col>) : siem_targets, k8s_clusters, k8s_policies, custom_roles, servers.cloud_ref, connection_rules, command_rules, notification_channels, user_groups, access_policies, account_templates, applications, risk_findings.key, zones, playbooks, cloud_accounts, cloud_pending_vms.cloud_ref.
+## État (25/11/2026)
 
-## Reste à faire (dans l'ordre)
-1. `models/user.py` : retirer `role` et `custom_role` mappés ; ajouter `is_platform_admin` ; `role` / `custom_role` / `org` deviennent des attributs Python posés par le binding (défaut VIEWER). `models/settings.py` : `org_id` nullable + UniqueConstraint(org_id, key, postgresql_nulls_not_distinct=True) ; `LoginEvent.org_id` nullable (info). `models/__init__.py` : exporter Organization, OrgMembership, OrgInvitation.
-2. Migration c1a7d0e5f012 : tables organizations / org_memberships / org_invitations ; org « Par défaut » (slug default, is_default) ; users.is_platform_admin = (role='ADMIN') ; memberships depuis users.role/custom_role_id puis drop de ces colonnes ; org_id sur toutes les tables (nullable -> update default -> NOT NULL sauf audit_logs, app_settings, login_events) ; app_settings plateforme (`_ssh_proxy_host_key`) à NULL ; remplacer les unicités ; rôle `citadel_rls` NOLOGIN + GRANT DML/USAGE + ALTER DEFAULT PRIVILEGES ; ENABLE + FORCE RLS + policy `(current_setting('app.bypass', true) = 'on' OR org_id::text = current_setting('app.org_id', true))` (app_settings : OR org_id IS NULL). Downgrade.
-3. `core/auth.py` / binding : `bind_user(db, user, org)` (membership -> user.role, user.custom_role, user.org ; super-admin = admin partout) ; org choisie par en-tête `X-Citadel-Org` (slug ou id) sinon première appartenance ; clés d'accès : org de la clé (lookup en system()) ; requêtes SQL sur `User.role` (governance 271, roles 24, notifications 52, secrets_ops 385) -> via memberships de l'org courante ; `_sync_user` : invitations -> memberships ; premier utilisateur = super-admin + admin de l'org par défaut.
-4. Points d'entrée : WebSockets terminal / k8s_exec / monitor (org dans le message auth ; monitor vérifie l'org de la session live), ticket RDP (org dans le ticket), proxy SSH (lookup clés/jetons en system() ; menu par organisation de l'utilisateur ; `email#org/serveur`), API applications (lookup en system() puis tenant(app.org_id)), jobs (contexte hérité ; mark_interrupted en system()), planificateur et SIEM (boucle par organisation avec tenant()), live registry Redis (org_id dans les métadonnées, filtrage), settings_service (filtre org_id explicite, clés plateforme org NULL).
-5. Crypto : `encrypt_value` avec la clé Transit de l'org courante (préfixe `okey:<key>|` pour les clés non par défaut), `decrypt_value` lit le préfixe et refuse une clé d'une autre org ; politique OpenBao élargie à `transit/*/citadel-*` (cli vault-bootstrap) ; création de la clé à la création d'une org. CA SSH : `ca_service` utilise la CA de l'org courante (générée à la création, signature ssh-keygen avec fichier temporaire 0600).
-6. API : `/api/orgs/mine`, `/api/platform/orgs` (super-admin : créer, lister, désactiver), `/api/org/members` (lister, inviter par e-mail, rôle, rôle personnalisé, retirer) ; `/api/auth/me` (org courante, liste, is_platform_admin) ; adapter `/api/admin/users` et `/api/users` aux appartenances.
-7. Front (agent) : sélecteur d'organisation dans la barre du haut, en-tête `X-Citadel-Org`, org dans les messages auth des WebSockets, Paramètres > Membres (invitations), page super-admin Organisations.
-8. Tests : unitaires tenancy ; e2e isolation (2 orgs, chaque liste/détail/action d'une org invisible depuis l'autre, 404) ; RLS en SQL brut sous citadel_rls ; secret chiffré avec la clé de l'org ; CA par org (certificat de A refusé par un serveur de B) ; proxy SSH multi-org ; puis revue sécurité multi-agents ciblée fuites inter-organisations.
+Étapes 1 à 6 faites et testées sur une copie de la base (`citadel_saas`), étape 7 (front) en cours, étape 8 : tests faits, revue de sécurité à lancer.
+
+### Modèle et base
+- `core/tenancy.py` : contexte (ContextVar `TenantContext` org_id / transit_key / CA / bypass, `TenantContext.for_org(org)`), `tenant(org)`, `system()`, `TenantMixin`, filtre ORM `do_orm_execute` (échec fermé sans organisation), `before_flush` (estampille org_id, refuse une autre org ; audit sans org autorisé pour les événements plateforme), `after_begin` (`SET LOCAL ROLE citadel_rls` + `app.org_id` / `app.bypass`), `apply_to_session` après un changement de contexte dans une transaction ouverte.
+- `models/organization.py` (Organization, OrgMembership, OrgInvitation) ; `User` sans rôle stocké : `role`, `custom_role`, `org` sont posés par `bind_user` ; `is_platform_admin`.
+- Migration `c1a7d0e5f012` : org « Par défaut » (slug `default`) avec les données existantes, appartenances depuis l'ancien rôle, anciens admins = super-admins, org_id sur 37 tables + app_settings + login_events, unicités par org, rôle `citadel_rls`, RLS ENABLE + FORCE sur 38 tables. Aller-retour downgrade / upgrade vérifié.
+
+### Requêtes et points d'entrée
+- `core/auth.py` : `user_orgs`, `resolve_org` (en-tête `X-Citadel-Org`, sinon la première ; une clé d'accès reste dans son org, en-tête contraire = 403), `bind_user`, `bind_request`, `authenticate_ws` (champ `org` du message auth). Première connexion : invitations converties en appartenances ; `AUTO_JOIN_DEFAULT_ORG` (vrai par défaut) met les nouveaux venus lecteurs dans l'org par défaut, comme avant.
+- `services/members.py` : toute liste ou résolution d'utilisateurs passe par les membres de l'org courante (`members_query`, `admin_ids`, `names`, `load_member` pour évaluer les droits d'une autre personne).
+- WebSockets terminal / k8s / monitor, ticket RDP (org dans le ticket), surveillance RDP, registre des sessions en direct (org_id dans les métadonnées, invisible hors de son org), paramètres (`settings_service.scope()`, clés plateforme à org NULL), API applications (la clé désigne l'org), planificateur et SIEM (une boucle par org), nettoyage des tâches au démarrage (`system()`).
+- Proxy SSH : organisation choisie par préfixe `login#acme:serveur` ou par un menu si la personne en a plusieurs ; la règle de connexion à Citadel est évaluée après ce choix (l'authentification SSH réussit, la session est refusée) ; connexions journalisées avec leur org.
+
+### Chiffrement et CA
+- Clé Transit par org `citadel-org-<uuid>` (créée avec l'org ; politique OpenBao élargie à `citadel-org-*`, relancer `vault-bootstrap`). Blobs préfixés `okey:<clé>|` ; dans une org, un blob d'une autre clé est refusé (`KeyMismatch`). Backend local : clé dérivée (HKDF) par org. L'org par défaut garde la clé existante.
+- CA SSH par org (Ed25519, clé privée chiffrée avec la clé de l'org, signature via fichier temporaire 0600 supprimé aussitôt). L'org par défaut garde la CA existante. Une org avec sa clé mais sans CA refuse de signer.
+- CLI `secrets-status|migrate|rotate-key` : org par org.
+
+### API
+- `/api/auth/me` (org courante, orgs accessibles, `is_platform_admin`), `/api/orgs/mine`, `/api/org/members` (+ PATCH / DELETE = retirer de l'org), `/api/org/invitations`, `/api/platform/orgs` (super-admin connecté, pas de clé d'accès). `/api/admin/users` et `/api/users` = membres de l'org courante.
+
+### Tests
+- `tests/test_tenancy.py` (contexte, clés par org, préfixes forgés, CA, préfixe du proxy) ; suite complète : 158 tests OK.
+- `scripts/e2e/org_isolation.py` : 30 vérifications entre deux orgs (listes, 404 en lecture / modification / suppression, mêmes noms dans les deux, invitations, clés d'accès, CA distincte et certificat signé par la bonne, chiffrement croisé refusé, RLS en SQL brut, échec fermé). `scripts/e2e/org_ssh_proxy.py` : préfixe, menu, journal. Lancer dans le conteneur backend avec `PYTHONPATH` sur le code de la branche et une base migrée.
+
+### Limites connues (à traiter en revue ou en phase 2)
+- Tables d'association (membres des groupes, cibles des règles) sans org_id : protégées par leurs lignes parentes, pas par la RLS.
+- Appareils, clés SSH et jetons du proxy sont globaux à la personne : un admin d'une org qui révoque l'appareil d'un membre partagé le révoque partout.
+- Une connexion Entra est journalisée dans l'org de la première requête de l'appareil.
+- Limitation de débit et liste d'adresses autorisées : réglages par org, mais le middleware n'en tient pas compte (comme avant).
+
+## Reste à faire
+7. Front (agent en cours) : sélecteur d'organisation, en-tête, org dans les WebSockets, Paramètres > Membres et invitations, page super-admin Organisations.
+8. Revue de sécurité multi-agents ciblée sur les fuites entre organisations, puis recette dans le navigateur, puis fusion dans `main` (migration à appliquer sur la vraie base, relancer `vault-bootstrap`).

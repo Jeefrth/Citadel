@@ -5,6 +5,7 @@ import {
   type IPublicClientApplication,
 } from "@azure/msal-browser";
 import { loginRequest, apiConfig } from "./authConfig";
+import { getOrgSlug, handleOrgRefused } from "./org";
 
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
 
@@ -147,9 +148,14 @@ function isDeviceRevoked(status: number, detail: unknown): boolean {
   return status === 401 && detail === "device_revoked";
 }
 
-/** Headers sent on every API call: device id, plus the bearer token when there is one. */
+/**
+ * Headers sent on every API call: device id, the selected organisation (if any),
+ * plus the bearer token when there is one.
+ */
 function baseHeaders(token: string | null): Record<string, string> {
   const headers: Record<string, string> = { "X-Citadel-Device": getDeviceId() };
+  const org = getOrgSlug();
+  if (org) headers["X-Citadel-Org"] = org;
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
@@ -197,7 +203,12 @@ async function throwForResponse(response: Response): Promise<never> {
     // The page is navigating away: never settle, so callers don't show an error
     return new Promise<never>(() => {});
   }
-  throw new ApiError(formatDetail(error.detail) || `API error ${response.status}`, response.status);
+  const message = formatDetail(error?.detail);
+  if (handleOrgRefused(response.status, message)) {
+    // Stored organisation refused: the page reloads on the default one
+    return new Promise<never>(() => {});
+  }
+  throw new ApiError(message || `API error ${response.status}`, response.status);
 }
 
 /** Authenticated GET returning the raw body as a Blob (recordings, CSV exports). */
@@ -298,7 +309,9 @@ export async function postMultipart<T>(
           handleDeviceRevoked();
           return;
         }
-        reject(new ApiError(formatDetail(detail) || `API error ${xhr.status}`, xhr.status));
+        const message = formatDetail(detail);
+        if (handleOrgRefused(xhr.status, message)) return;
+        reject(new ApiError(message || `API error ${xhr.status}`, xhr.status));
       }
     };
     xhr.onerror = () => reject(new ApiError("Erreur réseau pendant l'envoi", 0));
