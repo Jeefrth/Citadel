@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, WebSocket
 
-from app.core.auth import _get_or_create_dev_user, authenticate_token, enforce_login_acl
+from app.core.auth import authenticate_ws, enforce_login_acl
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.governance import client_ip
@@ -32,9 +32,7 @@ async def k8s_exec(websocket: WebSocket, cluster_id: str):
 
     async with async_session() as db:
         try:
-            user = await _get_or_create_dev_user(db) if settings.DEV_MODE else await authenticate_token(msg.get("token", ""), db)
-            if not user.is_active:
-                raise ValueError("User account is deactivated")
+            user = await authenticate_ws(db, msg)
         except Exception as e:  # noqa: BLE001
             return await _fail(websocket, f"Auth failed: {getattr(e, 'detail', e)}")
         ip = client_ip(websocket.client.host if websocket.client else None, websocket.headers)

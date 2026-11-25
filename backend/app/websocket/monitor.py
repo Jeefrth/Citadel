@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import uuid
 import json
 import logging
 import socket
@@ -15,7 +16,7 @@ from urllib.parse import parse_qs
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.core.auth import _get_or_create_dev_user, authenticate_token, enforce_login_acl
+from app.core.auth import authenticate_ws, enforce_login_acl
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.governance import client_ip
@@ -47,7 +48,7 @@ async def monitor_ssh(websocket: WebSocket, session_id: str):
     ip = client_ip(websocket.client.host if websocket.client else None, websocket.headers)
     async with async_session() as db:
         try:
-            user = await _get_or_create_dev_user(db) if settings.DEV_MODE else await authenticate_token(msg.get("token", ""), db)
+            user = await authenticate_ws(db, msg)
             await enforce_login_acl(db, user, ip)
         except Exception as e:  # noqa: BLE001
             await websocket.send_json({"type": "error", "message": f"Auth failed: {getattr(e, 'detail', e)}"})
@@ -123,6 +124,9 @@ async def monitor_rdp(websocket: WebSocket, session_id: str):
     if not payload or payload.get("kind") != "monitor-rdp" or payload.get("session_id") != session_id:
         await websocket.close(code=4001, reason="Invalid or expired ticket")
         return
+    from app.core import tenancy
+    if payload.get("org_id"):
+        tenancy.set_context(tenancy.TenantContext(org_id=uuid.UUID(payload["org_id"])))
     meta = await live.get(session_id)
     if not meta or not meta.get("guac_connection_id"):
         await websocket.close(code=4004, reason="Session not found")

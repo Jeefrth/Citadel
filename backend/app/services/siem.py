@@ -216,18 +216,28 @@ async def siem_loop(stop: asyncio.Event) -> None:
         try:
             if await client.set(LOCK_KEY, "1", nx=True, ex=30):
                 try:
+                    from app.core import tenancy
+                    from app.models.organization import Organization
                     async with async_session() as db:
-                        targets = (await db.execute(select(SiemTarget).where(SiemTarget.is_active.is_(True)))).scalars().all()
-                        for t in targets:
-                            try:
-                                while await forward_once(db, t) >= BATCH:
-                                    pass  # drain backlog
-                            except Exception as e:  # noqa: BLE001
-                                await db.rollback()
-                                t = await db.get(SiemTarget, t.id)
-                                t.last_error = f"{type(e).__name__}: {e}"[:500]
-                                await db.commit()
-                                logger.warning("SIEM target %s failed: %s", t.name, t.last_error)
+                        with tenancy.system():
+                            pairs = (await db.execute(
+                                select(SiemTarget.id, Organization.id, Organization.transit_key)
+                                .join(Organization, Organization.id == SiemTarget.org_id)
+                                .where(SiemTarget.is_active.is_(True), Organization.is_active.is_(True)))).all()
+                    for target_id, org_id, transit_key in pairs:
+                        # each target in its organisation: only that organisation's events
+                        with tenancy.tenant(org_id, transit_key):
+                            async with async_session() as db:
+                                t = await db.get(SiemTarget, target_id)
+                                try:
+                                    while await forward_once(db, t) >= BATCH:
+                                        pass  # drain backlog
+                                except Exception as e:  # noqa: BLE001
+                                    await db.rollback()
+                                    t = await db.get(SiemTarget, target_id)
+                                    t.last_error = f"{type(e).__name__}: {e}"[:500]
+                                    await db.commit()
+                                    logger.warning("SIEM target %s failed: %s", t.name, t.last_error)
                 finally:
                     await client.delete(LOCK_KEY)
         except Exception:  # noqa: BLE001

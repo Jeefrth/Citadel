@@ -403,3 +403,14 @@ def require_role(*roles: UserRole):
             )
         return user
     return _check_role
+
+
+async def authenticate_ws(db: AsyncSession, msg: dict) -> User:
+    """WebSocket first message {"type": "auth", "token", "org"}: authenticate and
+    enter the organisation (for the rest of the handler task)."""
+    user = await _get_or_create_dev_user(db) if settings.DEV_MODE else await authenticate_token(msg.get("token") or "", db)
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated")
+    org = msg.get("org")
+    await bind_request(db, user, str(org) if org else None, getattr(user, "_access_key_org", None))
+    return user

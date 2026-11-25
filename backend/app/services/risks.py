@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenancy import require_org_id
+from app.services.settings_service import scope as settings_scope
 from app.models.base import UserRole
 from app.models.identity import UserSSHKey
 from app.models.pam import AccessKey, AccessPolicy, Account, Application, DiscoveredAccount, RiskFinding
@@ -145,9 +147,9 @@ async def scan(db: AsyncSession, now: datetime | None = None, notify_new: bool =
         if key not in found and row.resolved_at is None:
             row.resolved_at = now
             resolved += 1
-    setting = (await db.execute(select(AppSetting).where(AppSetting.key == LAST_SCAN))).scalar_one_or_none()
+    setting = (await db.execute(select(AppSetting).where(AppSetting.key == LAST_SCAN, settings_scope()))).scalar_one_or_none()
     if setting is None:
-        db.add(AppSetting(key=LAST_SCAN, value=now.isoformat(), description="Dernière analyse des risques"))
+        db.add(AppSetting(org_id=require_org_id(), key=LAST_SCAN, value=now.isoformat(), description="Dernière analyse des risques"))
     else:
         setting.value = now.isoformat()
     if notify_new and new_serious:
@@ -161,7 +163,7 @@ async def scan(db: AsyncSession, now: datetime | None = None, notify_new: bool =
 
 
 async def scheduled(db: AsyncSession, now: datetime) -> int:
-    setting = (await db.execute(select(AppSetting).where(AppSetting.key == LAST_SCAN))).scalar_one_or_none()
+    setting = (await db.execute(select(AppSetting).where(AppSetting.key == LAST_SCAN, settings_scope()))).scalar_one_or_none()
     if setting is not None and datetime.fromisoformat(setting.value) + SCAN_EVERY > now:
         return 0
     await scan(db, now)

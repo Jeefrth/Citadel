@@ -13,6 +13,7 @@ import time
 
 import redis.asyncio as aioredis
 
+from app.core import tenancy
 from app.core.config import settings
 
 PREFIX = "citadel:live:"
@@ -30,7 +31,8 @@ def redis() -> aioredis.Redis:
 
 async def register(session_id: str, meta: dict) -> None:
     r = redis()
-    meta = {**meta, "session_id": session_id, "started_at": meta.get("started_at") or time.time(),
+    org = tenancy.current_org_id()
+    meta = {**meta, "org_id": str(org) if org else meta.get("org_id"), "session_id": session_id, "started_at": meta.get("started_at") or time.time(),
             "last_activity": time.time()}
     await r.hset(f"{PREFIX}meta:{session_id}", mapping={k: json.dumps(v) for k, v in meta.items()})
     await r.expire(f"{PREFIX}meta:{session_id}", META_TTL)
@@ -55,6 +57,10 @@ async def get(session_id: str) -> dict | None:
     if not raw:
         return None
     meta = {k.decode(): json.loads(v) for k, v in raw.items()}
+    # Inside an organisation, sessions of other organisations do not exist
+    ctx = tenancy.current()
+    if ctx is not None and not ctx.bypass and ctx.org_id is not None and meta.get("org_id") != str(ctx.org_id):
+        return None
     meta["watchers"] = sorted(w.decode() for w in await redis().smembers(f"{PREFIX}watchers:{session_id}"))
     return meta
 
@@ -64,9 +70,11 @@ async def list_active() -> list[dict]:
     out = []
     for sid in await r.smembers(f"{PREFIX}sessions"):
         sid = sid.decode()
-        meta = await get(sid)
-        if meta is None:  # heartbeat stopped (crashed worker): clean the index
+        if not await r.exists(f"{PREFIX}meta:{sid}"):  # heartbeat stopped (crashed worker): clean the index
             await r.srem(f"{PREFIX}sessions", sid)
+            continue
+        meta = await get(sid)
+        if meta is None:   # another organisation
             continue
         out.append(meta)
     return sorted(out, key=lambda m: m.get("started_at", 0))

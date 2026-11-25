@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.settings_service import scope as settings_scope
 from app.core.auth import require_role, has_perm, require_perm
 from app.core.database import get_db
 from app.models.audit import AuditLog
@@ -39,7 +40,7 @@ async def list_risks(status: str = Query(default="open", pattern="^(open|ignored
         stmt = stmt.where(RiskFinding.resolved_at.is_not(None)).order_by(RiskFinding.resolved_at.desc()).limit(200)
     rows = (await db.execute(stmt)).scalars().all()
     rows = sorted(rows, key=lambda r: (risks.SEVERITY_ORDER.get(r.severity, 9), r.category, r.title)) if status != "resolved" else rows
-    last = (await db.execute(select(AppSetting.value).where(AppSetting.key == risks.LAST_SCAN))).scalar_one_or_none()
+    last = (await db.execute(select(AppSetting.value).where(AppSetting.key == risks.LAST_SCAN, settings_scope()))).scalar_one_or_none()
     counts = {}
     for r in rows:
         counts[r.severity] = counts.get(r.severity, 0) + 1

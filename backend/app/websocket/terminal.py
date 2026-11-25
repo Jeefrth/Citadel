@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.core.auth import _get_or_create_dev_user, authenticate_token, enforce_login_acl
+from app.core.auth import authenticate_ws, enforce_login_acl
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.governance import client_ip
@@ -79,19 +79,13 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
         return await _fail(websocket, "First message must be auth")
 
     async with async_session() as db:
-        if settings.DEV_MODE:
-            user = await _get_or_create_dev_user(db)
-        else:
-            token = msg.get("token")
-            if not token:
-                return await _fail(websocket, "No token provided")
-            # Per-session MFA is enforced by an Entra ID Conditional Access policy
-            try:
-                user = await authenticate_token(token, db)
-                if not user.is_active:
-                    raise ValueError("User account is deactivated")
-            except Exception as e:  # noqa: BLE001
-                return await _fail(websocket, f"Auth failed: {e}")
+        if not settings.DEV_MODE and not msg.get("token"):
+            return await _fail(websocket, "No token provided")
+        # Per-session MFA is enforced by an Entra ID Conditional Access policy
+        try:
+            user = await authenticate_ws(db, msg)
+        except Exception as e:  # noqa: BLE001
+            return await _fail(websocket, f"Auth failed: {getattr(e, 'detail', e)}")
 
         # Access policy, account resolution
         try:

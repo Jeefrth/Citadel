@@ -158,6 +158,12 @@ async def cancel_job(db: AsyncSession, job: Job) -> bool:
 
 async def mark_interrupted() -> int:
     """At startup: jobs left running by a previous process cannot be resumed."""
+    from app.core import tenancy
+    with tenancy.system():   # every organisation's jobs
+        return await _mark_interrupted()
+
+
+async def _mark_interrupted() -> int:
     async with async_session() as db:
         jobs = (await db.execute(select(Job).where(Job.status.in_(["pending", "running"])))).scalars().all()
         for j in jobs:

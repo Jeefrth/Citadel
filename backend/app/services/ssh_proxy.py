@@ -72,8 +72,18 @@ async def find_user(db, login: str) -> User | None:
     return local[0] if len(local) == 1 else None
 
 
+def split_org(target: str | None) -> tuple[str | None, str | None]:
+    """'acme:web01' -> ('acme', 'web01'); organisation prefix of a direct target."""
+    if target and ":" in target:
+        org, rest = target.split(":", 1)
+        return (org.strip().lower() or None), (rest or None)
+    return None, target
+
+
 async def _record(db, user: User | None, ip: str | None, result: str, reason: str | None, login: str) -> None:
+    from app.core.tenancy import current_org_id
     db.add(LoginEvent(user_id=user.id if user else None, user_name=user.display_name if user else login[:255],
+                      org_id=current_org_id(),
                       method="ssh", result=result, reason=reason, ip_address=ip, user_agent="ssh"))
     await db.commit()
 
@@ -93,6 +103,7 @@ class _ProxyServer(asyncssh.SSHServer):
         self.ip: str | None = None
         self.user_id = None
         self.via: str = ""
+        self.key_id = None
         # public key auth: asyncssh asks about a key BEFORE the client proves it holds
         # the private key; nothing is decided or logged until auth_completed()
         self._pending_key: dict[str, tuple] = {}
@@ -122,8 +133,6 @@ class _ProxyServer(asyncssh.SSHServer):
                     UserSSHKey.user_id == user.id, UserSSHKey.fingerprint == fp))).scalar_one_or_none()
             if row is None:
                 return False  # the client may try another key: no failure logged per key
-            if not await _login_allowed(db, user, self.ip):
-                return False
         self._pending_key[username] = (user.id, row.id, row.name, login)
         return True
 
@@ -136,20 +145,8 @@ class _ProxyServer(asyncssh.SSHServer):
         if pending is None:
             return
         user_id, key_id, key_name, login = pending
-        self.user_id, self.via = user_id, f"clé {key_name}"
-        task = asyncio.get_running_loop().create_task(self._record_key_login(user_id, key_id, key_name, login))
-        _background.add(task)
-        task.add_done_callback(_background.discard)
-
-    async def _record_key_login(self, user_id, key_id, key_name, login) -> None:
-        try:
-            async with async_session() as db:
-                row = await db.get(UserSSHKey, key_id)
-                if row is not None:
-                    row.last_used_at = datetime.now(timezone.utc)
-                await _record(db, await db.get(User, user_id), self.ip, "success", f"clé {key_name}", login)
-        except Exception:  # noqa: BLE001
-            logger.exception("could not record SSH key sign-in")
+        self.user_id, self.via, self.key_id = user_id, f"clé {key_name}", key_id
+        # sign-in recorded by the session once the organisation is known
 
     async def validate_password(self, username: str, password: str) -> bool:
         login = parse_username(username)[0]
@@ -166,11 +163,9 @@ class _ProxyServer(asyncssh.SSHServer):
             if ok_row is None:
                 await _record(db, user, self.ip, "denied", "jeton invalide ou expiré", login)
                 return False
-            if not await _login_allowed(db, user, self.ip):
-                return False
             ok_row.last_used_at = now
-            await _record(db, user, self.ip, "success", "jeton de connexion", login)
-            self.user_id, self.via = user.id, "jeton"
+            await db.commit()
+            self.user_id, self.via = user.id, "jeton de connexion"
             return True
 
 
@@ -407,6 +402,29 @@ class _SSHFrontend:
         return ("input", data)
 
 
+async def _enter_org(process, db, user: User, wanted: str | None) -> bool:
+    from app.core.auth import bind_user, user_orgs
+    choices = await user_orgs(db, user)
+    if wanted:
+        choices = [om for om in choices if om[0].slug == wanted]
+        if not choices:
+            _w(process, f"Organisation « {wanted} » inconnue ou non autorisée.\n")
+            return False
+    if not choices:
+        _w(process, "Ce compte n'appartient à aucune organisation.\n")
+        return False
+    if len(choices) == 1:
+        org, m = choices[0]
+    else:
+        picked = await tui_select.select(process, tui_select.Selector(
+            "Organisation", [tui_select.Item(o.name, o.slug, (o, m)) for o, m in choices]))
+        if picked is None or picked == "back":
+            return False
+        org, m = picked.value
+    await bind_user(db, user, org, m)
+    return True
+
+
 async def _handle(process) -> None:
     owner: _ProxyServer = process.get_extra_info("connection").get_owner()
     try:
@@ -419,12 +437,26 @@ async def _handle(process) -> None:
             process.exit(1)
             return
         cols, rows = process.get_terminal_size()[:2]
-        _login, wanted_account, wanted_server = parse_username(process.get_extra_info("username") or "")
+        login, wanted_account, wanted_server = parse_username(process.get_extra_info("username") or "")
+        wanted_org, wanted_server = split_org(wanted_server)
         async with async_session() as db:
             user = await db.get(User, owner.user_id) if owner.user_id else None
             if user is None or not user.is_active:
                 process.exit(1)
                 return
+            # Organisation: prefix of the target, the only one, or chosen in a menu
+            if not await _enter_org(process, db, user, wanted_org):
+                process.exit(1)
+                return
+            if owner.key_id is not None:
+                row = await db.get(UserSSHKey, owner.key_id)
+                if row is not None:
+                    row.last_used_at = datetime.now(timezone.utc)
+            if not await _login_allowed(db, user, owner.ip):
+                _w(process, "Connexion à Citadel refusée par une règle de connexion.\n")
+                process.exit(1)
+                return
+            await _record(db, user, owner.ip, "success", owner.via, login)
             k8s_spec = None
             if wanted_server and wanted_server.startswith("k8s/"):
                 # direct: login#k8s/<cluster>/<namespace>/<pod>[/<container>]
@@ -531,7 +563,7 @@ async def _handle(process) -> None:
 
 
 async def _host_key(db) -> asyncssh.SSHKey:
-    row = (await db.execute(select(AppSetting).where(AppSetting.key == HOST_KEY_SETTING))).scalar_one_or_none()
+    row = (await db.execute(select(AppSetting).where(AppSetting.key == HOST_KEY_SETTING, AppSetting.org_id.is_(None)))).scalar_one_or_none()
     if row is not None:
         return asyncssh.import_private_key(decrypt_value(base64.b64decode(row.value)))
     key = asyncssh.generate_private_key("ssh-ed25519")
@@ -544,7 +576,7 @@ async def _host_key(db) -> asyncssh.SSHKey:
 
 async def host_fingerprint() -> str | None:
     async with async_session() as db:
-        row = (await db.execute(select(AppSetting).where(AppSetting.key == HOST_KEY_SETTING))).scalar_one_or_none()
+        row = (await db.execute(select(AppSetting).where(AppSetting.key == HOST_KEY_SETTING, AppSetting.org_id.is_(None)))).scalar_one_or_none()
         if row is None:
             return None
         return asyncssh.import_private_key(decrypt_value(base64.b64decode(row.value))).get_fingerprint("sha256")

@@ -8,7 +8,15 @@ import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenancy import current_org_id, require_org_id
 from app.models.settings import AppSetting
+
+
+def scope():
+    """Settings of the current organisation; outside any organisation, the
+    platform ones (org_id NULL). Every AppSetting query goes through this."""
+    org = current_org_id()
+    return AppSetting.org_id == org if org else AppSetting.org_id.is_(None)
 
 # Default settings with descriptions
 DEFAULTS = {
@@ -136,7 +144,7 @@ DEFAULTS = {
 async def get_setting(db: AsyncSession, key: str) -> str:
     """Get a setting value from DB, falling back to default."""
     result = await db.execute(
-        select(AppSetting).where(AppSetting.key == key)
+        select(AppSetting).where(AppSetting.key == key, scope())
     )
     setting = result.scalar_one_or_none()
     if setting:
@@ -173,8 +181,9 @@ async def get_setting_json(db: AsyncSession, key: str) -> list | dict:
 
 async def set_setting(db: AsyncSession, key: str, value: str):
     """Set a setting value in DB."""
+    org = require_org_id()   # platform settings are not editable here
     result = await db.execute(
-        select(AppSetting).where(AppSetting.key == key)
+        select(AppSetting).where(AppSetting.key == key, AppSetting.org_id == org)
     )
     setting = result.scalar_one_or_none()
 
@@ -182,7 +191,7 @@ async def set_setting(db: AsyncSession, key: str, value: str):
         setting.value = value
     else:
         desc = DEFAULTS.get(key, {}).get("description", "")
-        setting = AppSetting(key=key, value=value, description=desc)
+        setting = AppSetting(org_id=org, key=key, value=value, description=desc)
         db.add(setting)
 
     await db.commit()
@@ -190,7 +199,7 @@ async def set_setting(db: AsyncSession, key: str, value: str):
 
 async def get_all_settings(db: AsyncSession) -> dict:
     """Get all settings (DB values merged with defaults)."""
-    result = await db.execute(select(AppSetting))
+    result = await db.execute(select(AppSetting).where(scope()))
     db_settings = {s.key: s.value for s in result.scalars().all()}
 
     all_settings = {}

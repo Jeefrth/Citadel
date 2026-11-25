@@ -13,6 +13,7 @@ import uuid
 
 import redis.asyncio as aioredis
 
+from app.core import tenancy
 from app.core.config import settings
 from app.core.permissions import ResolvedAccount
 
@@ -45,6 +46,7 @@ async def issue_ticket(
         "user_id": str(user_id),
         "server_id": str(server_id),
         "protocol": protocol,
+        "org_id": str(tenancy.require_org_id()),
         "account": {
             "username": account.username,
             "password": _b64(account.password),
@@ -86,7 +88,9 @@ async def consume_ticket(ticket: str) -> tuple[dict, ResolvedAccount] | None:
 async def issue_raw(payload: dict) -> str:
     """Ticket carrying an arbitrary payload (e.g. RDP monitoring), same TTL and one-shot use."""
     ticket = secrets.token_urlsafe(32)
-    await _redis().set(_PREFIX + ticket, json.dumps({"raw": True, **payload}), ex=TICKET_TTL_SECONDS)
+    org = tenancy.current_org_id()
+    await _redis().set(_PREFIX + ticket, json.dumps({"raw": True, "org_id": str(org) if org else None, **payload}),
+                       ex=TICKET_TTL_SECONDS)
     return ticket
 
 

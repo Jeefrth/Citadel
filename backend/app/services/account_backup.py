@@ -29,6 +29,8 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenancy import require_org_id
+from app.services.settings_service import scope as settings_scope
 from app.core.security import decrypt_value, encrypt_value
 from app.models.audit import AuditLog
 from app.models.governance import NotificationChannel
@@ -70,7 +72,7 @@ def decrypt_archive(blob: bytes, passphrase: str) -> dict:
 
 
 async def get_passphrase(db: AsyncSession) -> str | None:
-    row = (await db.execute(select(AppSetting).where(AppSetting.key == PASSPHRASE_SETTING))).scalar_one_or_none()
+    row = (await db.execute(select(AppSetting).where(AppSetting.key == PASSPHRASE_SETTING, settings_scope()))).scalar_one_or_none()
     return decrypt_value(base64.b64decode(row.value)) if row else None
 
 
@@ -78,9 +80,9 @@ async def set_passphrase(db: AsyncSession, passphrase: str) -> None:
     if len(passphrase) < MIN_PASSPHRASE:
         raise ValueError(f"Phrase de passe trop courte ({MIN_PASSPHRASE} caractères au moins)")
     value = base64.b64encode(encrypt_value(passphrase)).decode()
-    row = (await db.execute(select(AppSetting).where(AppSetting.key == PASSPHRASE_SETTING))).scalar_one_or_none()
+    row = (await db.execute(select(AppSetting).where(AppSetting.key == PASSPHRASE_SETTING, settings_scope()))).scalar_one_or_none()
     if row is None:
-        db.add(AppSetting(key=PASSPHRASE_SETTING, value=value, description="Phrase de passe des sauvegardes (chiffrée)"))
+        db.add(AppSetting(org_id=require_org_id(), key=PASSPHRASE_SETTING, value=value, description="Phrase de passe des sauvegardes (chiffrée)"))
     else:
         row.value = value
 

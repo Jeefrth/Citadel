@@ -200,7 +200,16 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
         return
 
     async with async_session() as db:
-        user = (await db.execute(select(User).where(User.id == uuid.UUID(payload["user_id"])))).scalar_one_or_none()
+        from app.core.auth import bind_request
+        user = await db.get(User, uuid.UUID(payload["user_id"]))
+        if user is None or not payload.get("org_id"):
+            await websocket.close(code=4003, reason="Forbidden")
+            return
+        try:   # the organisation the ticket was issued in
+            await bind_request(db, user, org_id=payload["org_id"])
+        except Exception:  # noqa: BLE001
+            await websocket.close(code=4003, reason="Forbidden")
+            return
         server = (await db.execute(select(Server).where(Server.id == uuid.UUID(server_id)))).scalar_one_or_none()
         if user is None or not user.is_active or server is None:
             await websocket.close(code=4003, reason="Forbidden")

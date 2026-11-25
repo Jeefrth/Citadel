@@ -162,12 +162,19 @@ async def app_read_secret(request: Request, server: str, account: str,
     token = creds.credentials if creds else ""
     parts = token.split("_", 2) if token.startswith(PREFIX) else []
     app = None
+    org = None
     if len(parts) == 3:
-        app = (await db.execute(select(Application).where(Application.key_prefix == parts[1]))).scalar_one_or_none()
+        from app.core import tenancy
+        from app.models.organization import Organization
+        with tenancy.system():   # the key tells the organisation
+            app = (await db.execute(select(Application).where(Application.key_prefix == parts[1]))).scalar_one_or_none()
+            org = await db.get(Organization, app.org_id) if app is not None else None
     now = datetime.now(timezone.utc)
-    if (app is None or not hmac.compare_digest(app.key_hash, _hash(token)) or not app.is_active
-            or (app.expires_at and app.expires_at < now)):
+    if (app is None or org is None or not org.is_active or not hmac.compare_digest(app.key_hash, _hash(token))
+            or not app.is_active or (app.expires_at and app.expires_at < now)):
         raise HTTPException(status_code=401, detail="Invalid application key")
+    tenancy.set_context(tenancy.TenantContext(org_id=org.id, transit_key=org.transit_key))
+    await tenancy.apply_to_session(db)
 
     from app.services.secrets_ops import _system_user_id
     actor = app.created_by or await _system_user_id(db)

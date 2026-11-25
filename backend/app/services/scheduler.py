@@ -24,6 +24,25 @@ MAX_PER_CYCLE = 20  # keep cycles short; the rest is picked up next time
 
 
 async def run_cycle() -> dict:
+    """One cycle for every active organisation, each in its own context."""
+    from app.core import tenancy
+    from app.models.organization import Organization
+    async with async_session() as db:
+        orgs = (await db.execute(select(Organization).where(Organization.is_active.is_(True)))).scalars().all()
+    total: dict = {}
+    for org in orgs:
+        try:
+            with tenancy.tenant(org.id, org.transit_key):
+                stats = await _run_org_cycle()
+        except Exception:  # noqa: BLE001 - one organisation must not stop the others
+            logger.exception("scheduler cycle failed for organisation %s", org.slug)
+            continue
+        for k, v in stats.items():
+            total[k] = total.get(k, 0) + (v if isinstance(v, int) else 0)
+    return total
+
+
+async def _run_org_cycle() -> dict:
     now = datetime.now(timezone.utc)
     stats = {"rotated": 0, "rotation_failed": 0, "verified": 0, "discovered": 0, "approvals_expired": 0}
     async with async_session() as db:
