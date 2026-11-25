@@ -17,6 +17,7 @@ cd ~/citadel
 docker compose up -d                 # Citadel
 scripts/test-lab.sh up               # cibles Linux, passerelle, cible isolée, k3s (environ 30 s)
 scripts/test-lab.sh up --rdp         # idem + bureau RDP (image d'environ 1 Go)
+scripts/test-lab.sh provision        # enregistre le labo dans Citadel (relançable, sans doublon) : voir 0.3
 scripts/test-lab.sh users            # utilisateurs de test non-admin + clés d'accès (data/lab/keys.txt)
 scripts/test-lab.sh status           # rappel des cibles et identifiants
 ```
@@ -41,6 +42,8 @@ Non couvert par le laboratoire : cibles Windows / WinRM (mises à jour Windows, 
 Les tests de droits marqués **(API)** se font avec ces clés ; ceux marqués **(2e compte)** demandent une session Entra.
 
 ### 0.3 Ajouter les serveurs du laboratoire
+
+**Raccourci** : `scripts/test-lab.sh provision` fait tout ce qui suit par l'API (nœuds `Labo` et `Labo/Web`, identifiants, zone `Isolée` et passerelle `lab-gw`, serveurs `lab-linux`, `lab-linux2`, `lab-isolated`, `lab-rdp` avec leurs comptes, cluster `lab-k3s`, règles « Labo » et « Labo k8s » pour les autres utilisateurs), puis teste chaque connexion. Le suivre à la main reste utile pour recetter les formulaires.
 
 Toutes ces étapes se font avec ton compte admin. Les noms `lab-*` sont résolus par Citadel (même réseau Docker) : on les saisit tels quels dans le champ « Adresse IP ».
 

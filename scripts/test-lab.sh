@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Citadel test lab: disposable targets on the compose network, for docs/plan-de-test.md.
 #   scripts/test-lab.sh up [--rdp]   start the lab (RDP desktop optional: ~1 GB image)
+#   scripts/test-lab.sh provision    register the lab in Citadel (nodes, credentials, zone, servers, cluster, rules)
 #   scripts/test-lab.sh users        create lab users (operator, viewer, custom role) + access keys
 #   scripts/test-lab.sh status       show targets and credentials
 #   scripts/test-lab.sh down         remove everything (containers, isolated network, data/lab)
@@ -100,6 +101,15 @@ TXT
   docker ps --filter "name=lab-" --format '  {{.Names}}\t{{.Status}}'
 }
 
+provision() {
+  [ -f "$OUT/k3s.token" ] || { echo "Start the lab first: scripts/test-lab.sh up"; exit 1; }
+  docker compose cp scripts/lab/provision.py backend:/tmp/lab_provision.py >/dev/null 2>&1
+  docker compose cp "$OUT/k3s.token" backend:/tmp/k3s.token >/dev/null 2>&1
+  docker compose cp "$OUT/k3s-ca.crt" backend:/tmp/k3s-ca.crt >/dev/null 2>&1
+  docker compose exec -T backend python /tmp/lab_provision.py
+  docker compose exec -T backend rm -f /tmp/k3s.token /tmp/lab_provision.py
+}
+
 users() {
   mkdir -p "$OUT" && chmod 700 "$OUT"
   docker compose cp scripts/lab/lab_users.py backend:/tmp/lab_users.py >/dev/null 2>&1
@@ -120,8 +130,9 @@ down() {
 
 case "${1:-}" in
   up) shift; up "$@" ;;
+  provision) provision ;;
   users) users ;;
   status) status ;;
   down) down ;;
-  *) sed -n '2,7p' "$0"; exit 1 ;;
+  *) sed -n '2,8p' "$0"; exit 1 ;;
 esac
