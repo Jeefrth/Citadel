@@ -33,6 +33,7 @@ class LoginEvent(UUIDMixin, Base):
 
     user_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     user_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    org_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
     device_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("user_devices.id", ondelete="SET NULL"), nullable=True)
     method: Mapped[str] = mapped_column(String(20), nullable=False, default="entra")  # entra | access_key | ssh
     result: Mapped[str] = mapped_column(String(20), nullable=False, default="success")  # success | denied

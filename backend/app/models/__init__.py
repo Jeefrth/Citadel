@@ -1,5 +1,6 @@
 from app.models.base import UserRole, OSType, CredentialType, ServerStatus, JobStatus
 from app.models.user import User
+from app.models.organization import Organization, OrgMembership, OrgInvitation
 from app.models.server import Server
 from app.models.pam import (
     AccountTemplate, AccountBackup, Application, RiskFinding,
@@ -22,6 +23,9 @@ from app.models.governance import (
 
 __all__ = [
     "User",
+    "Organization",
+    "OrgMembership",
+    "OrgInvitation",
     "Server",
     "Node",
     "Account",

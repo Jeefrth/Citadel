@@ -37,7 +37,9 @@ class OrgMembership(UUIDMixin, Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     organization = relationship("Organization", lazy="joined")
-    custom_role = relationship("CustomRole", lazy="selectin")
+    user = relationship("User", back_populates="memberships", foreign_keys=[user_id], lazy="noload")
+    # CustomRole is tenant data: loaded explicitly by bind_user inside the org context
+    custom_role = relationship("CustomRole", lazy="noload")
 
 
 class OrgInvitation(UUIDMixin, Base):
