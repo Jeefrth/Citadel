@@ -63,10 +63,10 @@ def test_parse_windows_single_and_list():
 
 
 class FakeVault:
-    def encrypt(self, plaintext: bytes) -> str:
+    def encrypt(self, plaintext: bytes, key: str | None = None) -> str:
         return "vault:v3:" + base64.b64encode(plaintext[::-1]).decode()
 
-    def decrypt(self, ciphertext: str) -> bytes:
+    def decrypt(self, ciphertext: str, key: str | None = None) -> bytes:
         return base64.b64decode(ciphertext.split(":", 2)[2])[::-1]
 
 
