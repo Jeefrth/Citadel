@@ -4,9 +4,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.base import UUIDMixin
+from app.core.tenancy import TenantMixin
 
 
-class ServerMetric(UUIDMixin, Base):
+
+class ServerMetric(TenantMixin, UUIDMixin, Base):
     __tablename__ = "server_metrics"
 
     server_id: Mapped[str] = mapped_column(
@@ -35,7 +37,7 @@ class ServerMetric(UUIDMixin, Base):
     process_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
-class AlertRule(UUIDMixin, Base):
+class AlertRule(TenantMixin, UUIDMixin, Base):
     __tablename__ = "alert_rules"
 
     server_id: Mapped[str | None] = mapped_column(

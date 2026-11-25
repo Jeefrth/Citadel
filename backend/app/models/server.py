@@ -1,13 +1,16 @@
-from sqlalchemy import String, Integer, Enum, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Enum, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import UUIDMixin, TimestampMixin, OSType, ServerStatus
+from app.core.tenancy import TenantMixin
 
 
-class Server(UUIDMixin, TimestampMixin, Base):
+
+class Server(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "servers"
+    __table_args__ = (UniqueConstraint("org_id", "cloud_ref", name="uq_servers_org_cloud_ref"),)
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -35,7 +38,7 @@ class Server(UUIDMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("zones.id", ondelete="SET NULL"), nullable=True, index=True
     )
     # Cloud inventory link (A8): "azure:<vm resource id>"; cloud_state: present | missing
-    cloud_ref: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True)
+    cloud_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cloud_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     node_id: Mapped[str | None] = mapped_column(

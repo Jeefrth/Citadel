@@ -4,10 +4,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import UUIDMixin
+from app.core.tenancy import TenantMixin
 
 
-class AuditLog(UUIDMixin, Base):
+
+class AuditLog(TenantMixin, UUIDMixin, Base):
     __tablename__ = "audit_logs"
+    __tenant_nullable__ = True  # platform events (organisations, sign-in) have no organisation
 
     user_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False

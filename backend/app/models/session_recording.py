@@ -4,9 +4,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.base import UUIDMixin
+from app.core.tenancy import TenantMixin
 
 
-class SessionRecording(UUIDMixin, Base):
+
+class SessionRecording(TenantMixin, UUIDMixin, Base):
     __tablename__ = "session_recordings"
 
     session_id: Mapped[str] = mapped_column(

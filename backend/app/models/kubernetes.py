@@ -2,7 +2,7 @@
 
 from urllib.parse import urlparse
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,13 +10,16 @@ from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
 
 K8S_ACTIONS = ("view", "logs", "exec", "manage")
+from app.core.tenancy import TenantMixin
 
 
-class K8sCluster(UUIDMixin, TimestampMixin, Base):
+
+class K8sCluster(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """A cluster reached with a service account token (encrypted in the vault)."""
     __tablename__ = "k8s_clusters"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_k8s_clusters_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     api_url: Mapped[str] = mapped_column(String(500), nullable=False)        # https://host:6443
     ca_cert: Mapped[str | None] = mapped_column(Text, nullable=True)          # PEM; empty = system CAs
@@ -43,12 +46,13 @@ class K8sCluster(UUIDMixin, TimestampMixin, Base):
         return u.port or (443 if u.scheme == "https" else 80)
 
 
-class K8sPolicy(UUIDMixin, TimestampMixin, Base):
+class K8sPolicy(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """Who may do what in which namespaces of which clusters. Same rules as server
     access policies: the role caps the actions (viewer: view and logs only)."""
     __tablename__ = "k8s_policies"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_k8s_policies_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     valid_from: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)

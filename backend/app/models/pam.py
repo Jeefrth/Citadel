@@ -18,6 +18,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
+from app.core.tenancy import TenantMixin
+
 
 
 class PolicyAction(str, enum.Enum):
@@ -36,7 +38,7 @@ ACCOUNT_INPUT = "@INPUT"  # username/password typed at connection time
 VIRTUAL_ACCOUNTS = {ACCOUNT_ALL, ACCOUNT_USER, ACCOUNT_INPUT}
 
 
-class Node(UUIDMixin, TimestampMixin, Base):
+class Node(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "nodes"
     __table_args__ = (UniqueConstraint("parent_id", "name", name="uq_node_parent_name"),)
 
@@ -47,7 +49,7 @@ class Node(UUIDMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
-class Account(UUIDMixin, TimestampMixin, Base):
+class Account(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "accounts"
     __table_args__ = (UniqueConstraint("server_id", "username", name="uq_account_server_username"),)
 
@@ -89,7 +91,7 @@ class SecretStatus(str, enum.Enum):
     FAILED = "failed"     # target change failed, never active
 
 
-class SecretHistory(UUIDMixin, TimestampMixin, Base):
+class SecretHistory(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """Every secret Citadel generated for an account, encrypted.
 
     The new secret is persisted BEFORE it is applied on the target, so a
@@ -110,7 +112,7 @@ class SecretHistory(UUIDMixin, TimestampMixin, Base):
     activated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class DiscoveredAccount(UUIDMixin, Base):
+class DiscoveredAccount(TenantMixin, UUIDMixin, Base):
     """OS accounts found on a server by discovery (B5)."""
     __tablename__ = "discovered_accounts"
     __table_args__ = (UniqueConstraint("server_id", "username", name="uq_discovered_server_username"),)
@@ -138,10 +140,11 @@ user_group_members = Table(
 )
 
 
-class UserGroup(UUIDMixin, TimestampMixin, Base):
+class UserGroup(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "user_groups"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_user_groups_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     users = relationship("User", secondary=user_group_members, lazy="selectin")
@@ -169,10 +172,11 @@ policy_nodes = Table(
 )
 
 
-class AccessPolicy(UUIDMixin, TimestampMixin, Base):
+class AccessPolicy(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "access_policies"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_access_policies_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     valid_from: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -194,7 +198,7 @@ class AccessPolicy(UUIDMixin, TimestampMixin, Base):
     nodes = relationship("Node", secondary=policy_nodes, lazy="selectin")
 
 
-class UserFavorite(Base):
+class UserFavorite(TenantMixin, Base):
     __tablename__ = "user_favorites"
 
     user_id: Mapped[str] = mapped_column(
@@ -206,7 +210,7 @@ class UserFavorite(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class AccessKey(UUIDMixin, TimestampMixin, Base):
+class AccessKey(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "access_keys"
 
     user_id: Mapped[str] = mapped_column(
@@ -224,11 +228,12 @@ class AccessKey(UUIDMixin, TimestampMixin, Base):
     user = relationship("User", lazy="joined")
 
 
-class AccountTemplate(UUIDMixin, TimestampMixin, Base):
+class AccountTemplate(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """Blueprint of an OS account pushed to many servers at once (lot 7)."""
     __tablename__ = "account_templates"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_account_templates_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     os_scope: Mapped[str] = mapped_column(String(10), nullable=False, default="any")      # any | linux | windows
@@ -241,7 +246,7 @@ class AccountTemplate(UUIDMixin, TimestampMixin, Base):
     rotation_interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
 
 
-class AccountBackup(UUIDMixin, Base):
+class AccountBackup(TenantMixin, UUIDMixin, Base):
     """History of encrypted account backups (lot 7). The archive itself is not kept here."""
     __tablename__ = "account_backups"
 
@@ -257,12 +262,13 @@ class AccountBackup(UUIDMixin, Base):
     storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
-class Application(UUIDMixin, TimestampMixin, Base):
+class Application(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """A program that fetches secrets from Citadel with its own key (lot 7).
     Scope like an access policy: servers / nodes / labels x account usernames."""
     __tablename__ = "applications"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_applications_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     key_prefix: Mapped[str] = mapped_column(String(16), unique=True, nullable=False, index=True)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -278,12 +284,13 @@ class Application(UUIDMixin, TimestampMixin, Base):
     created_by: Mapped[str | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
-class RiskFinding(UUIDMixin, Base):
+class RiskFinding(TenantMixin, UUIDMixin, Base):
     """A risk found by the periodic scan (lot 7). key identifies the object + check,
     so a risk keeps its history until it disappears (resolved) or is ignored."""
     __tablename__ = "risk_findings"
+    __table_args__ = (UniqueConstraint("org_id", "key", name="uq_risk_findings_org_key"),)
 
-    key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     severity: Mapped[str] = mapped_column(String(10), nullable=False)      # high | medium | low
     title: Mapped[str] = mapped_column(String(255), nullable=False)

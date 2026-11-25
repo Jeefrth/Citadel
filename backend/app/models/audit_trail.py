@@ -1,14 +1,16 @@
 """Audit models (lot 4): command journal (D3), recording storage (D8), SIEM targets (D9)."""
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
+from app.core.tenancy import TenantMixin
 
 
-class CommandLog(UUIDMixin, Base):
+
+class CommandLog(TenantMixin, UUIDMixin, Base):
     """Every command run through Citadel (terminal line or execute API), with its decision."""
     __tablename__ = "command_logs"
 
@@ -29,7 +31,7 @@ class CommandLog(UUIDMixin, Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
-class RecordingStorage(UUIDMixin, TimestampMixin, Base):
+class RecordingStorage(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """Where finished recordings are stored. One active row; none = local disk."""
     __tablename__ = "recording_storage"
 
@@ -42,11 +44,12 @@ class RecordingStorage(UUIDMixin, TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
-class SiemTarget(UUIDMixin, TimestampMixin, Base):
+class SiemTarget(TenantMixin, UUIDMixin, TimestampMixin, Base):
     """Continuous export of audit and command events to a SIEM."""
     __tablename__ = "siem_targets"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_siem_targets_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     transport: Mapped[str] = mapped_column(String(10), nullable=False)    # udp | tcp | tls | http
     format: Mapped[str] = mapped_column(String(10), nullable=False)       # json | cef | hec

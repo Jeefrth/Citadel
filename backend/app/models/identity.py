@@ -6,6 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.base import UUIDMixin
+from app.core.tenancy import TenantMixin
+
 
 
 class UserDevice(UUIDMixin, Base):
@@ -64,12 +66,13 @@ class SSHConnectToken(UUIDMixin, Base):
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
-class CustomRole(UUIDMixin, Base):
+class CustomRole(TenantMixin, UUIDMixin, Base):
     """A named set of administration capabilities given on top of a base role (lot 7).
     The base role (operator / viewer) keeps capping the actions on servers."""
     __tablename__ = "custom_roles"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_custom_roles_org_name"),)
 
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     permissions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -4,9 +4,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import UUIDMixin, TimestampMixin, JobStatus
+from app.core.tenancy import TenantMixin
 
 
-class UpdateJob(UUIDMixin, TimestampMixin, Base):
+
+class UpdateJob(TenantMixin, UUIDMixin, TimestampMixin, Base):
     __tablename__ = "update_jobs"
 
     server_id: Mapped[str] = mapped_column(
