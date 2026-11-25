@@ -173,7 +173,7 @@ async def app_read_secret(request: Request, server: str, account: str,
     if (app is None or org is None or not org.is_active or not hmac.compare_digest(app.key_hash, _hash(token))
             or not app.is_active or (app.expires_at and app.expires_at < now)):
         raise HTTPException(status_code=401, detail="Invalid application key")
-    tenancy.set_context(tenancy.TenantContext(org_id=org.id, transit_key=org.transit_key))
+    tenancy.set_context(tenancy.TenantContext.for_org(org))
     await tenancy.apply_to_session(db)
 
     from app.services.secrets_ops import _system_user_id

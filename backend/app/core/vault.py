@@ -82,27 +82,31 @@ class VaultClient:
         return resp.json()
 
     # ── Transit ──
-    def _transit(self, op: str) -> str:
-        return f"{settings.VAULT_TRANSIT_MOUNT}/{op}/{settings.VAULT_TRANSIT_KEY}"
+    def _transit(self, op: str, key: str | None = None) -> str:
+        return f"{settings.VAULT_TRANSIT_MOUNT}/{op}/{key or settings.VAULT_TRANSIT_KEY}"
 
-    def encrypt(self, plaintext: bytes) -> str:
-        data = self.request("POST", self._transit("encrypt"), {"plaintext": base64.b64encode(plaintext).decode()})
+    def encrypt(self, plaintext: bytes, key: str | None = None) -> str:
+        data = self.request("POST", self._transit("encrypt", key), {"plaintext": base64.b64encode(plaintext).decode()})
         return data["data"]["ciphertext"]
 
-    def decrypt(self, ciphertext: str) -> bytes:
-        data = self.request("POST", self._transit("decrypt"), {"ciphertext": ciphertext})
+    def decrypt(self, ciphertext: str, key: str | None = None) -> bytes:
+        data = self.request("POST", self._transit("decrypt", key), {"ciphertext": ciphertext})
         return base64.b64decode(data["data"]["plaintext"])
 
-    def rewrap(self, ciphertext: str) -> str:
-        data = self.request("POST", self._transit("rewrap"), {"ciphertext": ciphertext})
+    def rewrap(self, ciphertext: str, key: str | None = None) -> str:
+        data = self.request("POST", self._transit("rewrap", key), {"ciphertext": ciphertext})
         return data["data"]["ciphertext"]
 
-    def key_info(self) -> dict:
-        return self.request("GET", self._transit("keys"))["data"]
+    def key_info(self, key: str | None = None) -> dict:
+        return self.request("GET", self._transit("keys", key))["data"]
 
-    def rotate_key(self) -> int:
-        self.request("POST", f"{self._transit('keys')}/rotate")
-        return int(self.key_info()["latest_version"])
+    def rotate_key(self, key: str | None = None) -> int:
+        self.request("POST", f"{self._transit('keys', key)}/rotate")
+        return int(self.key_info(key)["latest_version"])
+
+    def create_key(self, key: str) -> None:
+        """Organisation key (non-exportable aes256-gcm96); idempotent."""
+        self.request("POST", self._transit("keys", key), {"type": "aes256-gcm96", "exportable": False})
 
     # ── SSH CA ──
     def ssh_public_key(self) -> str:

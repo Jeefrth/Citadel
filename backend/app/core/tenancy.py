@@ -33,6 +33,13 @@ class TenantContext:
     org_id: uuid.UUID | None = None
     transit_key: str | None = None      # None = default key (settings)
     bypass: bool = False                # platform / system code
+    ssh_ca_public: str | None = None    # None = platform CA (default organisation)
+    ssh_ca_private: bytes | None = None  # encrypted with the organisation key
+
+    @classmethod
+    def for_org(cls, org) -> "TenantContext":
+        return cls(org_id=org.id, transit_key=org.transit_key, ssh_ca_public=org.ssh_ca_public,
+                   ssh_ca_private=bytes(org.ssh_ca_private) if org.ssh_ca_private else None)
 
 
 _ctx: ContextVar[TenantContext | None] = ContextVar("citadel_tenant", default=None)
@@ -68,8 +75,12 @@ def reset_context(token) -> None:
 
 
 @contextlib.contextmanager
-def tenant(org_id: uuid.UUID, transit_key: str | None = None):
-    token = _ctx.set(TenantContext(org_id=org_id, transit_key=transit_key))
+def tenant(org_id_or_org, transit_key: str | None = None):
+    """tenant(org) with the Organization (key and CA), or tenant(org_id) for code
+    that neither encrypts nor signs."""
+    ctx = (TenantContext(org_id=org_id_or_org, transit_key=transit_key) if isinstance(org_id_or_org, uuid.UUID)
+           else TenantContext.for_org(org_id_or_org))
+    token = _ctx.set(ctx)
     try:
         yield
     finally:

@@ -221,12 +221,12 @@ async def siem_loop(stop: asyncio.Event) -> None:
                     async with async_session() as db:
                         with tenancy.system():
                             pairs = (await db.execute(
-                                select(SiemTarget.id, Organization.id, Organization.transit_key)
+                                select(SiemTarget.id, Organization)
                                 .join(Organization, Organization.id == SiemTarget.org_id)
                                 .where(SiemTarget.is_active.is_(True), Organization.is_active.is_(True)))).all()
-                    for target_id, org_id, transit_key in pairs:
+                    for target_id, org in pairs:
                         # each target in its organisation: only that organisation's events
-                        with tenancy.tenant(org_id, transit_key):
+                        with tenancy.tenant(org):
                             async with async_session() as db:
                                 t = await db.get(SiemTarget, target_id)
                                 try:

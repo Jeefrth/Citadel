@@ -30,6 +30,12 @@ path "{TRANSIT_MOUNT}/decrypt/{TRANSIT_KEY}" {{ capabilities = ["update"] }}
 path "{TRANSIT_MOUNT}/rewrap/{TRANSIT_KEY}"  {{ capabilities = ["update"] }}
 path "{TRANSIT_MOUNT}/keys/{TRANSIT_KEY}"    {{ capabilities = ["read"] }}
 path "{TRANSIT_MOUNT}/keys/{TRANSIT_KEY}/rotate" {{ capabilities = ["update"] }}
+# one key per organisation (SaaS): create, use, rotate; never delete or export
+path "{TRANSIT_MOUNT}/encrypt/citadel-org-*" {{ capabilities = ["update"] }}
+path "{TRANSIT_MOUNT}/decrypt/citadel-org-*" {{ capabilities = ["update"] }}
+path "{TRANSIT_MOUNT}/rewrap/citadel-org-*"  {{ capabilities = ["update"] }}
+path "{TRANSIT_MOUNT}/keys/citadel-org-*"    {{ capabilities = ["create", "read", "update"] }}
+path "{TRANSIT_MOUNT}/keys/citadel-org-*/rotate" {{ capabilities = ["update"] }}
 path "{SSH_MOUNT}/sign/{SSH_ROLE}"           {{ capabilities = ["update"] }}
 path "{SSH_MOUNT}/public_key"                {{ capabilities = ["read"] }}
 """

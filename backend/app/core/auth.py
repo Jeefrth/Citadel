@@ -215,7 +215,7 @@ async def bind_user(db: AsyncSession, user: User, org: Organization, membership:
     """Enter the organisation: tenant context + RLS for this transaction, and the
     user's role in it. A platform admin without membership is admin."""
     from app.models.identity import CustomRole
-    tenancy.set_context(tenancy.TenantContext(org_id=org.id, transit_key=org.transit_key))
+    tenancy.set_context(tenancy.TenantContext.for_org(org))
     await tenancy.apply_to_session(db)
     user.org = org
     user.custom_role = None

@@ -32,7 +32,7 @@ async def run_cycle() -> dict:
     total: dict = {}
     for org in orgs:
         try:
-            with tenancy.tenant(org.id, org.transit_key):
+            with tenancy.tenant(org):
                 stats = await _run_org_cycle()
         except Exception:  # noqa: BLE001 - one organisation must not stop the others
             logger.exception("scheduler cycle failed for organisation %s", org.slug)

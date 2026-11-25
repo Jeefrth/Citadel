@@ -15,6 +15,7 @@ import time
 import logging
 from pathlib import Path
 
+from app.core import tenancy
 from app.core.config import settings
 
 logger = logging.getLogger("citadel.ca")
@@ -56,8 +57,37 @@ def _use_vault() -> bool:
     return settings.CA_BACKEND == "vault"
 
 
+def _org_ca() -> tenancy.TenantContext | None:
+    """The CA of the organisation in context, None for the platform CA
+    (default organisation). A tenant without a CA of its own must be the
+    default organisation: anything else would sign with the wrong CA."""
+    ctx = tenancy.current()
+    if ctx is None or ctx.bypass or ctx.org_id is None:
+        return None
+    if ctx.ssh_ca_public and ctx.ssh_ca_private:
+        return ctx
+    if ctx.transit_key is not None:   # own key but no CA: misconfigured organisation
+        raise RuntimeError("This organisation has no SSH CA")
+    return None
+
+
+def generate_org_ca(comment: str) -> tuple[str, bytes]:
+    """New Ed25519 CA for an organisation: (public key, private key encrypted
+    with the key of the organisation in context)."""
+    from app.core.security import encrypt_value
+    with tempfile.TemporaryDirectory(prefix="citadel_ca_") as d:
+        path = os.path.join(d, "ca")
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", path, "-N", "", "-q", "-C", comment], check=True)
+        public = Path(path + ".pub").read_text().strip()
+        private = Path(path).read_text()
+    return public, encrypt_value(private)
+
+
 def get_ca_public_key() -> str:
     """Return the CA public key string (for sshd_config TrustedUserCAKeys)."""
+    org = _org_ca()
+    if org is not None:
+        return org.ssh_ca_public
     if _use_vault():
         from app.core.vault import get_vault
         return get_vault().ssh_public_key()
@@ -78,7 +108,8 @@ def sign_user_certificate(
     validity_minutes: certificate lifetime in minutes (default 480 = 8h).
     Supports any value from 1 minute to 1440 minutes (24h).
     """
-    if not _use_vault():
+    org = _org_ca()
+    if org is None and not _use_vault():
         _ensure_ca_exists()
 
     if principals is None:
@@ -97,7 +128,7 @@ def sign_user_certificate(
 
     key_id = f"citadel-{username}-{int(time.time())}"
 
-    if _use_vault():
+    if org is None and _use_vault():
         from app.core.vault import get_vault
         public_key = Path(key_path + ".pub").read_text().strip()
         signed = get_vault().ssh_sign(public_key, principals, validity_minutes, key_id)
@@ -119,17 +150,29 @@ def sign_user_certificate(
         else:
             validity_str = f"+{hours}h{remaining_min}m"
 
-    # Sign with CA
-    subprocess.run(
-        [
-            "ssh-keygen", "-s", str(CA_PRIVATE_KEY_PATH),
-            "-I", key_id,
-            "-n", ",".join(principals),
-            "-V", validity_str,
-            key_path + ".pub",
-        ],
-        check=True,
-    )
+    # Sign with the CA: the platform one, or the organisation's (private key
+    # decrypted into a 0600 file of the temp dir, removed right after)
+    ca_path = str(CA_PRIVATE_KEY_PATH)
+    if org is not None:
+        from app.core.security import decrypt_value
+        ca_path = os.path.join(tmpdir, "ca")
+        fd = os.open(ca_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(decrypt_value(org.ssh_ca_private))
+    try:
+        subprocess.run(
+            [
+                "ssh-keygen", "-s", ca_path,
+                "-I", key_id,
+                "-n", ",".join(principals),
+                "-V", validity_str,
+                key_path + ".pub",
+            ],
+            check=True,
+        )
+    finally:
+        if org is not None and os.path.exists(ca_path):
+            os.unlink(ca_path)
 
     logger.info(
         "Signed ephemeral certificate: user=%s, principals=%s, valid=%dmin, key_id=%s",

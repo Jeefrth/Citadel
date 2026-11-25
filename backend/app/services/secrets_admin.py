@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.core.security import _local_decrypt, decrypt_value, is_vault_blob, vault_blob_version
+from app.core.security import _local_decrypt, current_key, decrypt_value, is_vault_blob, join_blob, split_blob, vault_blob_version
 from app.models.credential import Credential
 from app.models.audit_trail import RecordingStorage, SiemTarget
 from app.models.governance import NotificationChannel
@@ -59,8 +59,8 @@ async def status(db: AsyncSession) -> dict:
             "version": health.get("version"),
         }
         if settings.SECRETS_BACKEND == "vault" and not health.get("sealed"):
-            key = vault.key_info()
-            info["transit_key"] = settings.VAULT_TRANSIT_KEY
+            key = vault.key_info(current_key())
+            info["transit_key"] = current_key() or settings.VAULT_TRANSIT_KEY
             info["latest_version"] = key.get("latest_version")
             info["min_decryption_version"] = key.get("min_decryption_version")
             outdated = sum(n for k, n in counts.items()
@@ -84,8 +84,9 @@ async def migrate(db: AsyncSession) -> dict:
         if is_vault_blob(blob):
             continue
         try:
-            plaintext = _local_decrypt(blob)
-            setattr(row, col, vault.encrypt(plaintext.encode()).encode())
+            key, inner = split_blob(blob)
+            plaintext = _local_decrypt(inner, key)
+            setattr(row, col, join_blob(key, vault.encrypt(plaintext.encode(), key=key).encode()))
             migrated += 1
         except Exception as e:  # noqa: BLE001
             failed += 1
@@ -100,11 +101,13 @@ async def rotate_key(db: AsyncSession) -> dict:
         raise ValueError("SECRETS_BACKEND must be 'vault' to rotate the key")
     from app.core.vault import get_vault
     vault = get_vault()
-    latest = vault.rotate_key()
+    org_key = current_key()   # the organisation's key only
+    latest = vault.rotate_key(org_key)
     rewrapped = 0
     async for row, col, blob in _iter_blobs(db):
-        if is_vault_blob(blob) and (vault_blob_version(blob) or 0) < latest:
-            setattr(row, col, vault.rewrap(blob.decode()).encode())
+        key, inner = split_blob(blob)
+        if key == org_key and is_vault_blob(blob) and (vault_blob_version(blob) or 0) < latest:
+            setattr(row, col, join_blob(key, vault.rewrap(inner.decode(), key=key).encode()))
             rewrapped += 1
     await db.commit()
     return {"latest_version": latest, "rewrapped": rewrapped}
@@ -121,17 +124,27 @@ async def check_all_decryptable(db: AsyncSession) -> dict:
     return {"decryptable": ok, "undecryptable": bad}
 
 
-# ── CLI wrappers ──
-async def status_standalone() -> dict:
+# ── CLI wrappers: every organisation, each with its own key ──
+async def _each_org(fn) -> dict:
+    from app.core import tenancy
+    from app.models.organization import Organization
     async with async_session() as db:
-        return await status(db)
+        orgs = (await db.execute(select(Organization).order_by(Organization.name))).scalars().all()
+    out = {}
+    for org in orgs:
+        with tenancy.tenant(org):
+            async with async_session() as db:
+                out[org.slug] = await fn(db)
+    return out
+
+
+async def status_standalone() -> dict:
+    return await _each_org(status)
 
 
 async def migrate_standalone() -> dict:
-    async with async_session() as db:
-        return await migrate(db)
+    return await _each_org(migrate)
 
 
 async def rotate_key_standalone() -> dict:
-    async with async_session() as db:
-        return await rotate_key(db)
+    return await _each_org(rotate_key)
