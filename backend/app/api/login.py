@@ -228,7 +228,7 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 async def _popup_url(db, user: User, provider: IdentityProvider, purpose: str, force: bool) -> dict:
     sid = getattr(user, "_session_id", None)
     if sid is None:
-        raise HTTPException(status_code=403, detail="Only from a browser session")
+        raise HTTPException(status_code=403, detail="Possible seulement depuis une session ouverte dans le navigateur")
     url = await oidc.start(provider, purpose, "/", user_id=user.id, session_id=sid, force_login=force)
     return {"url": url}
 
@@ -238,7 +238,7 @@ async def reauth(db: AsyncSession = Depends(get_db), user: User = Depends(get_id
     """URL for the re-authentication popup, at the provider of the current session."""
     s = await db.get(AuthSession, getattr(user, "_session_id", None)) if getattr(user, "_session_id", None) else None
     if s is None or s.provider_id is None:
-        raise HTTPException(status_code=403, detail="Only from a browser session")
+        raise HTTPException(status_code=403, detail="Possible seulement depuis une session ouverte dans le navigateur")
     provider = await _active_provider(db, s.provider_id)
     try:
         return await _popup_url(db, user, provider, "reauth", True)

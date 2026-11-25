@@ -1,64 +1,10 @@
-import {
-  BrowserAuthError,
-  CacheLookupPolicy,
-  InteractionRequiredAuthError,
-  type IPublicClientApplication,
-} from "@azure/msal-browser";
-import { loginRequest, apiConfig } from "./authConfig";
+import { apiConfig } from "./authConfig";
 import { getOrgSlug, handleOrgRefused } from "./org";
+import { DEV_MODE, getAccessToken, logout, markSignedOut, refreshSession } from "./session";
 
-const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
-
-let msalInstance: IPublicClientApplication | null = null;
-
-export function setMsalInstance(instance: IPublicClientApplication) {
-  msalInstance = instance;
-}
-
-// Errors meaning "silent renewal is not possible, the user must go through Entra again"
-const INTERACTIVE_CODES = new Set(["monitor_window_timeout", "timed_out", "no_tokens_found", "block_iframe_reload"]);
-let redirecting = false;
-
-/**
- * Access token for the Citadel API.
- *
- * Silent renewal uses the cache then the refresh token only, never the hidden
- * iframe: with device-based Conditional Access (Intune, platform SSO) the
- * iframe cannot complete and MSAL fails after a 10 s "monitor_window_timeout".
- * When silent renewal is not possible, the whole tab is redirected to Entra
- * (where Conditional Access can run) and comes back to the same page.
- */
+/** Access token for the Citadel API (null in dev mode). */
 async function getToken(): Promise<string | null> {
-  if (DEV_MODE) return null;
-
-  if (!msalInstance) throw new Error("MSAL not initialized");
-
-  const account = msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0];
-  if (!account) throw new Error("No authenticated account");
-
-  try {
-    const response = await msalInstance.acquireTokenSilent({
-      ...loginRequest,
-      account,
-      cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
-    });
-    return response.accessToken;
-  } catch (e) {
-    const interactive =
-      e instanceof InteractionRequiredAuthError ||
-      (e instanceof BrowserAuthError && INTERACTIVE_CODES.has(e.errorCode));
-    if (!interactive) throw e;
-    if (!redirecting) {
-      redirecting = true;
-      await msalInstance.acquireTokenRedirect({
-        ...loginRequest,
-        account,
-        redirectStartPage: window.location.href,
-      });
-    }
-    // The page is navigating away: never resolve, so callers don't show an error
-    return new Promise<string>(() => {});
-  }
+  return getAccessToken();
 }
 
 // ── Device identifier (lot 6) ──────────────────────────
@@ -121,8 +67,8 @@ let signingOut = false;
 
 /**
  * This browser was signed out of Citadel ("Déconnecter" in Mon compte or by an
- * admin): forget the device id, then sign out of MSAL. The next sign-in gets a
- * fresh device id.
+ * admin): forget the device id, then end the Citadel session. The next sign-in
+ * gets a fresh device id.
  */
 export function handleDeviceRevoked(): void {
   if (signingOut) return;
@@ -136,12 +82,11 @@ export function handleDeviceRevoked(): void {
   } catch {
     /* storage unavailable: no message on the sign-in page */
   }
-  if (DEV_MODE || !msalInstance) {
+  if (DEV_MODE) {
     window.location.reload();
     return;
   }
-  const account = msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0];
-  msalInstance.logoutRedirect(account ? { account } : undefined).catch(() => window.location.reload());
+  void logout();
 }
 
 function isDeviceRevoked(status: number, detail: unknown): boolean {
@@ -183,7 +128,7 @@ export class ApiError extends Error {
 }
 
 /**
- * Bearer token for WebSocket auth messages (same MSAL token as the terminal).
+ * Bearer token for WebSocket auth messages (Citadel access token).
  * In dev mode the backend ignores it, so an empty string is returned.
  */
 export async function getAuthToken(): Promise<string> {
@@ -194,6 +139,41 @@ export async function getAuthToken(): Promise<string> {
 export function wsBaseUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}`;
+}
+
+/**
+ * 401 meaning "the access token is no longer accepted" (not a device sign-out,
+ * not a request for a recent sign-in): worth one refresh and a retry.
+ */
+async function isStaleToken(response: Response): Promise<boolean> {
+  if (response.status !== 401 || DEV_MODE) return false;
+  const body = await response
+    .clone()
+    .json()
+    .catch(() => null);
+  const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : null;
+  return detail !== "device_revoked" && detail !== "reauth_required";
+}
+
+/**
+ * fetch with the access token. On a 401 for a stale token: one refresh, one retry;
+ * still 401: the session is over, back to the sign-in page (never settles).
+ */
+async function authedFetch(path: string, init: (token: string | null) => RequestInit): Promise<Response> {
+  const url = `${apiConfig.baseUrl}${path}`;
+  const first = await fetch(url, init(await getToken()));
+  if (!(await isStaleToken(first))) return first;
+  const token = await refreshSession().catch(() => null);
+  if (!token) {
+    markSignedOut();
+    return new Promise<Response>(() => {});
+  }
+  const second = await fetch(url, init(token));
+  if (await isStaleToken(second)) {
+    markSignedOut();
+    return new Promise<Response>(() => {});
+  }
+  return second;
 }
 
 async function throwForResponse(response: Response): Promise<never> {
@@ -213,20 +193,18 @@ async function throwForResponse(response: Response): Promise<never> {
 
 /** Authenticated GET returning the raw body as a Blob (recordings, CSV exports). */
 export async function fetchBlob(path: string): Promise<Blob> {
-  const token = await getToken();
-  const response = await fetch(`${apiConfig.baseUrl}${path}`, { headers: baseHeaders(token) });
+  const response = await authedFetch(path, (token) => ({ headers: baseHeaders(token) }));
   if (!response.ok) await throwForResponse(response);
   return response.blob();
 }
 
 /** Authenticated POST with a JSON body returning a Blob (e.g. ZIP of recordings). */
 export async function postBlob(path: string, body: unknown): Promise<Blob> {
-  const token = await getToken();
-  const response = await fetch(`${apiConfig.baseUrl}${path}`, {
+  const response = await authedFetch(path, (token) => ({
     method: "POST",
     headers: { ...baseHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }));
   if (!response.ok) await throwForResponse(response);
   return response.blob();
 }
@@ -244,18 +222,14 @@ export function saveBlob(blob: Blob, filename: string): void {
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await getToken();
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...options.headers as Record<string, string>,
-    ...baseHeaders(token),
-  };
-
-  const response = await fetch(`${apiConfig.baseUrl}${path}`, {
+  const response = await authedFetch(path, (token) => ({
     ...options,
-    headers,
-  });
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string>),
+      ...baseHeaders(token),
+    },
+  }));
 
   if (!response.ok) await throwForResponse(response);
 
@@ -283,6 +257,7 @@ export async function postMultipart<T>(
   path: string,
   form: FormData,
   onProgress?: (ratio: number) => void,
+  retried = false,
 ): Promise<T> {
   const token = await getToken();
   return new Promise<T>((resolve, reject) => {
@@ -307,6 +282,23 @@ export async function postMultipart<T>(
         const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : null;
         if (isDeviceRevoked(xhr.status, detail)) {
           handleDeviceRevoked();
+          return;
+        }
+        if (xhr.status === 401 && !DEV_MODE && detail !== "reauth_required") {
+          // Stale access token: one refresh and one retry, then back to the sign-in page
+          if (retried) {
+            markSignedOut();
+            return;
+          }
+          refreshSession()
+            .catch(() => null)
+            .then((t) => {
+              if (!t) {
+                markSignedOut();
+                return;
+              }
+              postMultipart<T>(path, form, onProgress, true).then(resolve, reject);
+            });
           return;
         }
         const message = formatDetail(detail);

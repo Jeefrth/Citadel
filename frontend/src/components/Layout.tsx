@@ -1,6 +1,5 @@
 import { Fragment } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { useMsal } from "@azure/msal-react";
 import { useTheme } from "next-themes";
 import { motion } from "motion/react";
 import { Building2, Check, ChevronsUpDown, LogOut, MailPlus, Moon, Search, Sun, UserCog } from "lucide-react";
@@ -40,6 +39,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCurrentUser } from "@/services/useCurrentUser";
+import { logout } from "@/services/session";
 import { roleLabel, switchOrg } from "@/services/org";
 import NoOrgScreen from "@/components/NoOrgScreen";
 import { useHasK8sClusters } from "@/services/k8s";
@@ -219,12 +219,10 @@ function OrgSwitcher() {
 }
 
 function UserMenu() {
-  const { instance, accounts } = useMsal();
-  const account = accounts[0];
   const { user } = useCurrentUser();
   const { resolvedTheme, setTheme } = useTheme();
-  const name = account?.name || user?.display_name || "Utilisateur";
-  const email = account?.username || user?.email || "";
+  const name = user?.display_name || "Utilisateur";
+  const email = user?.email || "";
   const invites = user?.pending_invitations || 0;
 
   return (
@@ -283,7 +281,7 @@ function UserMenu() {
               {resolvedTheme === "dark" ? "Thème clair" : "Thème sombre"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => instance.logoutRedirect()}>
+            <DropdownMenuItem onSelect={() => void logout()}>
               <LogOut /> Se déconnecter
             </DropdownMenuItem>
           </DropdownMenuContent>

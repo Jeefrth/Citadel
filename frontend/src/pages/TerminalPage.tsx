@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useMsal } from "@azure/msal-react";
-import { loginRequest } from "@/services/authConfig";
 import { api, getAuthToken, wsBaseUrl } from "@/services/api";
+import { reauthenticate } from "@/services/reauth";
 import { hasAction, type ConnectionChoice, type ServerData } from "@/services/types";
 import Terminal from "@/components/Terminal";
 import RdpViewer from "@/components/RdpViewer";
@@ -41,7 +40,6 @@ interface Tab {
 let tabCounter = 0;
 
 export default function TerminalPage() {
-  const { instance, accounts } = useMsal();
   const [searchParams, setSearchParams] = useSearchParams();
   const [servers, setServers] = useState<ServerData[]>([]);
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -101,7 +99,7 @@ export default function TerminalPage() {
     setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  // Same silent-then-redirect policy as the API client (no hidden iframe)
+  // Citadel access token (refreshed in the background)
   const getToken = useCallback(async (): Promise<string> => getAuthToken(), []);
 
   const requestTerminal = (srv: ServerData) => {
@@ -112,17 +110,11 @@ export default function TerminalPage() {
   // Called by ConnectDialog; throwing keeps the dialog open with the error shown
   const confirmMfaAndOpen = async (connection: ConnectionChoice, certDuration?: number) => {
     if (!pendingServer) return;
-    const account = accounts[0];
-    if (!account) throw new Error("Not authenticated");
 
-    // Force full re-auth via popup -> triggers MFA (Conditional Access)
-    await instance.acquireTokenPopup({
-      ...loginRequest,
-      account,
-      prompt: "login",
-    });
+    // Sign in again at the provider (popup, MFA by the provider's policy): new auth_time
+    await reauthenticate();
 
-    // MFA passed: open the session
+    // Re-authenticated: open the session
     const id = `tab-${++tabCounter}`;
     const tab: Tab = {
       id,

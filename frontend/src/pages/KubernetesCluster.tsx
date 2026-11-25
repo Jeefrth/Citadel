@@ -2,8 +2,7 @@
 // shell (opened as a tab of the Terminal page) and actions (permission "manage").
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useMsal } from "@azure/msal-react";
-import { loginRequest } from "@/services/authConfig";
+import { reauthenticate } from "@/services/reauth";
 import { toast } from "sonner";
 import {
   Activity,
@@ -289,19 +288,14 @@ function PodsPanel({ cluster, ns, refresh }: { cluster: K8sCluster; ns: string; 
   const canExec = canK8s(cluster, "exec");
   const canManage = canK8s(cluster, "manage");
 
-  const { instance, accounts } = useMsal();
-
-  // Same rule as an SSH terminal: full re-authentication (MFA through Conditional
-  // Access) right on the click, so the popup isn't blocked by the browser
+  // Same rule as an SSH terminal: sign in again at the provider right on the click,
+  // so the popup isn't blocked by the browser
   const openShell = async (p: K8sPod, container: string) => {
-    const account = accounts[0];
-    if (account) {
-      try {
-        await instance.acquireTokenPopup({ ...loginRequest, account, prompt: "login" });
-      } catch (e) {
-        toast.error(`Authentification annulée : ${errorMessage(e)}`);
-        return;
-      }
+    try {
+      await reauthenticate();
+    } catch (e) {
+      toast.error(errorMessage(e));
+      return;
     }
     const q = new URLSearchParams({ k8s: cluster.id, name: cluster.name, ns, pod: p.name, container });
     navigate(`/terminal?${q.toString()}`);

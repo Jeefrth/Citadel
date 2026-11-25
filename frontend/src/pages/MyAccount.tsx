@@ -31,6 +31,7 @@ import {
 } from "@/services/types";
 import { DevicesTable, LoginEventsTable, RevokeDeviceText } from "@/components/identityUi";
 import SshAccessCard from "@/components/SshAccessCard";
+import { SessionsCard, SignInMethodsCard } from "@/components/SignInCards";
 import ShortcutCard from "@/components/ShortcutCard";
 import { AccessTable } from "@/pages/Access";
 import {
@@ -338,7 +339,7 @@ export default function MyAccount() {
     <div className="space-y-6">
       <PageHeader
         title="Mon compte"
-        description="Votre profil, vos accès, votre accès SSH, vos appareils, vos connexions et vos clés API."
+        description="Votre profil, vos accès, votre accès SSH, vos moyens de connexion, vos sessions, vos appareils et vos clés API."
       />
 
       {/* Profile */}
@@ -549,6 +550,10 @@ export default function MyAccount() {
           </Table>
         )}
       </Card>
+
+      {/* Sign-in methods and Citadel sessions (SaaS phase 3) */}
+      <SignInMethodsCard />
+      <SessionsCard />
 
       {/* Devices */}
       <Card className="overflow-hidden">

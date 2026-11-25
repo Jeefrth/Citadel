@@ -7,6 +7,9 @@ import { isReviewMessage, type ConnectionChoice } from "@/services/types";
 import { GovernanceNotice } from "@/components/governanceUi";
 import { wsBaseUrl as defaultWsBaseUrl } from "@/services/api";
 import { orgAuthFields } from "@/services/org";
+import { isReauthRequired, reauthenticate } from "@/services/reauth";
+import { errorMessage } from "@/services/types";
+import { Button } from "@/components/ui/button";
 
 /** Refusals from the connection ACL (deny or review) get a banner above the terminal. */
 function isGovernanceMessage(msg: string): boolean {
@@ -77,6 +80,23 @@ export default function Terminal({
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [govMessage, setGovMessage] = useState<string | null>(null);
+  // "reauth_required" from the server: one re-authentication and one retry
+  const [attempt, setAttempt] = useState(0);
+  const reauthTried = useRef(false);
+  const awaitingReauth = useRef(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
+
+  /** Re-authenticate, then reconnect (new xterm and WebSocket). */
+  const reauthAndRetry = useCallback(async () => {
+    setReauthError(null);
+    try {
+      await reauthenticate();
+      awaitingReauth.current = false;
+      setAttempt((a) => a + 1);
+    } catch (e) {
+      setReauthError(errorMessage(e));
+    }
+  }, []);
 
   const connect = useCallback(async () => {
     if (!containerRef.current) return;
@@ -159,6 +179,13 @@ export default function Terminal({
         }
 
         case "error":
+          if (isReauthRequired(msg.message) && !reauthTried.current) {
+            reauthTried.current = true;
+            awaitingReauth.current = true;
+            xterm.writeln("\r\n\x1b[1;33mNouvelle authentification requise...\x1b[0m");
+            void reauthAndRetry();
+            break;
+          }
           xterm.writeln(`\r\n\x1b[1;31mError: ${msg.message}\x1b[0m`);
           if (typeof msg.message === "string" && isGovernanceMessage(msg.message)) {
             setGovMessage(msg.message);
@@ -174,7 +201,8 @@ export default function Terminal({
 
     ws.onclose = () => {
       xterm.writeln("\r\n\x1b[1;33mConnection closed\x1b[0m");
-      onDisconnectedRef.current?.();
+      // Waiting for the re-authentication: the tab reconnects, it is not over
+      if (!awaitingReauth.current) onDisconnectedRef.current?.();
     };
 
     ws.onerror = () => {
@@ -224,7 +252,8 @@ export default function Terminal({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [serverId, serverName, getToken, certDuration, connection, wsBaseUrl, wsPath]);
+    // attempt: reconnect after a re-authentication
+  }, [serverId, serverName, getToken, certDuration, connection, wsBaseUrl, wsPath, attempt, reauthAndRetry]);
 
   useEffect(() => {
     const cleanup = connect();
@@ -239,6 +268,29 @@ export default function Terminal({
   return (
     <div className="flex h-full min-h-[400px] w-full flex-col gap-2">
       {govMessage && <GovernanceNotice message={govMessage} />}
+      {reauthError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-live/30 bg-live/10 px-3 py-2 text-sm">
+          <span className="min-w-0 break-words">
+            Une nouvelle authentification est requise pour ouvrir cette session. {reauthError}
+          </span>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                awaitingReauth.current = false;
+                setReauthError(null);
+                onDisconnectedRef.current?.();
+              }}
+            >
+              Abandonner
+            </Button>
+            <Button size="sm" onClick={reauthAndRetry}>
+              S'authentifier à nouveau
+            </Button>
+          </div>
+        </div>
+      )}
       <div
         className="dark min-h-[400px] w-full flex-1 overflow-hidden rounded-lg border p-2"
         style={{ backgroundColor: TERMINAL_BG }}

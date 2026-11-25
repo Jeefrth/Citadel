@@ -1,19 +1,16 @@
 // Full-page screen for a person who belongs to no organisation: pending invitations
 // (accept, then reload in that organisation) or a hint to ask for one, and sign-out.
-import { useMsal } from "@azure/msal-react";
 import { toast } from "sonner";
 import { LogOut, MailQuestion } from "lucide-react";
 import { switchOrg } from "@/services/org";
+import { logout } from "@/services/session";
 import type { MyInvitation } from "@/services/types";
 import { InvitationRows, useMyInvitations } from "@/components/MyInvitations";
 import { ErrorBox } from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
-
 export default function NoOrgScreen() {
-  const { instance } = useMsal();
   const { invitations, error, busy, answer } = useMyInvitations();
 
   const onAnswer = async (inv: MyInvitation, accept: boolean) => {
@@ -23,7 +20,7 @@ export default function NoOrgScreen() {
     else toast.success(`Invitation de ${res.org.name} refusée`);
   };
 
-  const signOut = () => (DEV_MODE ? window.location.reload() : instance.logoutRedirect());
+  const signOut = () => void logout();
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-background px-4 py-10">

@@ -6,6 +6,7 @@ import BackupsPanel from "@/components/settings/BackupsPanel";
 import ApplicationsPanel from "@/components/settings/ApplicationsPanel";
 import RolesPanel from "@/components/settings/RolesPanel";
 import MembersPanel from "@/components/settings/MembersPanel";
+import IdentityProvidersPanel from "@/components/settings/IdentityProvidersPanel";
 import { api } from "@/services/api";
 import SecretsVaultCard from "@/components/SecretsVaultCard";
 import NotificationChannelsPanel from "@/components/NotificationChannels";
@@ -34,6 +35,7 @@ import {
   DatabaseBackup,
   AppWindow,
   UserCog,
+  LogIn,
   ShieldAlert,
 } from "lucide-react";
 import { PageHeader, Tabs } from "@/components/kit";
@@ -104,10 +106,11 @@ type Tab =
   | "audit"
   | "users"
   | "roles"
+  | "auth"
   | "system";
 const TAB_IDS: Tab[] = [
   "security", "commands", "masking", "network", "ca", "vault", "backups",
-  "applications", "notifications", "audit", "users", "roles", "system",
+  "applications", "notifications", "audit", "users", "roles", "auth", "system",
 ];
 
 export default function Settings() {
@@ -285,13 +288,14 @@ export default function Settings() {
     { id: "audit", icon: FileSearch, label: "Audit" },
     { id: "users", icon: Users, label: "Membres" },
     { id: "roles", icon: UserCog, label: "Rôles" },
+    { id: "auth", icon: LogIn, label: "Authentification" },
     { id: "system", icon: Info, label: "Système" },
   ];
 
   if (loading) {
     return (
       <div>
-        <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres et rôles." />
+        <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres, rôles et authentification." />
         <div className="mb-6 flex gap-4 border-b pb-2.5">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-4 w-20" />
@@ -400,7 +404,7 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres et rôles." />
+      <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres, rôles et authentification." />
 
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
@@ -555,6 +559,8 @@ sudo systemctl restart sshd`}
         {activeTab === "applications" && <ApplicationsPanel />}
 
         {activeTab === "roles" && <RolesPanel onChanged={loadCustomRoles} />}
+
+        {activeTab === "auth" && <IdentityProvidersPanel scope="org" />}
 
         {activeTab === "notifications" && (
           <>

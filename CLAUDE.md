@@ -21,7 +21,7 @@
 | Cache | Redis 7 |
 | SSH | asyncssh + ssh-keygen (certificats éphémères) |
 | WinRM | pywinrm (NTLM) |
-| Auth | Microsoft Entra ID (MSAL.js + JWKS) |
+| Auth | OIDC multi-fournisseurs (Entra, Google, Okta, OIDC générique) + sessions Citadel |
 | CA | Mini-CA Ed25519 via ssh-keygen |
 | Container | Docker + Docker Compose |
 | Cloud | Azure VM (cible production) |
@@ -37,6 +37,7 @@
 - Opérations (fichiers, tâches, passerelles, Azure) : `docs/operations.md`
 - Kubernetes : `docs/kubernetes.md`
 - Multi-organisation (SaaS phase 1) : `docs/saas-phase1.md`
+- Connexion multi-fournisseurs (SaaS phase 3) : `docs/saas-phase3.md`
 - Plan de test manuel (recette) : `docs/plan-de-test.md`, laboratoire `scripts/test-lab.sh up|users|status|down`
 - Design de l'interface : `docs/design.md`
 - README complet : `README.md`
@@ -53,6 +54,7 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **SaaS phase 3** (11/2026) : connexion OIDC multi-fournisseurs (boutons plateforme + SSO par organisation avec domaines, arrivée automatique, SSO imposé), sessions Citadel (jeton 10 min + cookie de renouvellement tournant), ré-authentification avant terminal, MSAL retiré. Voir `docs/saas-phase3.md`
 - **SaaS phase 1** (11/2026) : organisations (isolation ORM + RLS Postgres, rôle par appartenance, super-admin plateforme, invitations avec consentement, clé Transit et CA SSH par organisation, proxy SSH multi-org, suppression d'organisation). Voir `docs/saas-phase1.md`
 - **Lot 8** (11/2026) : Kubernetes (clusters, règles par espace de noms, logs, actions, shell dans un conteneur sur le cœur de session commun). Voir `docs/kubernetes.md`
 - **Lot 7** (11/2026) : proxy SSH, masquage, push de comptes, sauvegarde chiffrée, API applications, risques, rôles personnalisés. Voir `docs/operations.md`, `docs/vault.md`, `docs/governance.md`, `docs/audit.md`
@@ -130,7 +132,7 @@ backend/
 ```
 frontend/
 ├── src/
-│   ├── main.tsx             # Entry Vite + init MSAL
+│   ├── main.tsx             # Entry Vite
 │   ├── App.tsx              # Routing (support dev mode bypass)
 │   ├── pages/               # Dashboard, Servers, ServerDetail, TerminalPage, Sessions,
 │   │                        # Updates, Audit, Settings (coffre, notifications), Access
@@ -140,7 +142,7 @@ frontend/
 │   │                        # RdpViewer, NodeTree, ConnectDialog, AccountsSection,
 │   │                        # DiscoveredAccounts, SecretsVaultCard, AclRules,
 │   │                        # NotificationChannels, ui.tsx (briques communes)
-│   ├── services/            # authConfig.ts (MSAL), api.ts (fetch typé + Bearer)
+│   ├── services/            # session.ts (jeton Citadel, renouvellement, ré-authentification), api.ts (fetch typé + Bearer)
 │   └── lib/                 # utils.ts
 ├── vite.config.ts
 └── package.json             # React 18, Vite 6, Shadcn/ui, xterm.js 5.5,
@@ -148,7 +150,7 @@ frontend/
                              # guacamole-common-js 1.5, react-router-dom 7
 ```
 
-**Flux auth** : MSAL → Entra ID (OAuth2/OIDC PKCE) → token Bearer dans headers ; pour le terminal, `acquireTokenPopup({ prompt: "login" })` force MFA avant ouverture WebSocket.
+**Flux auth** : `/api/auth/login/{fournisseur}` → fournisseur OIDC (code + PKCE côté serveur, `services/oidc.py`) → `/api/auth/callback` pose le cookie de renouvellement → le front (`services/session.ts`) obtient un jeton Citadel de 10 min par `POST /api/auth/refresh` (en-tête `X-Citadel-Refresh: 1`, rotation du cookie). Avant un terminal : fenêtre de ré-authentification (`/api/auth/reauth`, `prompt=login`), le serveur exige un `auth_time` de moins de 5 min (`require_recent_auth`).
 
 ### Docker (`docker-compose.yml`)
 
@@ -158,7 +160,7 @@ Services dev : `guacd` (1.6.0, non publié, enregistre dans `data/recordings/raw
 
 1. **Certificats SSH éphémères** : Mini-CA Ed25519 signe à la demande des certs courts (5 min à 24 h) → `cert_validity_minutes` ; aucun secret stocké pour ce type de credential.
 2. **Session recording** : événements I/O terminal timestampés, base64-encodés, stockés en JSONB ; replay xterm.js avec contrôle de vitesse.
-3. **MFA par session terminal** : popup Entra forcé avant chaque ouverture WebSocket.
+3. **MFA par session terminal** : ré-authentification chez le fournisseur (fenêtre) avant chaque ouverture de terminal, contrôlée côté serveur par l'`auth_time` de la session.
 4. **Chiffrement credentials** : `SECRETS_BACKEND=vault` → OpenBao Transit (`vault:vN:…` en base, clé jamais hors du coffre) ; `local` → AES-256-GCM avec `CREDENTIAL_ENCRYPTION_KEY`. `decrypt_value` lit les deux formats. CA SSH dans le coffre si `CA_BACKEND=vault`.
 5. **Command filter** : blocklist regex (rm -rf, mkfs, dd, fork bomb, shutdown, curl|sh…).
 6. **RBAC + règles d'accès** : 3 rôles (admin / operator / viewer). L'admin voit tout ; les autres ne voient que les serveurs accordés par une `AccessPolicy` (utilisateurs ou groupes × serveurs, nœuds avec sous-nœuds ou étiquettes × comptes × actions, fenêtre de validité). Le rôle sert de plafond (viewer : jamais `execute`). Un serveur invisible renvoie 404.

@@ -1160,3 +1160,63 @@ export interface MaskingTestResult {
   result: string;
   hits: number;
 }
+
+// ── Sign-in providers and Citadel sessions (SaaS phase 3) ──────
+
+export type ProviderKind = "entra" | "google" | "okta" | "oidc";
+
+/** Public view of a provider (sign-in buttons, discovery, linkable). */
+export interface AuthProvider {
+  id: string;
+  name: string;
+  kind: ProviderKind | string;
+}
+
+export interface AuthIdentity {
+  id: string;
+  provider: AuthProvider | null;
+  email: string | null;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface AuthSessionData {
+  id: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+  ip_address: string | null;
+  device: string | null;
+  current: boolean;
+}
+
+/** Identity provider as administered (organisation SSO or platform button). */
+export interface IdentityProviderData {
+  id: string;
+  kind: ProviderKind;
+  name: string;
+  issuer: string;
+  client_id: string;
+  has_secret: boolean;
+  scopes: string;
+  domains: string[];
+  jit_role: BaseRole | null;
+  enforced: boolean;
+  is_active: boolean;
+  created_at: string;
+  redirect_uri: string;
+}
+
+export interface IdentityProviderInput {
+  kind: ProviderKind;
+  name: string;
+  issuer: string;
+  client_id: string;
+  /** Write-only: null keeps the current secret. */
+  client_secret: string | null;
+  scopes: string;
+  domains: string[];
+  jit_role: BaseRole | null;
+  enforced: boolean;
+  is_active: boolean;
+}

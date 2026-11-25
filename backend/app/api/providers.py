@@ -67,6 +67,8 @@ async def _validate(db: AsyncSession, data: ProviderIn, org_id, exclude=None) ->
     u = urlparse(issuer)
     if u.scheme != "https" and not (settings.DEV_MODE or settings.OIDC_ALLOW_HTTP):
         raise HTTPException(status_code=400, detail="L'émetteur doit être en https://")
+    if data.jit_role == UserRole.ADMIN:
+        raise HTTPException(status_code=400, detail="L'arrivée automatique ne peut pas donner le rôle administrateur")
     if "openid" not in data.scopes.split():
         raise HTTPException(status_code=400, detail="Les scopes doivent contenir « openid »")
     try:

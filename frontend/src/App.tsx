@@ -1,11 +1,7 @@
 import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
-import {
-  AuthenticatedTemplate,
-  UnauthenticatedTemplate,
-  useMsal,
-} from "@azure/msal-react";
-import { setMsalInstance } from "@/services/api";
+import { toast } from "sonner";
+import { useAuthState } from "@/services/session";
 import Layout from "@/components/Layout";
 import OrgChangedNotice from "@/components/shell/OrgChangedNotice";
 import LoginPage from "@/components/LoginPage";
@@ -31,9 +27,6 @@ import Risks from "@/pages/Risks";
 import Kubernetes from "@/pages/Kubernetes";
 import KubernetesCluster from "@/pages/KubernetesCluster";
 import PlatformOrgs from "@/pages/PlatformOrgs";
-
-// DEV MODE: bypass Entra ID auth for local testing
-const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
 
 function AppRoutes() {
   return (
@@ -69,26 +62,24 @@ function AppRoutes() {
   );
 }
 
+/** Session first (refresh cookie): sign-in page when signed out (dev mode: always in). */
 export default function App() {
-  const { instance } = useMsal();
+  const auth = useAuthState();
 
+  // A failed sign-in while a session is still open: show it, then clean the URL
   useEffect(() => {
-    setMsalInstance(instance);
-  }, [instance]);
+    if (auth !== "signedIn") return;
+    const url = new URL(window.location.href);
+    const err = url.searchParams.get("auth_error");
+    if (err === null) return;
+    toast.error(`Connexion impossible : ${err}`);
+    url.searchParams.delete("auth_error");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [auth]);
 
-  if (DEV_MODE) {
-    return <AppRoutes />;
+  if (auth === "loading") {
+    return <div className="min-h-svh bg-background" aria-busy="true" />;
   }
-
-  return (
-    <>
-      <UnauthenticatedTemplate>
-        <LoginPage />
-      </UnauthenticatedTemplate>
-
-      <AuthenticatedTemplate>
-        <AppRoutes />
-      </AuthenticatedTemplate>
-    </>
-  );
+  if (auth === "signedOut") return <LoginPage />;
+  return <AppRoutes />;
 }

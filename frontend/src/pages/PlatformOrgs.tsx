@@ -22,6 +22,7 @@ import {
   type NoticeData,
 } from "@/components/kit";
 import { TableSkeleton, Tip } from "@/components/auditUi";
+import IdentityProvidersPanel from "@/components/settings/IdentityProvidersPanel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -327,7 +328,7 @@ export default function PlatformOrgs() {
     <div className="space-y-4">
       <PageHeader
         title="Organisations"
-        description="Chaque organisation a ses serveurs, ses membres, sa clé de chiffrement et son autorité de certification SSH."
+        description="Chaque organisation a ses serveurs, ses membres, sa clé de chiffrement et son autorité de certification SSH. En bas : les fournisseurs proposés sur la page de connexion."
         actions={
           <Button onClick={() => setCreating(true)}>
             <Plus /> Nouvelle organisation
@@ -452,6 +453,11 @@ export default function PlatformOrgs() {
           </TableBody>
         </Table>
       </Card>
+
+      {/* Buttons of the sign-in page (platform providers) */}
+      <div className="space-y-4 pt-4">
+        <IdentityProvidersPanel scope="platform" />
+      </div>
 
       {creating && (
         <CreateOrgModal
