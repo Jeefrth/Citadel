@@ -100,7 +100,7 @@ def test_ssh_proxy_org_prefix():
     assert split_org(None) == (None, None)
 
 
-@pytest.mark.parametrize("slug", ["12345678-1234-1234-1234-123456789abc", "12345678123412341234123456789abc", "default", "a", "Acme"])
+@pytest.mark.parametrize("slug", ["12345678-1234-1234-1234-123456789abc", "12345678123412341234123456789abc", "default", "a", "-acme", "ac"])
 def test_slug_rejected(slug):
     from fastapi import HTTPException
     from app.services.orgs import check_slug
