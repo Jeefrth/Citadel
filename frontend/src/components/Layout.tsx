@@ -45,6 +45,7 @@ import NotificationBell, { usePolledCount } from "@/components/NotificationBell"
 import LiveIndicator from "@/components/shell/LiveIndicator";
 import CommandPalette, { useCommandPalette } from "@/components/shell/CommandPalette";
 import { NAV, trailFor, type NavRequirement } from "@/components/shell/nav";
+import { formatShortcut, useShortcut } from "@/services/shortcut";
 
 function initials(name: string): string {
   return name
@@ -190,6 +191,7 @@ export default function Layout() {
   const allows = (req: NavRequirement | undefined) =>
     req === "k8s" ? hasClusters || can("kubernetes") : allowsPerm(req);
   const palette = useCommandPalette();
+  const [shortcut] = useShortcut();
   const trail = trailFor(pathname);
 
   return (
@@ -231,7 +233,7 @@ export default function Layout() {
               <Search className="size-4" />
               <span className="hidden md:inline">Rechercher</span>
               <kbd className="pointer-events-none ml-auto hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] md:inline-flex">
-                ⌘K
+                {formatShortcut(shortcut)}
               </kbd>
             </Button>
             <NotificationBell />

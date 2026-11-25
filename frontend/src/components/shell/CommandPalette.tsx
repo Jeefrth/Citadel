@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { matches, useShortcut } from "@/services/shortcut";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { AppWindow, Archive, CloudCog, Container, ShieldCheck, EyeOff, KeyRound, Laptop, Moon, Server, ShieldAlert, Sun, Terminal, UserCog, UserPlus } from "lucide-react";
@@ -27,16 +28,17 @@ interface ServerLite {
 
 export function useCommandPalette() {
   const [open, setOpen] = useState(false);
+  const [shortcut] = useShortcut();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (matches(e, shortcut)) {
         e.preventDefault();
         setOpen((o) => !o);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [shortcut]);
   return { open, setOpen };
 }
 

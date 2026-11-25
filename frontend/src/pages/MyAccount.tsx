@@ -15,6 +15,7 @@ import {
 } from "@/services/types";
 import { DevicesTable, LoginEventsTable, RevokeDeviceText } from "@/components/identityUi";
 import SshAccessCard from "@/components/SshAccessCard";
+import ShortcutCard from "@/components/ShortcutCard";
 import { AccessTable } from "@/pages/Access";
 import {
   Chip,
@@ -365,6 +366,8 @@ export default function MyAccount() {
       </Card>
 
       <SshAccessCard />
+
+      <ShortcutCard />
 
       {/* API keys */}
       <Card className="overflow-hidden">

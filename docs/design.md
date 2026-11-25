@@ -61,3 +61,8 @@ Durées de 0,15 à 0,25 s, ressort `stiffness 500, damping 40` pour les indicate
 ## Rédaction
 
 Phrases courtes, verbes d'action, casse de phrase. Un bouton dit ce qu'il fait (« Approuver », « Ouvrir une session », « Enregistrer la règle »), et le message de confirmation reprend le même verbe (« Règle enregistrée »). Pas de tirets longs (— ou –) dans l'interface.
+
+
+## Raccourci de recherche
+
+La palette de recherche s'ouvre par défaut avec Cmd+K (Ctrl+K hors macOS). Chacun peut le changer dans Mon compte > Raccourci de recherche : modèles (Cmd+Maj+K, « / », Ctrl+Espace, Cmd+P) ou combinaison enregistrée en l'appuyant. Le choix est gardé dans le navigateur (`localStorage`, clé `citadel.shortcut.palette`) et l'indication de la barre du haut le suit. « / » et les touches sans modificateur ne se déclenchent pas pendant la saisie (champs, terminal) ; une lettre ou un chiffre seul est refusé à l'enregistrement.
