@@ -7,8 +7,10 @@ import sys
 sys.path.insert(0, "/app")
 from sqlalchemy import delete, select, text  # noqa: E402
 
+from app.core import tenancy  # noqa: E402
 from app.core.auth import hash_access_key  # noqa: E402
 from app.core.database import async_session  # noqa: E402
+from app.models.organization import Organization, OrgMembership  # noqa: E402
 from app.models.base import UserRole  # noqa: E402
 from app.models.identity import CustomRole  # noqa: E402
 from app.models.pam import AccessKey  # noqa: E402
@@ -19,7 +21,19 @@ USERS = [("lab-operator", "Lab Operator", UserRole.OPERATOR, None),
          ("lab-auditor", "Lab Auditeur (rôle personnalisé)", UserRole.VIEWER, "Lab auditeur")]
 
 
+async def _default_org():
+    async with async_session() as db:
+        return (await db.execute(select(Organization).where(Organization.is_default.is_(True)))).scalar_one()
+
+
 async def up():
+    """Lab people are members of the default organisation (keys pinned to it)."""
+    org = await _default_org()
+    with tenancy.tenant(org):
+        await _up(org)
+
+
+async def _up(org):
     async with async_session() as db:
         role = (await db.execute(select(CustomRole).where(CustomRole.name == "Lab auditeur"))).scalar_one_or_none()
         if role is None:
@@ -29,10 +43,15 @@ async def up():
         for oid, name, r, custom in USERS:
             u = (await db.execute(select(User).where(User.entra_object_id == oid))).scalar_one_or_none()
             if u is None:
-                u = User(entra_object_id=oid, email=f"{oid}@lab.test", display_name=name, role=r, is_active=True)
+                u = User(entra_object_id=oid, email=f"{oid}@lab.test", display_name=name, is_active=True)
                 db.add(u)
                 await db.flush()
-            u.custom_role_id = role.id if custom else None
+            m = (await db.execute(select(OrgMembership).where(OrgMembership.org_id == org.id,
+                                                              OrgMembership.user_id == u.id))).scalar_one_or_none()
+            if m is None:
+                m = OrgMembership(org_id=org.id, user_id=u.id, role=r)
+                db.add(m)
+            m.role, m.custom_role_id = r, (role.id if custom else None)
             await db.execute(delete(AccessKey).where(AccessKey.user_id == u.id, AccessKey.name == "lab"))
             prefix = secrets.token_hex(4)
             key = f"ctk_{prefix}_{secrets.token_urlsafe(24)}"
@@ -42,6 +61,11 @@ async def up():
 
 
 async def down():
+    with tenancy.system():
+        await _down()
+
+
+async def _down():
     async with async_session() as db:
         ids = [r[0] for r in (await db.execute(select(User.id).where(User.entra_object_id.like("lab-%")))).all()]
         for t in ("audit_logs", "command_logs", "login_events", "user_devices", "session_recordings"):

@@ -30,5 +30,11 @@ Décisions validées par JF le 25/11/2026 :
 7. Front : retrait de MSAL, écran de connexion, gestion du jeton et du renouvellement, ré-authentification des terminaux, pages d'administration.
 8. Tests (unitaires + e2e avec un fournisseur OIDC de test local) et revue de sécurité.
 
+## État (25/11/2026)
+- Serveur (étapes 1 à 6) fait : `models/auth.py`, migration `c1a7d0e5f013`, `services/oidc.py`, `services/sessions.py`, `services/login.py`, `api/login.py`, `api/providers.py`, SSO imposé et ré-authentification dans `core/auth.py`.
+- Tests : `tests/test_login.py`, `scripts/e2e/sso_login.py` (36 vérifications avec un fournisseur OIDC factice lancé par le test : refus sans invitation, JIT par domaine, invitation + e-mail vérifié, e-mail non vérifié refusé, rotation du cookie, rejeu du callback refusé, cookie volé = session révoquée, SSO imposé, ré-authentification avant terminal, jeton de fournisseur ou falsifié refusé, redirection ouverte impossible). Le test se lance avec un serveur de test démarré avec `OIDC_ALLOW_HTTP=true` et `PUBLIC_URL=http://localhost:8001`.
+- Corrigé au passage : suppression d'une personne bloquée par la contrainte appareil du journal des connexions (contrainte désormais vérifiée à la validation) ; scripts du laboratoire adaptés aux organisations.
+- Front (étape 7) en cours.
+
 ## Prérequis côté Entra (JF)
 L'application `srv_gest` est aujourd'hui de type SPA (pas de secret). L'échange du code se fait désormais côté serveur : ajouter une plateforme **Web** avec l'URI de redirection `http://localhost:5173/api/auth/callback` et créer un **secret client** (à mettre dans `.env` : `AZURE_CLIENT_SECRET`, repris par la migration dans le fournisseur).

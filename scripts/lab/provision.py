@@ -16,7 +16,8 @@ from sqlalchemy import delete, select  # noqa: E402
 
 from app.core.auth import hash_access_key  # noqa: E402
 from app.core.database import async_session  # noqa: E402
-from app.models.base import UserRole  # noqa: E402
+from app.core import tenancy  # noqa: E402
+from app.models.organization import Organization  # noqa: E402
 from app.models.pam import AccessKey  # noqa: E402
 from app.models.user import User  # noqa: E402
 
@@ -24,15 +25,36 @@ API = "http://localhost:8000/api"
 PW_ADMIN, PW_USER, PW_GW = "Lab-Admin-2026", "Lab-User-2026", "Lab-Gw-2026"
 
 
-async def main():
+async def _temp_key():
+    """Temporary access key of the platform admin, in the default organisation (the lab lives there)."""
     async with async_session() as db:
-        admin = (await db.execute(select(User).where(User.role == UserRole.ADMIN).order_by(User.created_at))).scalars().first()
+        org = (await db.execute(select(Organization).where(Organization.is_default.is_(True)))).scalar_one()
+        admin = (await db.execute(select(User).where(User.is_platform_admin.is_(True)).order_by(User.created_at))).scalars().first()
         prefix = secrets.token_hex(4)
         key = f"ctk_{prefix}_{secrets.token_urlsafe(24)}"
-        db.add(AccessKey(user_id=admin.id, name="lab-provision", prefix=prefix, key_hash=hash_access_key(key), is_active=True))
-        await db.commit()
+        with tenancy.tenant(org):
+            await tenancy.apply_to_session(db)
+            db.add(AccessKey(user_id=admin.id, name="lab-provision", prefix=prefix, key_hash=hash_access_key(key), is_active=True))
+            await db.commit()
+    return admin, key
+
+
+async def _drop_temp_key():
+    async with async_session() as db:
+        with tenancy.system():
+            await tenancy.apply_to_session(db)
+            await db.execute(delete(AccessKey).where(AccessKey.name == "lab-provision"))
+            await db.commit()
+
+
+async def main():
+    admin, key = await _temp_key()
+    async with async_session() as db:
         me = (admin.email or "").split("@")[0]
-        others = [str(u.id) for u in (await db.execute(select(User).where(User.id != admin.id, User.is_active.is_(True)))).scalars().all()
+        from app.models.organization import OrgMembership
+        member_ids = select(OrgMembership.user_id).join(Organization, Organization.id == OrgMembership.org_id).where(Organization.is_default.is_(True))
+        others = [str(u.id) for u in (await db.execute(select(User).where(User.id != admin.id, User.is_active.is_(True),
+                                                                          User.id.in_(member_ids)))).scalars().all()
                   if not u.entra_object_id.startswith("dev-mode")]
     c = httpx.AsyncClient(base_url=API, headers={"Authorization": f"Bearer {key}"}, timeout=60)
 
@@ -129,19 +151,12 @@ async def main():
               else "Aucun autre utilisateur : pas de règle d'accès créée (lancez « users » puis « provision » pour en avoir).")
     finally:
         await c.aclose()
-        async with async_session() as db:
-            await db.execute(delete(AccessKey).where(AccessKey.name == "lab-provision"))
-            await db.commit()
+        await _drop_temp_key()
 
 
 async def remove():
     """Remove the lab objects from Citadel (the audit trail is kept)."""
-    async with async_session() as db:
-        admin = (await db.execute(select(User).where(User.role == UserRole.ADMIN).order_by(User.created_at))).scalars().first()
-        prefix = secrets.token_hex(4)
-        key = f"ctk_{prefix}_{secrets.token_urlsafe(24)}"
-        db.add(AccessKey(user_id=admin.id, name="lab-provision", prefix=prefix, key_hash=hash_access_key(key), is_active=True))
-        await db.commit()
+    admin, key = await _temp_key()
     c = httpx.AsyncClient(base_url=API, headers={"Authorization": f"Bearer {key}"}, timeout=60)
 
     async def rm(path, label):
@@ -178,9 +193,7 @@ async def remove():
             await rm(f"/nodes/{labo['id']}", "nœud Labo")
     finally:
         await c.aclose()
-        async with async_session() as db:
-            await db.execute(delete(AccessKey).where(AccessKey.name == "lab-provision"))
-            await db.commit()
+        await _drop_temp_key()
 
 
 asyncio.run(remove() if "--remove" in sys.argv else main())
