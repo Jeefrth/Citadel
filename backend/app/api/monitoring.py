@@ -29,7 +29,7 @@ router = APIRouter()
 # ── Metrics collection ───────────────────────────────────
 
 
-@router.post("/{server_id}/metrics", response_model=MetricsRead)
+@router.post("/servers/{server_id}/metrics", response_model=MetricsRead)
 async def collect_metrics(
     server_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -103,7 +103,7 @@ async def collect_metrics(
     )
 
 
-@router.get("/{server_id}/metrics/latest", response_model=MetricsRead | None)
+@router.get("/servers/{server_id}/metrics/latest", response_model=MetricsRead | None)
 async def get_latest_metrics(
     server_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -138,7 +138,7 @@ async def get_latest_metrics(
     )
 
 
-@router.get("/{server_id}/metrics/history", response_model=list[MetricsHistoryPoint])
+@router.get("/servers/{server_id}/metrics/history", response_model=list[MetricsHistoryPoint])
 async def get_metrics_history(
     server_id: uuid.UUID,
     hours: int = Query(default=24, ge=1, le=720),

@@ -27,24 +27,29 @@ class ServerMetrics:
 
 
 _LINUX_METRICS_SCRIPT = r"""
-cpu_idle=$(top -bn1 | grep '%Cpu' | awk '{print $8}' | head -1)
-cpu_percent=$(echo "100 - ${cpu_idle:-0}" | bc 2>/dev/null || echo "0")
-cpu_count=$(nproc)
-load_avg=$(cat /proc/loadavg | awk '{print $1", "$2", "$3}')
+# /proc + awk only: no bc / top / free / ps (often missing on minimal servers)
+read_cpu() { awk '/^cpu /{idle=$5+$6; t=0; for(i=2;i<=NF;i++) t+=$i; print t, idle}' /proc/stat; }
+set -- $(read_cpu); t1=$1; i1=$2
+sleep 0.5
+set -- $(read_cpu); t2=$1; i2=$2
+cpu_percent=$(awk -v t="$((t2 - t1))" -v i="$((i2 - i1))" 'BEGIN{ if (t > 0) printf "%.1f", (t - i) * 100 / t; else print 0 }')
+cpu_count=$(nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo)
+load_avg=$(awk '{print $1", "$2", "$3}' /proc/loadavg)
 
-mem_total=$(free -m | awk '/^Mem:/{print $2}')
-mem_used=$(free -m | awk '/^Mem:/{print $3}')
-mem_percent=$(echo "scale=1; $mem_used * 100 / $mem_total" | bc 2>/dev/null || echo "0")
+mem_total=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo)
+mem_avail=$(awk '/^MemAvailable:/{printf "%d", $2/1024}' /proc/meminfo)
+mem_used=$(( ${mem_total:-0} - ${mem_avail:-0} ))
+mem_percent=$(awk -v u="$mem_used" -v t="${mem_total:-0}" 'BEGIN{ if (t > 0) printf "%.1f", u * 100 / t; else print 0 }')
 
-disk_total=$(df -BG / | awk 'NR==2{gsub("G",""); print $2}')
-disk_used=$(df -BG / | awk 'NR==2{gsub("G",""); print $3}')
-disk_percent=$(df / | awk 'NR==2{gsub("%",""); print $5}')
+disk_total=$(df -P -k / | awk 'NR==2{printf "%.1f", $2/1048576}')
+disk_used=$(df -P -k / | awk 'NR==2{printf "%.1f", $3/1048576}')
+disk_percent=$(df -P / | awk 'NR==2{gsub("%",""); print $5}')
 
-rx_bytes=$(cat /proc/net/dev | grep -v lo | awk 'NR>2{sum+=$2} END{print sum+0}')
-tx_bytes=$(cat /proc/net/dev | grep -v lo | awk 'NR>2{sum+=$10} END{print sum+0}')
+rx_bytes=$(awk -F'[: ]+' 'NR>2 && $2!="lo"{sum+=$3} END{print sum+0}' /proc/net/dev)
+tx_bytes=$(awk -F'[: ]+' 'NR>2 && $2!="lo"{sum+=$11} END{print sum+0}' /proc/net/dev)
 
 uptime_sec=$(awk '{print int($1)}' /proc/uptime)
-proc_count=$(ps aux --no-heading | wc -l)
+proc_count=$(ls -d /proc/[0-9]* 2>/dev/null | wc -l)
 
 echo "{\"cpu_percent\":${cpu_percent:-0},\"cpu_count\":${cpu_count:-1},\"load_average\":\"${load_avg}\",\"memory_total_mb\":${mem_total:-0},\"memory_used_mb\":${mem_used:-0},\"memory_percent\":${mem_percent:-0},\"disk_total_gb\":${disk_total:-0},\"disk_used_gb\":${disk_used:-0},\"disk_percent\":${disk_percent:-0},\"network_rx_bytes\":${rx_bytes:-0},\"network_tx_bytes\":${tx_bytes:-0},\"uptime_seconds\":${uptime_sec:-0},\"process_count\":${proc_count:-0}}"
 """

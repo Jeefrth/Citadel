@@ -98,7 +98,7 @@ Toutes ces étapes se font avec ton compte admin. Les noms `lab-*` sont résolus
 #### 0.3.6 Vérifications après ajout
 
 - [ ] **P13** Serveurs : 3 ou 4 serveurs, filtre étiquette `env=labo`, filtre nœud `Labo` (sous-nœud `Web` inclus), recherche `isolated`.
-- [ ] **P14** Fiche `lab-linux` > métriques : CPU, RAM et disque remontent après quelques minutes (compte par défaut).
+- [ ] **P14** Fiche `lab-linux` > **Collecter les métriques** : CPU, mémoire (environ 25 %), disque, charge, uptime et nombre de processus cohérents (comparer avec `docker exec lab-linux cat /proc/meminfo`). Recommencer 2 ou 3 fois : le graphique sur 24 h se remplit. Il n'y a pas de collecte automatique : seulement à la demande.
 - [ ] **P15** Traces : la page Journal d'audit n'a pas encore d'écran, vérifier en base : `docker compose exec db psql -U citadel -d citadel -c "select action, result from audit_logs order by timestamp desc limit 20"`. Attendu : création des credentials, des comptes, `server.test_connection`.
 
 #### 0.3.7 Règle d'accès de test
