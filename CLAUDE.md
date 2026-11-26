@@ -37,6 +37,7 @@
 - Opérations (fichiers, tâches, passerelles, Azure) : `docs/operations.md`
 - Kubernetes : `docs/kubernetes.md`
 - Multi-organisation (SaaS phase 1) : `docs/saas-phase1.md`
+- Règles par organisation et console plateforme (SaaS phase 2) : `docs/saas-phase2.md`
 - Connexion multi-fournisseurs (SaaS phase 3) : `docs/saas-phase3.md`
 - Plan de test manuel (recette) : `docs/plan-de-test.md`, laboratoire `scripts/test-lab.sh up|users|status|down`
 - Design de l'interface : `docs/design.md`
@@ -54,6 +55,7 @@
 - **Sprint A** : Session recording — enregistrement I/O terminal, replay xterm.js (play/pause/vitesse)
 - **Sprint B** : Mini-CA — certificats SSH éphémères Ed25519 (5min à 24h), zéro secret stocké
 - **Sprint C** : Hardening — MFA par session (popup Entra), command filter, timeout 30min, CA persistante
+- **SaaS phase 2** (11/2026) : réglages d'organisation réellement appliqués (liste d'adresses, limite de requêtes, inactivité, durées de certificat, enregistrement), numéros de demande par organisation, console plateforme. Voir `docs/saas-phase2.md`
 - **SaaS phase 3** (11/2026) : connexion OIDC multi-fournisseurs (boutons plateforme + SSO par organisation avec domaines, arrivée automatique, SSO imposé), sessions Citadel (jeton 10 min + cookie de renouvellement tournant), ré-authentification avant terminal, MSAL retiré. Voir `docs/saas-phase3.md`
 - **SaaS phase 1** (11/2026) : organisations (isolation ORM + RLS Postgres, rôle par appartenance, super-admin plateforme, invitations avec consentement, clé Transit et CA SSH par organisation, proxy SSH multi-org, suppression d'organisation). Voir `docs/saas-phase1.md`
 - **Lot 8** (11/2026) : Kubernetes (clusters, règles par espace de noms, logs, actions, shell dans un conteneur sur le cœur de session commun). Voir `docs/kubernetes.md`
@@ -165,7 +167,7 @@ Services dev : `guacd` (1.6.0, non publié, enregistre dans `data/recordings/raw
 5. **Command filter** : blocklist regex (rm -rf, mkfs, dd, fork bomb, shutdown, curl|sh…).
 6. **RBAC + règles d'accès** : 3 rôles (admin / operator / viewer). L'admin voit tout ; les autres ne voient que les serveurs accordés par une `AccessPolicy` (utilisateurs ou groupes × serveurs, nœuds avec sous-nœuds ou étiquettes × comptes × actions, fenêtre de validité). Le rôle sert de plafond (viewer : jamais `execute`). Un serveur invisible renvoie 404.
 7. **Async** : FastAPI + asyncio + asyncssh + asyncpg pour haute concurrence.
-8. **Timeout terminal** : 30 minutes d'inactivité.
+8. **Timeout terminal** : réglage `idle_timeout_minutes` de l'organisation (30 min par défaut).
 9. **Comptes** : un serveur a N comptes (`Account`) dont un « par défaut » utilisé par l'automatisation (monitoring, mises à jour, commandes). Secret = `Credential` référencé ou certificat éphémère. Comptes virtuels dans les règles : `@ALL`, `@USER` (partie locale de l'UPN + certificat), `@INPUT` (saisi à la connexion, jamais stocké).
 10. **RDP par ticket** : `POST /connect-ticket` contrôle les droits et résout le compte, puis le WebSocket n'accepte qu'un ticket Redis à usage unique (60 s). Aucun jeton ni mot de passe dans les URL (uvicorn journalise les query strings).
 11. **Clés API** : `ctk_<prefix>_<secret>`, seul le SHA-256 est stocké, héritent des droits de l'utilisateur, ne peuvent pas créer d'autres clés.
