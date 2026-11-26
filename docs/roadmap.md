@@ -141,7 +141,7 @@ Idées réunies après les phases SaaS 1 à 3. Effort : **S** (quelques jours), 
 ### SaaS (suite des phases)
 | Piste | Effort | Notes |
 |---|---|---|
-| ⭐ Phase 4 : connecteur sortant installé chez le client | L | Condition pour joindre les serveurs privés d'un client sans ouvrir de port. |
+| ⭐ Phase 4 : connecteur sortant installé chez le client | L | Condition pour joindre les serveurs privés d'un client sans ouvrir de port. **Un agent installé sur un serveur du site, qui découvre les serveurs existants** (détail plus bas). |
 | Phase 5 : produit (inscription, adresse par client, quotas, facturation, RGPD) | L | Deux grilles étudiées : à la personne (entreprises) ou à la ressource protégée avec sous-organisations (infogérants). |
 | Sous-organisations pour infogérants (parent / clients, facture consolidée) | M | Indispensable pour la grille « infogérance ». |
 | Marque blanche (logo, couleurs, domaine de l'infogérant) | M | |
@@ -213,10 +213,40 @@ Idées réunies après les phases SaaS 1 à 3. Effort : **S** (quelques jours), 
 | Accès de secours (break-glass) scellé avec rotation après usage | M | |
 | Haute disponibilité (plusieurs instances, sauvegarde / restauration documentée) | L | |
 
+### Phase 4 : le connecteur est un agent qui découvre le réseau (décision JF, 26/11/2026)
+- **Un agent par site**, installé sur un serveur du réseau du client (Linux ou Windows, paquet ou conteneur). Il ouvre une **connexion sortante** vers Citadel (pas de port entrant chez le client) et relaie les sessions SSH, RDP, WinRM, Kubernetes et les tâches vers les serveurs de son site. Il remplace les passerelles actuelles pour ce site.
+- **Découverte des serveurs existants** : l'agent scanne les plages réseau que l'admin de l'organisation lui confie explicitement (jamais d'autres) :
+  - hôtes actifs, ports d'administration (22 SSH, 3389 RDP, 5985/5986 WinRM, 443, 6443 Kubernetes, équipements réseau) ;
+  - identification du système (bannière SSH, RDP, SMB, nom DNS inverse) ;
+  - planification (au déploiement, puis périodique) et rythme limité pour ne pas perturber le réseau.
+- **Les serveurs trouvés ne sont pas ajoutés d'office** : ils arrivent dans une liste « à valider », comme les VM cloud en attente aujourd'hui (importer avec nœud, zone et étiquettes, ou ignorer). Un serveur disparu est signalé.
+- **Sécurité de l'agent** :
+  - enrôlement par jeton à usage unique, puis certificat propre à l'agent, révocable depuis Citadel ;
+  - l'agent n'exécute que des actions demandées par Citadel pour une session ou une tâche autorisée, et ne donne jamais de shell libre ;
+  - plages de scan et actions journalisées dans l'audit de l'organisation ;
+  - mise à jour signée de l'agent.
+- **Socle de la suite d'exploitation** (axe suivant) : le même agent portera plus tard l'inventaire, la sauvegarde et la collecte de supervision.
+
+## Axe : suite d'exploitation (idée du 26/11/2026)
+Faire de Citadel une suite de gestion d'infrastructure où chaque action passe par le bastion (droits, validation, enregistrement, audit). C'est le différenciateur face aux RMM du marché, cibles fréquentes des attaquants. Existant : inventaire, mises à jour, supervision, tâches et Ansible, SFTP, rotation des secrets, Kubernetes. Modules envisagés, activables par organisation (ex. Citadel Access / Ops / Backup) :
+
+| Module | Contenu | Effort |
+|---|---|---|
+| Sauvegarde | Orchestration (restic ou Borg vers S3, Azure, SFTP), planning, rétention, chiffrement par organisation, **tests de restauration automatiques**, alerte si une sauvegarde manque ; pilotage de Veeam ou Proxmox Backup Server en option | L |
+| Mises à jour v2 | Vagues (test, pilote, production), fenêtres de maintenance, politique de redémarrage, report, conformité par client | M |
+| Inventaire complet | Matériel, logiciels, licences, garanties, cycle de vie, export CMDB | M |
+| Déploiement logiciel | Catalogue de paquets et scripts, déploiement par groupe | M |
+| Conformité de configuration | Contrôles CIS ou base maison, score, dérive, correction par playbook validé | M |
+| Supervision v2 | Services, ports, certificats, sauvegardes, escalade (Teams, mail, astreinte), page d'état | M |
+| Documentation vivante | Fiche par serveur générée (rôle, contacts, procédures, dernières interventions) | S |
+
+Risques : dispersion (avancer module par module, chacun utile seul), concurrence des RMM établis (rester sur l'angle sécurité et audit), responsabilité sur les sauvegardes (d'où les tests de restauration).
+
 ### Ordre suggéré
-1. Phase 4 : connecteur sortant.
+1. Phase 4 : connecteur sortant (agent par site avec découverte des serveurs).
 2. Outil en ligne de commande.
 3. Accès juste à temps via Teams + ticket obligatoire.
 4. Résumé des sessions par IA (démonstration).
 5. Conformité du poste (Intune) et vulnérabilités Tenable avant connexion.
-6. Phase 5 : produit et facturation, selon la grille retenue.
+6. Mises à jour v2, puis module Sauvegarde (suite d'exploitation).
+7. Phase 5 : produit et facturation, selon la grille retenue.
