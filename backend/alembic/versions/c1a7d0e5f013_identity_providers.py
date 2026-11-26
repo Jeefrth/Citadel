@@ -37,6 +37,7 @@ def upgrade() -> None:
         sa.Column("encrypted_client_secret", sa.LargeBinary(), nullable=True),
         sa.Column("scopes", sa.String(500), nullable=False, server_default="openid email profile"),
         sa.Column("domains", sa.JSON(), nullable=False, server_default="[]"),
+        sa.Column("verified_domains", sa.JSON(), nullable=False, server_default="[]"),
         sa.Column("jit_role", userrole, nullable=True),
         sa.Column("enforced", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -102,6 +103,8 @@ def upgrade() -> None:
             "UPDATE identity_providers SET domains = COALESCE((SELECT json_agg(DISTINCT lower(split_part(email, '@', 2))) "
             "FROM users WHERE email LIKE '%@%' AND entra_object_id NOT LIKE 'lab-%'), '[]'::json) "
             "WHERE id = CAST(:pid AS uuid)").bindparams(pid=pid))
+        # the platform already trusted this tenant: its domains count as approved
+        op.execute(sa.text("UPDATE identity_providers SET verified_domains = domains WHERE id = CAST(:pid AS uuid)").bindparams(pid=pid))
 
 
 def downgrade() -> None:

@@ -151,6 +151,18 @@ async def verify(db: AsyncSession, token: str) -> tuple[AuthSession, dict]:
     return s, claims
 
 
+async def cookie_matches(db: AsyncSession, token: str, session_id, user_id) -> bool:
+    """The refresh cookie sent belongs to this live session of this person
+    (popup flows must come back to the browser of the session that started them)."""
+    if not token or not session_id:
+        return False
+    s = await db.get(AuthSession, uuid.UUID(str(session_id)))
+    if s is None or s.revoked_at is not None or s.expires_at <= _now() or str(s.user_id) != str(user_id):
+        return False
+    h = _hash(token)
+    return secrets.compare_digest(h, s.refresh_hash) or (s.previous_hash is not None and secrets.compare_digest(h, s.previous_hash))
+
+
 async def revoke(db: AsyncSession, s: AuthSession) -> None:
     s.revoked_at = s.revoked_at or _now()
 

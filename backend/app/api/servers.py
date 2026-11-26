@@ -453,6 +453,8 @@ async def create_connect_ticket(
     """One-time, 60 s ticket for the RDP WebSocket (no token/password in URLs)."""
     if body.protocol != "rdp":
         raise HTTPException(status_code=400, detail="Only 'rdp' tickets are supported")
+    from app.core.auth import require_recent_auth
+    await require_recent_auth(db, user)   # same rule as terminals: sign-in at the provider just before
     server, grant = await require_server(db, user, server_id, PolicyAction.CONNECT.value)
     account = resolve_for_user(
         server, grant, user,

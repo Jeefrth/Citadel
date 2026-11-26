@@ -36,5 +36,17 @@ Décisions validées par JF le 25/11/2026 :
 - Corrigé au passage : suppression d'une personne bloquée par la contrainte appareil du journal des connexions (contrainte désormais vérifiée à la validation) ; scripts du laboratoire adaptés aux organisations.
 - Front (étape 7) en cours.
 
+## Revue de sécurité (26/11/2026, 3 relecteurs + vérification adverse)
+Corrigé :
+- Usurpation de n'importe quel compte Entra : la détection « Entra multi-tenant » était une recherche de texte dans l'émetteur ; un fournisseur d'organisation pointant vers son propre serveur pouvait signer des jetons au nom de n'importe qui. Désormais : URL exacte, et tous les points d'accès (clés, jeton, autorisation) doivent être sur l'hôte de l'émetteur (Google : googleapis.com) ; un fournisseur « entra » doit être sur login.microsoftonline.com.
+- Captation d'invitations : un SSO d'organisation pouvait affirmer n'importe quelle adresse « vérifiée ». Une adresse n'est retenue (compte, invitations) que si elle vient d'un fournisseur plateforme ou d'un SSO d'organisation pour un domaine **approuvé par un super-admin** (`verified_domains`, `PUT /api/platform/identity-providers/{id}/verified-domains`, demandes en attente : `GET /api/platform/domain-requests`). La découverte par adresse n'utilise que les domaines approuvés.
+- Secret `AZURE_CLIENT_SECRET` envoyable à un serveur tiers : réservé au fournisseur Entra de l'org par défaut, tenant et application exacts. Un changement d'émetteur, d'application ou de type efface le secret stocké.
+- Connexion forcée (login CSRF) : cookie de liaison `citadel_oidc` posé au départ et exigé au retour ; les fenêtres (ré-authentification, liaison) exigent le cookie de la session qui les a demandées.
+- Injection de script dans la fenêtre de retour : plus de script en ligne (données en JSON échappé + `/api/auth/popup.js`, CSP stricte), l'erreur du fournisseur n'est jamais reflétée.
+- Ré-authentification sans `auth_time` acceptée : refusée ; l'heure de connexion doit être postérieure à la demande.
+- RDP ouvrable sans ré-authentification récente : le ticket RDP l'exige aussi.
+- Requêtes du serveur vers des adresses internes (SSRF) via l'émetteur : adresses privées, locales et métadonnées refusées, pas de redirection suivie, réponse du fournisseur non renvoyée.
+
 ## Prérequis côté Entra (JF)
 L'application `srv_gest` est aujourd'hui de type SPA (pas de secret). L'échange du code se fait désormais côté serveur : ajouter une plateforme **Web** avec l'URI de redirection `http://localhost:5173/api/auth/callback` et créer un **secret client** (à mettre dans `.env` : `AZURE_CLIENT_SECRET`, repris par la migration dans le fournisseur).
+La ré-authentification exige la revendication `auth_time` dans le jeton d'ID : dans l'application, **Configuration des jetons > Ajouter une revendication facultative > ID > auth_time**.

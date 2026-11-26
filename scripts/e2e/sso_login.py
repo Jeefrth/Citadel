@@ -142,7 +142,7 @@ async def main():
         with tenancy.system():
             plat = IdentityProvider(org_id=None, kind="oidc", name="Mock plateforme", issuer=IDP, client_id="citadel-platform")
             org_p = IdentityProvider(org_id=acme_id, kind="okta", name="Okta Acme", issuer=IDP, client_id="citadel-acme",
-                                     domains=["acme.test"], jit_role=UserRole.VIEWER)
+                                     domains=["acme.test", "pending.test"], verified_domains=["acme.test"], jit_role=UserRole.VIEWER)
             db.add_all([plat, org_p])
             db.add(OrgInvitation(org_id=default.id, email="carol@ext.test", role=UserRole.OPERATOR))
             db.add(OrgInvitation(org_id=default.id, email="dave@ext.test", role=UserRole.OPERATOR))
@@ -158,6 +158,8 @@ async def main():
             d = (await c.post(f"{API}/api/auth/discover", json={"value": "acme-sso"})).json()
             check([p["id"] for p in d] == [str(org_pid)], "discovery by organisation identifier")
             check((await c.post(f"{API}/api/auth/discover", json={"value": "x@unknown.test"})).json() == [], "no hint for unknown domains")
+            check((await c.post(f"{API}/api/auth/discover", json={"value": "x@pending.test"})).json() == [],
+                  "a domain not approved by the platform is not used for discovery")
 
         # Unknown person, no invitation, platform provider: refused, nothing created
         r = await sign_in(plat_id, "eve")
@@ -187,6 +189,13 @@ async def main():
         async with httpx.AsyncClient(timeout=20) as c:
             again = await c.get(r.callback_url)
         check("auth_error" in again.headers.get("location", ""), "a callback cannot be replayed")
+        # login CSRF: a callback URL started in the attacker's browser, opened in the victim's
+        async with httpx.AsyncClient(timeout=20) as attacker, httpx.AsyncClient(timeout=20) as victim:
+            r0 = await attacker.get(f"{API}/api/auth/login/{org_pid}", params={"login_hint": "alice"})
+            r0 = await attacker.get(r0.headers["location"])
+            rv = await victim.get(r0.headers["location"])
+        check("auth_error" in rv.headers.get("location", "") and cookie_of(rv) is None,
+              "callback opened in another browser refused (login CSRF)")
 
         # Domain restriction of the organisation SSO
         r = await sign_in(org_pid, "bob")
@@ -210,6 +219,20 @@ async def main():
             check(len(ids) == 1 and ids[0]["provider"]["name"] == "Mock plateforme", "identity listed in Mon compte")
             un = await c.delete(f"{API}/api/auth/identities/{ids[0]['id']}", headers={"Authorization": f"Bearer {tokc}"})
             check(un.status_code == 400, "cannot remove the only sign-in method")
+
+        # An organisation SSO cannot claim invitations for addresses outside its approved domains
+        async with async_session() as db:
+            with tenancy.system():
+                db.add(OrgInvitation(org_id=default.id, email="eve@nowhere.test", role=UserRole.ADMIN))
+                await db.execute(update(IdentityProvider).where(IdentityProvider.id == org_pid).values(jit_role=None))
+                await db.commit()
+        r = await sign_in(org_pid, "eve")
+        check("auth_error" in r.headers.get("location", "") and cookie_of(r) is None,
+              "org SSO asserting a verified address outside its approved domains cannot claim an invitation")
+        async with async_session() as db:
+            with tenancy.system():
+                await db.execute(update(IdentityProvider).where(IdentityProvider.id == org_pid).values(jit_role=UserRole.VIEWER))
+                await db.commit()
 
         # Invitation but unverified e-mail: refused
         r = await sign_in(plat_id, "dave")
@@ -249,8 +272,16 @@ async def main():
             qs = parse_qs(urlparse(u).query)
             check(qs.get("prompt") == ["login"] and qs.get("max_age") == ["0"], "re-authentication forces a new sign-in")
             r = await c.get(u + "&" + urlencode({"login_hint": "alice"}))
+            r = await c.get(r.headers["location"])   # no session cookie: another browser
+            check('"ok": false' in r.text, "re-authentication popup refused outside the session's browser")
+        async with httpx.AsyncClient(timeout=20, cookies={"citadel_refresh": ck3}) as c:
+            u = (await c.post(f"{API}/api/auth/reauth", headers={"Authorization": f"Bearer {tok}"})).json()["url"]
+            r = await c.get(u + "&" + urlencode({"login_hint": "alice"}))
             r = await c.get(r.headers["location"])
-            check(r.status_code == 200 and '"ok": true' in r.text, "re-authentication popup reports success")
+            check(r.status_code == 200 and '"ok": true' in r.text and "<script>" not in r.text.split("application/json")[0],
+                  "re-authentication popup reports success (no inline script)")
+            x = await c.get(f"{API}/api/auth/callback", params={"state": "x", "error": "</script><script>alert(1)</script>"})
+            check("alert(1)" not in x.text and "alert(1)" not in x.headers.get("location", ""), "provider error never reflected")
         rr = await refresh(ck3)
         check(rr.json()["auth_time"] > old_auth, "session auth_time moved forward")
         tok = rr.json()["access_token"]

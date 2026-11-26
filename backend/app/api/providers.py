@@ -46,6 +46,8 @@ class ProviderIn(BaseModel):
 def _read(p: IdentityProvider) -> dict:
     return {"id": str(p.id), "kind": p.kind, "name": p.name, "issuer": p.issuer, "client_id": p.client_id,
             "has_secret": p.encrypted_client_secret is not None, "scopes": p.scopes, "domains": p.domains or [],
+            "verified_domains": p.verified_domains or [],
+            "pending_domains": [d for d in (p.domains or []) if d not in (p.verified_domains or [])],
             "jit_role": p.jit_role.value if p.jit_role else None, "enforced": p.enforced, "is_active": p.is_active,
             "created_at": p.created_at, "redirect_uri": oidc.redirect_uri()}
 
@@ -65,8 +67,10 @@ def _clean_domains(domains: list[str]) -> list[str]:
 async def _validate(db: AsyncSession, data: ProviderIn, org_id, exclude=None) -> list[str]:
     issuer = data.issuer.strip().rstrip("/")
     u = urlparse(issuer)
-    if u.scheme != "https" and not (settings.DEV_MODE or settings.OIDC_ALLOW_HTTP):
+    if u.scheme != "https" and not settings.OIDC_ALLOW_HTTP:
         raise HTTPException(status_code=400, detail="L'émetteur doit être en https://")
+    if data.kind == "entra" and u.netloc != oidc.MS_HOST:
+        raise HTTPException(status_code=400, detail="Un fournisseur Microsoft Entra a un émetteur sur login.microsoftonline.com")
     if data.jit_role == UserRole.ADMIN:
         raise HTTPException(status_code=400, detail="L'arrivée automatique ne peut pas donner le rôle administrateur")
     if "openid" not in data.scopes.split():
@@ -77,7 +81,8 @@ async def _validate(db: AsyncSession, data: ProviderIn, org_id, exclude=None) ->
         raise HTTPException(status_code=400, detail=f"Découverte OIDC impossible : {e}")
     domains = _clean_domains(data.domains)
     if domains:
-        # a domain belongs to one organisation (discovery from an address must be unambiguous)
+        # a domain belongs to one organisation (discovery from an address must be unambiguous);
+        # requested domains only count once a platform admin approved them
         q = select(IdentityProvider).where(IdentityProvider.org_id.is_not(None))
         if org_id is not None:
             q = q.where(IdentityProvider.org_id != org_id)
@@ -89,10 +94,15 @@ async def _validate(db: AsyncSession, data: ProviderIn, org_id, exclude=None) ->
 
 
 def _apply(p: IdentityProvider, data: ProviderIn, domains: list[str]) -> None:
-    p.kind, p.name, p.issuer, p.client_id = data.kind, data.name.strip(), data.issuer.strip().rstrip("/"), data.client_id.strip()
+    issuer, client_id = data.issuer.strip().rstrip("/"), data.client_id.strip()
+    moved = p.issuer is not None and (p.issuer != issuer or p.client_id != client_id or p.kind != data.kind)
+    p.kind, p.name, p.issuer, p.client_id = data.kind, data.name.strip(), issuer, client_id
     p.scopes, p.domains, p.jit_role, p.is_active = data.scopes.strip(), domains, data.jit_role, data.is_active
+    p.verified_domains = [d for d in (p.verified_domains or []) if d in domains and not moved]
     if data.client_secret:
         p.encrypted_client_secret = encrypt_value(data.client_secret)
+    elif moved:
+        p.encrypted_client_secret = None   # never send the stored secret to another server or application
 
 
 def _check_enforce(user: User, p: IdentityProvider, enforced: bool) -> None:
@@ -208,3 +218,43 @@ async def platform_delete(provider_id: uuid.UUID, db: AsyncSession = Depends(get
         db.add(AuditLog(org_id=None, user_id=user.id, action="idp.delete", result=f"plateforme {p.name}"))
         await db.delete(p)
         await db.commit()
+
+
+# ── Domain approval (platform admins) ──
+
+class DomainsIn(BaseModel):
+    domains: list[str] = Field(default_factory=list, max_length=50)
+
+
+@router.get("/platform/domain-requests")
+async def domain_requests(db: AsyncSession = Depends(get_db), _: User = Depends(require_platform_admin)):
+    """Organisation SSO with domains waiting for approval."""
+    from app.models.organization import Organization
+    rows = (await db.execute(select(IdentityProvider, Organization).join(
+        Organization, Organization.id == IdentityProvider.org_id))).all()
+    return [{**_read(p), "org": {"id": str(o.id), "name": o.name, "slug": o.slug}} for p, o in rows
+            if any(d not in (p.verified_domains or []) for d in (p.domains or []))]
+
+
+@router.put("/platform/identity-providers/{provider_id}/verified-domains")
+async def set_verified_domains(provider_id: uuid.UUID, data: DomainsIn, db: AsyncSession = Depends(get_db),
+                               user: User = Depends(require_platform_admin)):
+    """Approve (or withdraw) domains of an organisation SSO, after checking the
+    organisation really owns them (out of band: DNS, contract...)."""
+    p = await db.get(IdentityProvider, provider_id)
+    if p is None or p.org_id is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    wanted = _clean_domains(data.domains)
+    unknown = [d for d in wanted if d not in (p.domains or [])]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Domaines non demandés par l'organisation : {', '.join(unknown)}")
+    for other in (await db.execute(select(IdentityProvider).where(
+            IdentityProvider.org_id.is_not(None), IdentityProvider.org_id != p.org_id))).scalars().all():
+        taken = set(wanted) & {d.lower() for d in (other.verified_domains or [])}
+        if taken:
+            raise HTTPException(status_code=409, detail=f"Domaine déjà approuvé pour une autre organisation : {', '.join(sorted(taken))}")
+    p.verified_domains = wanted
+    async with tenancy.system_in(db):
+        db.add(AuditLog(org_id=p.org_id, user_id=user.id, action="idp.domains.approve", result=f"{p.name}: {', '.join(wanted) or '-'}"))
+        await db.commit()
+    return _read(p)

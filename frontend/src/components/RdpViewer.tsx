@@ -44,7 +44,11 @@ export default function RdpViewer({
         });
         ticket = res.ticket;
       } catch (e) {
-        if (!cancelled) setTicketError(e instanceof Error ? e.message : "erreur");
+        const msg = e instanceof Error ? e.message : "erreur";
+        if (!cancelled)
+          setTicketError(
+            msg.includes("reauth_required") ? "Authentification trop ancienne : fermez cet onglet et rouvrez la connexion." : msg,
+          );
         onDisconnected?.();
         return;
       }

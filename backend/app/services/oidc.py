@@ -8,13 +8,16 @@ provider (Entra, Google, Okta, generic OIDC).
   azp); nothing from the provider is trusted before that.
 """
 
+import asyncio
 import base64
 import hashlib
+import ipaddress
 import json
+import logging
 import secrets
 import time
-from dataclasses import dataclass
-from urllib.parse import urlencode
+from dataclasses import dataclass, field
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import redis.asyncio as aioredis
@@ -23,6 +26,8 @@ from jose.exceptions import JOSEError
 
 from app.core.config import settings
 
+logger = logging.getLogger("citadel.oidc")
+MS_HOST = "login.microsoftonline.com"
 STATE_PREFIX = "citadel:oidc:state:"
 STATE_TTL = 600
 CACHE_TTL = 3600
@@ -50,8 +55,35 @@ def redirect_uri() -> str:
 
 
 def _is_entra_multi(issuer: str) -> bool:
-    """Entra 'organizations' / 'common' authority: the real issuer carries the user's tenant."""
-    return any(f"login.microsoftonline.com/{t}/" in issuer + "/" for t in ("organizations", "common", "consumers"))
+    """Entra 'organizations' / 'common' authority: the real issuer carries the
+    user's tenant. Exact URL only: anything else is an ordinary issuer."""
+    u = urlparse(issuer.rstrip("/"))
+    return u.scheme == "https" and u.netloc == MS_HOST and u.path in ("/organizations/v2.0", "/common/v2.0", "/consumers/v2.0")
+
+
+def _endpoint_ok(issuer: str, url: str) -> bool:
+    """Endpoints and keys of a provider live on its own host (Google: googleapis.com).
+    A discovery document pointing its keys elsewhere is refused."""
+    ih, h = urlparse(issuer).hostname or "", urlparse(url).hostname or ""
+    return h == ih or (ih == "accounts.google.com" and h.endswith(".googleapis.com"))
+
+
+async def _check_public(url: str) -> None:
+    """No request to private, loopback, link-local or reserved addresses (SSRF
+    from a provider configured by an organisation admin)."""
+    if settings.OIDC_ALLOW_HTTP:
+        return   # tests with a local provider
+    u = urlparse(url)
+    if u.scheme != "https" or not u.hostname:
+        raise OIDCError("Adresse du fournisseur refusée (https obligatoire)")
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(u.hostname, u.port or 443)
+    except OSError as e:
+        raise OIDCError("Fournisseur introuvable (DNS)") from e
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global or ip.is_multicast:
+            raise OIDCError("Adresse du fournisseur refusée (réseau interne)")
 
 
 async def discovery(issuer: str) -> dict:
@@ -59,8 +91,9 @@ async def discovery(issuer: str) -> dict:
     hit = _discovery.get(issuer)
     if hit and hit[0] > time.time():
         return hit[1]
+    await _check_public(issuer)
     try:
-        async with httpx.AsyncClient(timeout=_http_timeout) as c:
+        async with httpx.AsyncClient(timeout=_http_timeout, follow_redirects=False) as c:
             r = await c.get(issuer + "/.well-known/openid-configuration")
             r.raise_for_status()
             doc = r.json()
@@ -70,8 +103,11 @@ async def discovery(issuer: str) -> dict:
     if not _is_entra_multi(issuer) and doc.get("issuer", "").rstrip("/") != issuer:
         raise OIDCError("Document de découverte d'un autre émetteur")
     for k in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
-        if not str(doc.get(k, "")).startswith("https://") and not (settings.DEV_MODE or settings.OIDC_ALLOW_HTTP):
+        url = str(doc.get(k, ""))
+        if not url.startswith("https://") and not settings.OIDC_ALLOW_HTTP:
             raise OIDCError("Point d'accès du fournisseur non HTTPS")
+        if not _endpoint_ok(issuer, url):
+            raise OIDCError("Le document de découverte désigne un autre serveur")
     _discovery[issuer] = (time.time() + CACHE_TTL, doc)
     return doc
 
@@ -80,7 +116,8 @@ async def _jwks_for(uri: str, force: bool = False) -> dict:
     hit = _jwks.get(uri)
     if hit and hit[0] > time.time() and not force:
         return hit[1]
-    async with httpx.AsyncClient(timeout=_http_timeout) as c:
+    await _check_public(uri)
+    async with httpx.AsyncClient(timeout=_http_timeout, follow_redirects=False) as c:
         r = await c.get(uri)
         r.raise_for_status()
         keys = r.json()
@@ -101,15 +138,17 @@ class Flow:
     return_to: str = "/"
     user_id: str | None = None
     session_id: str | None = None
+    started: float = field(default_factory=time.time)
+    binding: str | None = None   # hash of the browser-binding cookie (sign-in)
 
 
 async def start(provider, purpose: str, return_to: str = "/", user_id=None, session_id=None,
-                login_hint: str | None = None, force_login: bool = False) -> str:
+                login_hint: str | None = None, force_login: bool = False, binding: str | None = None) -> str:
     """Authorization URL for this provider; the flow state is kept server side."""
     doc = await discovery(provider.issuer)
     state, nonce, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
     flow = Flow(str(provider.id), purpose, nonce, verifier, return_to, str(user_id) if user_id else None,
-                str(session_id) if session_id else None)
+                str(session_id) if session_id else None, binding=binding)
     await _r().set(STATE_PREFIX + state, json.dumps(flow.__dict__), ex=STATE_TTL)
     params = {
         "response_type": "code",
@@ -148,17 +187,15 @@ async def finish(provider, flow: Flow, code: str, client_secret: str | None) -> 
             data["client_secret"] = client_secret
         else:
             auth = (provider.client_id, client_secret)
+    await _check_public(doc["token_endpoint"])
     try:
-        async with httpx.AsyncClient(timeout=_http_timeout) as c:
+        async with httpx.AsyncClient(timeout=_http_timeout, follow_redirects=False) as c:
             r = await c.post(doc["token_endpoint"], data=data, auth=auth, headers={"Accept": "application/json"})
     except httpx.HTTPError as e:
         raise OIDCError(f"Fournisseur injoignable ({type(e).__name__})") from e
     if r.status_code != 200:
-        try:
-            err = r.json().get("error_description") or r.json().get("error")
-        except ValueError:
-            err = r.text[:200]
-        raise OIDCError(f"Le fournisseur a refusé l'échange du code : {str(err)[:200]}")
+        logger.warning("token endpoint of %s refused the code: %s %s", provider.issuer, r.status_code, r.text[:300])
+        raise OIDCError("Le fournisseur a refusé l'échange du code (détails dans le journal du serveur)")
     tokens = r.json()
     id_token = tokens.get("id_token")
     if not id_token:

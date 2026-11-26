@@ -29,6 +29,9 @@ from app.services import oidc, sessions
 
 router = APIRouter()
 REFRESH_HEADER = "X-Citadel-Refresh"   # custom header: a cross-site form cannot send it (CSRF)
+BIND_COOKIE = "citadel_oidc"           # ties a sign-in to the browser that started it (login CSRF)
+OAUTH_ERRORS = {"access_denied": "Connexion annulée", "login_required": "Connexion requise chez le fournisseur",
+                "interaction_required": "Le fournisseur demande une action", "consent_required": "Consentement requis chez le fournisseur"}
 
 
 def _provider_read(p: IdentityProvider) -> dict:
@@ -80,25 +83,52 @@ async def discover(data: DiscoverIn, db: AsyncSession = Depends(get_db)):
 @router.get("/login/{provider_id}")
 async def login(provider_id: str, return_to: str = "/", login_hint: str | None = None,
                 db: AsyncSession = Depends(get_db)):
+    import hashlib
+    import secrets as _secrets
     p = await _active_provider(db, provider_id)
+    bind = _secrets.token_urlsafe(32)
     try:
-        url = await oidc.start(p, "login", _safe_return(return_to), login_hint=(login_hint or "")[:255] or None)
+        url = await oidc.start(p, "login", _safe_return(return_to), login_hint=(login_hint or "")[:255] or None,
+                               binding=hashlib.sha256(bind.encode()).hexdigest())
     except oidc.OIDCError as e:
         return RedirectResponse(f"/?auth_error={quote(str(e))}", status_code=302)
-    return RedirectResponse(url, status_code=302)
+    resp = RedirectResponse(url, status_code=302)
+    resp.set_cookie(BIND_COOKIE, bind, max_age=oidc.STATE_TTL, httponly=True, samesite="lax", path="/api/auth",
+                    secure=settings.PUBLIC_URL.startswith("https://"))
+    return resp
 
 
 # ── Provider callback ──
 
 def _popup_result(kind: str, ok: bool, message: str = "") -> HTMLResponse:
-    """Page shown in the popup (re-authentication, linking): tells the app and closes."""
-    origin = settings.PUBLIC_URL.rstrip("/")
-    payload = json.dumps({"type": f"citadel-{kind}", "ok": ok, "message": message})
-    body = f"""<!doctype html><meta charset="utf-8"><title>Citadel</title>
-<p style="font-family:sans-serif">{html.escape(message or ("Terminé, vous pouvez fermer cette fenêtre." if ok else "Échec."))}</p>
-<script>try {{ window.opener && window.opener.postMessage({payload}, {json.dumps(origin)}); }} catch (e) {{}}
-setTimeout(function () {{ window.close(); }}, {300 if ok else 4000});</script>"""
-    return HTMLResponse(body, headers={"Cache-Control": "no-store"})
+    """Page shown in the popup (re-authentication, linking): tells the app and
+    closes. No inline script (CSP script-src 'self'): the data sits in an inert
+    JSON block, escaped for HTML, and /api/auth/popup.js posts it."""
+    data = {"type": f"citadel-{kind}", "ok": ok, "message": message, "origin": settings.PUBLIC_URL.rstrip("/")}
+    blob = json.dumps(data).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    text = html.escape(message or ("Terminé, vous pouvez fermer cette fenêtre." if ok else "Échec."))
+    body = (f'<!doctype html><meta charset="utf-8"><title>Citadel</title>'
+            f'<p style="font-family:sans-serif">{text}</p>'
+            f'<script type="application/json" id="citadel-result">{blob}</script>'
+            f'<script src="/api/auth/popup.js"></script>')
+    return HTMLResponse(body, headers={"Cache-Control": "no-store", "Content-Security-Policy":
+                                       "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'"})
+
+
+POPUP_JS = """(function () {
+  var el = document.getElementById("citadel-result");
+  if (!el) return;
+  var d = JSON.parse(el.textContent);
+  try { if (window.opener) window.opener.postMessage({type: d.type, ok: d.ok, message: d.message}, d.origin); } catch (e) {}
+  setTimeout(function () { window.close(); }, d.ok ? 300 : 4000);
+})();
+"""
+
+
+@router.get("/popup.js")
+async def popup_js():
+    from fastapi.responses import Response
+    return Response(POPUP_JS, media_type="application/javascript", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/callback")
@@ -117,8 +147,17 @@ async def callback(request: Request, state: str = "", code: str = "", error: str
             return _popup_result(flow.purpose, False, msg)
         return RedirectResponse(f"/?auth_error={quote(msg)}", status_code=302)
 
-    if error:
-        return fail(f"Connexion annulée ou refusée par le fournisseur ({error})"[:300])
+    if error:   # never reflect what the provider (or anyone crafting the URL) sent
+        return fail(OAUTH_ERRORS.get(error, "Le fournisseur a refusé la connexion"))
+    # The callback must come back to the browser that started the flow
+    import hashlib
+    if flow.purpose == "login":
+        bind = request.cookies.get(BIND_COOKIE, "")
+        if not flow.binding or not bind or hashlib.sha256(bind.encode()).hexdigest() != flow.binding:
+            return fail("Connexion commencée dans un autre navigateur : recommencez")
+    else:   # popups: the browser holds the session that asked for them
+        if not await sessions.cookie_matches(db, request.cookies.get(sessions.COOKIE, ""), flow.session_id, flow.user_id):
+            return fail("Fenêtre ouverte hors de votre session : recommencez")
     try:
         provider = await _active_provider(db, flow.provider_id)
         claims = await oidc.finish(provider, flow, code, await login_svc.client_secret(db, provider))
@@ -146,6 +185,7 @@ async def callback(request: Request, state: str = "", code: str = "", error: str
     await db.commit()
     resp = RedirectResponse(_safe_return(flow.return_to), status_code=302)
     resp.set_cookie(value=refresh, **sessions.cookie_kwargs())
+    resp.delete_cookie(BIND_COOKIE, path="/api/auth")
     return resp
 
 
@@ -159,8 +199,11 @@ async def _finish_reauth(db, flow, provider, ident, claims) -> HTMLResponse:
         return _popup_result("reauth", False, "Ce n'est pas le compte de la session en cours")
     auth_time = claims.get("auth_time")
     now = datetime.now(timezone.utc)
-    when = datetime.fromtimestamp(int(auth_time), timezone.utc) if auth_time else now
-    if (now - when).total_seconds() > 300:   # the provider did not actually ask again
+    if not auth_time:
+        return _popup_result("reauth", False, "Le fournisseur n'indique pas l'heure de connexion (claim auth_time) : "
+                                               "ré-authentification impossible, voir la documentation")
+    when = datetime.fromtimestamp(int(auth_time), timezone.utc)
+    if when.timestamp() < flow.started - 5:   # sign-in older than this request: not asked again
         return _popup_result("reauth", False, "Le fournisseur n'a pas redemandé la connexion")
     s.auth_time, s.provider_id = min(when, now), provider.id
     await db.commit()

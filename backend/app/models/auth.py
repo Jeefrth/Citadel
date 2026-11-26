@@ -31,6 +31,9 @@ class IdentityProvider(UUIDMixin, Base):
     scopes: Mapped[str] = mapped_column(String(500), nullable=False, default="openid email profile")
     # e-mail domains of the organisation: discovery from an address, and only these addresses accepted
     domains: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # domains a platform admin has approved for this organisation: only these are used
+    # for discovery from an address and make an e-mail of the provider trusted
+    verified_domains: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # arrival without invitation (JIT): None = invitation required
     jit_role: Mapped[UserRole | None] = mapped_column(Enum(UserRole, name="userrole", create_type=False), nullable=True)
     enforced: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)   # members must sign in through it
