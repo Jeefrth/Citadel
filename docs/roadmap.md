@@ -84,7 +84,7 @@ L'objectif des sprints D / E / F est de transformer Citadel d'un bastion fonctio
 - En complément de MFA Entra, second facteur hardware obligatoire pour le rôle `admin`.
 - Bibliothèque `webauthn` Python, UI d'enrollment.
 
-#### F2. Rate limit affiné + IP allowlist
+#### F2. Rate limit affiné + IP allowlist (✅ en partie fait en SaaS phase 2 : liste d'adresses et limite par personne au niveau de l'organisation ; reste le verrouillage progressif)
 
 - Passer du rate limit global (200 req/min) à per-user et per-endpoint (login, terminal open).
 - Allowlist CIDR par utilisateur ou rôle (nouvelle table `AccessPolicy`).
@@ -132,3 +132,91 @@ Estimation Sprint D : ~2 semaines à temps plein (touche `core/security`, modèl
 - Terraform Azure (IaC : VM, VNet, NSG, Key Vault).
 - Helm chart Kubernetes + Ingress.
 - Procédure disaster recovery + tests de restauration.
+
+
+## Pistes d'évolution (26/11/2026)
+
+Idées réunies après les phases SaaS 1 à 3. Effort : **S** (quelques jours), **M** (une à deux semaines), **L** (plusieurs semaines). ⭐ = recommandé.
+
+### SaaS (suite des phases)
+| Piste | Effort | Notes |
+|---|---|---|
+| ⭐ Phase 4 : connecteur sortant installé chez le client | L | Condition pour joindre les serveurs privés d'un client sans ouvrir de port. |
+| Phase 5 : produit (inscription, adresse par client, quotas, facturation, RGPD) | L | Deux grilles étudiées : à la personne (entreprises) ou à la ressource protégée avec sous-organisations (infogérants). |
+| Sous-organisations pour infogérants (parent / clients, facture consolidée) | M | Indispensable pour la grille « infogérance ». |
+| Marque blanche (logo, couleurs, domaine de l'infogérant) | M | |
+| Portail client en lecture seule (qui est intervenu, relectures, rapports) | M | |
+| Clé maîtrisée par le client (BYOK : Azure Key Vault, HSM) | M | |
+| Hébergement des données au choix (Suisse, UE), instance dédiée | M | |
+| Vérification DNS automatique des domaines d'organisation | S | Remplace la validation manuelle du super-admin (dnspython). |
+
+### Étendre ce qu'on protège
+| Piste | Effort | Notes |
+|---|---|---|
+| Bases de données (PostgreSQL, MySQL, SQL Server) : identifiant temporaire, journal des requêtes | L | Souvent le premier besoin après SSH et RDP. |
+| Applications web internes via proxy HTTP identifié et enregistré | L | Consoles d'hyperviseur, de pare-feu… sans VPN. |
+| Équipements réseau (FortiGate, switchs) comme cibles | M | |
+| ⭐ Sauvegarde et comparaison des configurations réseau après chaque session, alerte de dérive hors Citadel | M | |
+| Consoles cloud (Azure, AWS) : rôle temporaire | M | |
+| Comptes Active Directory : rotation, découverte des comptes à privilèges | M | |
+
+### Accès juste à temps et organisation du travail
+| Piste | Effort | Notes |
+|---|---|---|
+| ⭐ Demande et validation depuis Teams ou Slack, expiration automatique | M | La validation à 4 yeux existe, il manque le canal. |
+| Zéro privilège permanent par défaut | M | |
+| ⭐ Ticket Jira / JSM obligatoire pour se connecter, session rattachée au ticket | S | |
+| Lien avec l'astreinte (PagerDuty, Opsgenie) | S | |
+| Fenêtres de maintenance pour les actions sensibles | S | |
+| ⭐ Bibliothèque de procédures lançables par un niveau 1 sans shell | M | |
+| ChatOps : lancer une procédure validée depuis Teams | M | |
+| Session partagée ou accompagnée (expert, prestataire sous supervision) | M | |
+
+### Expérience utilisateur
+| Piste | Effort | Notes |
+|---|---|---|
+| ⭐ Outil en ligne de commande (`citadel login`, `citadel ssh web01`) avec certificat court | M | Réutilise la CA SSH ; compatible scp, rsync, VS Code Remote. |
+| Passkeys / FIDO2 pour la ré-authentification | M | Voir F1. |
+| Application mobile ou notifications pour valider une demande | M | |
+| Mode bac à sable pour la formation | M | |
+
+### Intelligence et audit
+| Piste | Effort | Notes |
+|---|---|---|
+| ⭐ Résumé automatique des sessions par IA | S | Les enregistrements et le journal des commandes existent déjà. |
+| Détection de comportements à risque en temps réel (commande inhabituelle, horaire, exfiltration) | L | Voir E3. |
+| Recherche dans le contenu des sessions et en langage naturel dans l'audit | M | |
+| Copilote dans le terminal (explique, propose, prévient avant une commande dangereuse) | M | |
+| Enregistrements à valeur probante (horodatage RFC 3161) | S | Voir D3. |
+| Rapports de conformité (ISO 27001, nLPD, NIS2) et revue d'accès trimestrielle | M | |
+
+### Intégrations et contexte
+| Piste | Effort | Notes |
+|---|---|---|
+| ⭐ Conformité du poste avant l'accès (Intune, CrowdStrike) | M | Rare dans les bastions. |
+| Synchronisation des groupes Entra / Okta (SCIM) | M | |
+| ⭐ Vulnérabilités du serveur (Tenable) affichées avant la connexion | S | |
+| Supervision (PRTG, métriques) dans la fiche du serveur | S | |
+| Synchronisation avec l'inventaire (CMDB, AssetSonar), criticité qui durcit les règles | M | |
+| Module CrowdStrike NG-SIEM avec règles de détection | S | |
+| Fournisseur Terraform | M | |
+
+### Hygiène et sécurité des secrets
+| Piste | Effort | Notes |
+|---|---|---|
+| ⭐ Nettoyage des clés SSH (`authorized_keys` orphelines) | M | Valeur dès le premier jour chez un nouveau client. |
+| Mots de passe du coffre vérifiés contre les fuites (k-anonymat) | S | |
+| Comptes pièges | S | |
+| Secrets pour pipelines CI/CD via OIDC, identités machine | M | |
+| Filigrane RDP / terminal, analyse antivirus des fichiers transférés | M | |
+| Certificats TLS des serveurs qui expirent | S | |
+| Accès de secours (break-glass) scellé avec rotation après usage | M | |
+| Haute disponibilité (plusieurs instances, sauvegarde / restauration documentée) | L | |
+
+### Ordre suggéré
+1. Phase 4 : connecteur sortant.
+2. Outil en ligne de commande.
+3. Accès juste à temps via Teams + ticket obligatoire.
+4. Résumé des sessions par IA (démonstration).
+5. Conformité du poste (Intune) et vulnérabilités Tenable avant connexion.
+6. Phase 5 : produit et facturation, selon la grille retenue.
