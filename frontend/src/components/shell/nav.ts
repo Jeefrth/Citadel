@@ -1,6 +1,7 @@
 import {
   Activity,
   Building2,
+  Gauge,
   ClipboardCheck,
   Container,
   FileBarChart,
@@ -81,6 +82,7 @@ export const NAV: NavGroup[] = [
     items: [
       { to: "/infrastructure", label: "Infrastructure", icon: Network, perm: ["servers", "secrets"] },
       { to: "/settings", label: "Paramètres", icon: Settings, perm: "admin" },
+      { to: "/platform", label: "Plateforme", icon: Gauge, perm: "platform" },
       { to: "/platform/orgs", label: "Organisations", icon: Building2, perm: "platform" },
     ],
   },

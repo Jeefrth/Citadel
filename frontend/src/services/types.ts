@@ -228,6 +228,8 @@ export interface UserData {
   orgs?: OrgBrief[];
   /** Invitations waiting for this person's consent (Mon compte > Invitations). */
   pending_invitations?: number;
+  /** SaaS phase 2 (/api/auth/me): the address Citadel sees for this request. */
+  client_ip?: string | null;
 }
 
 export type BaseRole = "admin" | "operator" | "viewer";

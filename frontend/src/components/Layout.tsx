@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { motion } from "motion/react";
@@ -40,8 +40,9 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useCurrentUser } from "@/services/useCurrentUser";
 import { logout } from "@/services/session";
-import { roleLabel, switchOrg } from "@/services/org";
+import { isIpBlocked, onIpBlocked, roleLabel, switchOrg } from "@/services/org";
 import NoOrgScreen from "@/components/NoOrgScreen";
+import IpBlockedScreen from "@/components/IpBlockedScreen";
 import { useHasK8sClusters } from "@/services/k8s";
 import NotificationBell, { usePolledCount } from "@/components/NotificationBell";
 import LiveIndicator from "@/components/shell/LiveIndicator";
@@ -73,7 +74,10 @@ function CitadelMark({ className = "" }: { className?: string }) {
 function AppSidebar({ allows }: { allows: (req: NavRequirement | undefined) => boolean }) {
   const { pathname } = useLocation();
   const [pendingApprovals] = usePolledCount("/api/approvals/pending-count");
-  const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`));
+  // Prefix match for detail pages, unless another entry is exactly this page (/platform vs /platform/orgs)
+  const exactEntry = NAV.some((g) => g.items.some((i) => i.to === pathname));
+  const isActive = (to: string) =>
+    to === "/" ? pathname === "/" : pathname === to || (!exactEntry && pathname.startsWith(`${to}/`));
 
   return (
     <Sidebar collapsible="icon">
@@ -294,6 +298,9 @@ function UserMenu() {
 /** No organisation for this account: dedicated screen instead of the shell. */
 export default function Layout() {
   const { noOrg } = useCurrentUser();
+  const [ipBlocked, setIpBlocked] = useState(isIpBlocked);
+  useEffect(() => onIpBlocked(setIpBlocked), []);
+  if (ipBlocked) return <IpBlockedScreen />;
   return noOrg ? <NoOrgScreen /> : <AppShell />;
 }
 

@@ -27,6 +27,7 @@ import Risks from "@/pages/Risks";
 import Kubernetes from "@/pages/Kubernetes";
 import KubernetesCluster from "@/pages/KubernetesCluster";
 import PlatformOrgs from "@/pages/PlatformOrgs";
+import Platform from "@/pages/Platform";
 
 function AppRoutes() {
   return (
@@ -52,6 +53,7 @@ function AppRoutes() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/risks" element={<Risks />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/platform" element={<Platform />} />
         <Route path="/platform/orgs" element={<PlatformOrgs />} />
         <Route path="/access" element={<Access />} />
         <Route path="/account" element={<MyAccount />} />

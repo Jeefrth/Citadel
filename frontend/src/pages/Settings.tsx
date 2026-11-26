@@ -8,6 +8,9 @@ import RolesPanel from "@/components/settings/RolesPanel";
 import MembersPanel from "@/components/settings/MembersPanel";
 import IdentityProvidersPanel from "@/components/settings/IdentityProvidersPanel";
 import { api } from "@/services/api";
+import { useCurrentUser } from "@/services/useCurrentUser";
+import { errorMessage } from "@/services/types";
+import IpAllowlistEditor from "@/components/settings/IpAllowlistEditor";
 import SecretsVaultCard from "@/components/SecretsVaultCard";
 import NotificationChannelsPanel from "@/components/NotificationChannels";
 import RecordingStorageCard from "@/components/RecordingStorageCard";
@@ -38,7 +41,7 @@ import {
   LogIn,
   ShieldAlert,
 } from "lucide-react";
-import { PageHeader, Tabs } from "@/components/kit";
+import { ErrorBox, PageHeader, Tabs } from "@/components/kit";
 import { FactRow, SettingsCard, Tip } from "@/components/auditUi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,7 +55,6 @@ const SETTING_LABELS: Record<string, string> = {
   rate_limit_window_seconds: "Fenêtre de la limite (secondes)",
   mfa_required_for_terminal: "MFA obligatoire pour le terminal",
   session_recording_enabled: "Enregistrement des sessions",
-  max_session_recordings: "Nombre maximal d'enregistrements",
   command_filter_enabled: "Filtrage des commandes",
   default_cert_validity_minutes: "Validité par défaut (minutes)",
   min_cert_validity_minutes: "Validité minimale (minutes)",
@@ -63,6 +65,20 @@ const SETTING_LABELS: Record<string, string> = {
   access_expiry_notice_days: "Rappel avant la fin d'une règle d'accès (jours)",
   risk_secret_max_age_days: "Âge maximal d'un mot de passe géré (jours)",
   risk_dormant_days: "Utilisateur inactif après (jours)",
+};
+
+/** Explanations shown instead of the backend description (organisation rules, SaaS phase 2). */
+const SETTING_HINTS: Record<string, string> = {
+  rate_limit_requests:
+    "Requêtes par personne dans l'organisation sur la fenêtre ci-dessous. 0 : sans limite, sinon au moins 30. Au-delà, l'API répond « Trop de requêtes ».",
+  rate_limit_window_seconds: "Durée de la fenêtre de comptage, de 1 à 3600 secondes.",
+  idle_timeout_minutes: "Un terminal sans activité est fermé après ce délai (1 à 1440 minutes).",
+  mfa_required_for_terminal: "Nouvelle connexion chez le fournisseur d'identité juste avant d'ouvrir un terminal.",
+  session_recording_enabled:
+    "Désactivé : les sessions SSH, Kubernetes et RDP ne sont plus enregistrées. La session et son audit restent journalisés.",
+  default_cert_validity_minutes: "Durée proposée à l'ouverture d'un terminal (1 à 1440 minutes).",
+  min_cert_validity_minutes: "Une durée demandée plus courte est relevée à ce minimum.",
+  max_cert_validity_minutes: "Une durée demandée plus longue est ramenée à ce maximum.",
 };
 
 function settingLabel(key: string): string {
@@ -97,7 +113,6 @@ type Tab =
   | "security"
   | "commands"
   | "masking"
-  | "network"
   | "ca"
   | "vault"
   | "backups"
@@ -109,7 +124,7 @@ type Tab =
   | "auth"
   | "system";
 const TAB_IDS: Tab[] = [
-  "security", "commands", "masking", "network", "ca", "vault", "backups",
+  "security", "commands", "masking", "ca", "vault", "backups",
   "applications", "notifications", "audit", "users", "roles", "auth", "system",
 ];
 
@@ -124,12 +139,11 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const { user } = useCurrentUser();
 
   // Editable state
   const [editValues, setEditValues] = useState<Record<string, string>>({});
-
-  // IP allowlist editing
-  const [newIp, setNewIp] = useState("");
 
   // Command filter editing
   const [newPattern, setNewPattern] = useState("");
@@ -173,6 +187,7 @@ export default function Settings() {
 
   const saveSetting = async (key: string) => {
     setSaving(key);
+    setSaveError(null);
     try {
       await api.put(`/api/admin/settings/${key}`, { value: editValues[key] });
 
@@ -182,9 +197,9 @@ export default function Settings() {
       const vals: Record<string, string> = {};
       for (const [k, meta] of Object.entries(freshSettings)) vals[k] = meta.value;
       setEditValues(vals);
-    } catch {
-      // revert
-      setEditValues((prev) => ({ ...prev, [key]: settings[key]?.value || "" }));
+    } catch (e) {
+      // Keep the edited value so it can be fixed; the backend says why (400)
+      setSaveError(`${settingLabel(key)} : ${errorMessage(e)}`);
     } finally {
       setSaving(null);
     }
@@ -222,20 +237,7 @@ export default function Settings() {
     }
   };
 
-  const addIp = () => {
-    if (!newIp.trim()) return;
-    const list = getIpList();
-    if (!list.includes(newIp.trim())) {
-      const updated = JSON.stringify([...list, newIp.trim()]);
-      setEditValues((prev) => ({ ...prev, ip_allowlist: updated }));
-    }
-    setNewIp("");
-  };
-
-  const removeIp = (ip: string) => {
-    const updated = JSON.stringify(getIpList().filter((i) => i !== ip));
-    setEditValues((prev) => ({ ...prev, ip_allowlist: updated }));
-  };
+  const setIpList = (list: string[]) => setEditValues((prev) => ({ ...prev, ip_allowlist: JSON.stringify(list) }));
 
   // Command filter helpers
   const getPatterns = (): string[] => {
@@ -279,7 +281,6 @@ export default function Settings() {
     { id: "security", icon: Shield, label: "Sécurité" },
     { id: "commands", icon: Terminal, label: "Commandes" },
     { id: "masking", icon: EyeOff, label: "Masquage" },
-    { id: "network", icon: Globe, label: "Réseau" },
     { id: "ca", icon: Key, label: "Certificats" },
     { id: "vault", icon: Vault, label: "Coffre de secrets" },
     { id: "backups", icon: DatabaseBackup, label: "Sauvegardes" },
@@ -295,7 +296,7 @@ export default function Settings() {
   if (loading) {
     return (
       <div>
-        <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres, rôles et authentification." />
+        <PageHeader title="Paramètres" description="Sécurité et accès, masquage, certificats, coffre, sauvegardes, applications, notifications, audit, membres, rôles et authentification." />
         <div className="mb-6 flex gap-4 border-b pb-2.5">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-4 w-20" />
@@ -327,7 +328,7 @@ export default function Settings() {
           <label htmlFor={`setting-${key}`} className="text-sm font-medium">
             {settingLabel(key)}
           </label>
-          <p className="text-xs text-muted-foreground">{meta.description}</p>
+          <p className="text-xs text-muted-foreground">{SETTING_HINTS[key] ?? meta.description}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {type === "bool" ? (
@@ -404,20 +405,41 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Paramètres" description="Sécurité, masquage, réseau, certificats, coffre, sauvegardes, applications, notifications, audit, membres, rôles et authentification." />
+      <PageHeader title="Paramètres" description="Sécurité et accès, masquage, certificats, coffre, sauvegardes, applications, notifications, audit, membres, rôles et authentification." />
 
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
       <div className="max-w-4xl space-y-4">
+        <ErrorBox message={saveError} />
         {activeTab === "security" && (
-          <SettingsCard icon={Shield} title="Sécurité" description="Inactivité, limitation de débit, MFA et enregistrement des sessions.">
-            {renderSettingRow("idle_timeout_minutes", "number")}
-            {renderSettingRow("rate_limit_requests", "number")}
-            {renderSettingRow("rate_limit_window_seconds", "number")}
-            {renderSettingRow("mfa_required_for_terminal", "bool")}
-            {renderSettingRow("session_recording_enabled", "bool")}
-            {renderSettingRow("max_session_recordings", "number")}
-          </SettingsCard>
+          <>
+            <SettingsCard
+              icon={Globe}
+              title="Accès à l'organisation"
+              description="Adresses autorisées à utiliser l'organisation, contrôlées partout : web, API, clés d'accès, terminaux, RDP, proxy SSH et clés d'application. Les administrateurs de la plateforme ne sont pas bloqués (leur accès est journalisé)."
+            >
+              <IpAllowlistEditor
+                list={getIpList()}
+                onChange={setIpList}
+                dirty={editValues["ip_allowlist"] !== settings["ip_allowlist"]?.value}
+                saving={saving === "ip_allowlist"}
+                onSave={() => saveSetting("ip_allowlist")}
+                clientIp={user?.client_ip}
+              />
+            </SettingsCard>
+            <SettingsCard icon={Shield} title="Limite de requêtes" description="Protège l'organisation contre un script ou une clé d'accès qui s'emballe.">
+              {renderSettingRow("rate_limit_requests", "number")}
+              {renderSettingRow("rate_limit_window_seconds", "number")}
+            </SettingsCard>
+            <SettingsCard icon={Terminal} title="Terminaux" description="Règles appliquées à chaque session SSH, Kubernetes et RDP de l'organisation.">
+              {renderSettingRow("idle_timeout_minutes", "number")}
+              {renderSettingRow("mfa_required_for_terminal", "bool")}
+              {renderSettingRow("session_recording_enabled", "bool")}
+              {renderSettingRow("default_cert_validity_minutes", "number")}
+              {renderSettingRow("min_cert_validity_minutes", "number")}
+              {renderSettingRow("max_cert_validity_minutes", "number")}
+            </SettingsCard>
+          </>
         )}
 
         {activeTab === "commands" && (
@@ -456,53 +478,11 @@ export default function Settings() {
           </>
         )}
 
-        {activeTab === "network" && (
-          <SettingsCard
-            icon={Globe}
-            title="Adresses IP autorisées"
-            description="Liste vide : toutes les adresses sont autorisées. Sinon, seules les adresses et plages listées accèdent à l'application."
-          >
-            <div className="space-y-3">
-              {getIpList().length === 0 && (
-                <div className="flex items-center gap-2 rounded-md border border-success/25 bg-success/10 px-3 py-2 text-sm text-success">
-                  <Check className="size-4" />
-                  Aucune restriction : toutes les adresses IP sont autorisées.
-                </div>
-              )}
-              <div className="space-y-1.5">
-                {getIpList().map((ip) =>
-                  listRow(ip, () => removeIp(ip), <Globe className="size-3.5 shrink-0 text-muted-foreground" />),
-                )}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newIp}
-                  onChange={(e) => setNewIp(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addIp()}
-                  placeholder="192.168.1.0/24 ou 10.0.0.5"
-                  className="font-mono"
-                />
-                <Button variant="outline" onClick={addIp} disabled={!newIp.trim()}>
-                  <Plus /> Ajouter
-                </Button>
-              </div>
-              {editValues["ip_allowlist"] !== settings["ip_allowlist"]?.value && (
-                <Button onClick={() => saveSetting("ip_allowlist")} disabled={saving === "ip_allowlist"}>
-                  {saving === "ip_allowlist" ? <Loader2 className="animate-spin" /> : <Save />}
-                  Enregistrer la liste
-                </Button>
-              )}
-            </div>
-          </SettingsCard>
-        )}
-
         {activeTab === "ca" && (
           <>
-            <SettingsCard icon={Key} title="Certificats éphémères" description="Durée de validité des certificats SSH signés à la demande.">
-              {renderSettingRow("default_cert_validity_minutes", "number")}
-              {renderSettingRow("min_cert_validity_minutes", "number")}
-              {renderSettingRow("max_cert_validity_minutes", "number")}
-            </SettingsCard>
+            <p className="text-sm text-muted-foreground">
+              Les durées de validité des certificats éphémères se règlent dans Sécurité, section Terminaux.
+            </p>
 
             {caInfo && (
               <SettingsCard title="Autorité de certification" description="Clé publique à déclarer sur chaque serveur cible.">

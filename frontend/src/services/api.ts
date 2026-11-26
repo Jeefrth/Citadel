@@ -1,5 +1,6 @@
+import { toast } from "sonner";
 import { apiConfig } from "./authConfig";
-import { getOrgSlug, handleOrgRefused } from "./org";
+import { IP_REFUSED_DETAIL, getOrgSlug, handleOrgRefused, markIpBlocked } from "./org";
 import { DEV_MODE, getAccessToken, logout, markSignedOut, refreshSession } from "./session";
 
 /** Access token for the Citadel API (null in dev mode). */
@@ -176,6 +177,18 @@ async function authedFetch(path: string, init: (token: string | null) => Request
   return second;
 }
 
+// 429 (organisation rate limit): one readable toast, not one per failed call; never retried
+let lastRateToast = 0;
+function notifyRateLimited(message: string): void {
+  const now = Date.now();
+  if (now - lastRateToast < 10_000) return;
+  lastRateToast = now;
+  toast.error(message || "Trop de requêtes pour cette organisation, réessayez dans un instant", {
+    id: "citadel-rate-limit",
+    description: "La limite de requêtes de l'organisation est atteinte. Patientez quelques secondes.",
+  });
+}
+
 async function throwForResponse(response: Response): Promise<never> {
   const error = await response.json().catch(() => ({ detail: response.statusText }));
   if (isDeviceRevoked(response.status, error?.detail)) {
@@ -184,6 +197,8 @@ async function throwForResponse(response: Response): Promise<never> {
     return new Promise<never>(() => {});
   }
   const message = formatDetail(error?.detail);
+  if (response.status === 429) notifyRateLimited(message);
+  if (response.status === 403 && message === IP_REFUSED_DETAIL) markIpBlocked();
   if (handleOrgRefused(response.status, message)) {
     // Stored organisation refused: the page reloads on the default one
     return new Promise<never>(() => {});
@@ -302,6 +317,8 @@ export async function postMultipart<T>(
           return;
         }
         const message = formatDetail(detail);
+        if (xhr.status === 429) notifyRateLimited(message);
+        if (xhr.status === 403 && message === IP_REFUSED_DETAIL) markIpBlocked();
         if (handleOrgRefused(xhr.status, message)) return;
         reject(new ApiError(message || `API error ${xhr.status}`, xhr.status));
       }

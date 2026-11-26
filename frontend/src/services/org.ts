@@ -92,6 +92,30 @@ export function switchOrg(slug: string): void {
  */
 const ORG_REFUSED = /organisation inconnue|pas membre de cette organisation/i;
 const NO_ORG = /aucune organisation pour ce compte/i;
+/** Exact 403 detail when the organisation's address allow-list refuses this request. */
+export const IP_REFUSED_DETAIL = "Adresse IP non autorisée par cette organisation";
+
+// ── Address refused by the organisation (SaaS phase 2) ──
+let ipBlocked = false;
+const ipListeners = new Set<(blocked: boolean) => void>();
+
+export function isIpBlocked(): boolean {
+  return ipBlocked;
+}
+
+/** Any API call refused by the allow-list: the app switches to the "access refused" screen. */
+export function markIpBlocked(): void {
+  if (ipBlocked) return;
+  ipBlocked = true;
+  ipListeners.forEach((l) => l(true));
+}
+
+export function onIpBlocked(listener: (blocked: boolean) => void): () => void {
+  ipListeners.add(listener);
+  return () => {
+    ipListeners.delete(listener);
+  };
+}
 
 /** The signed-in person belongs to no organisation (403 "Aucune organisation pour ce compte"). */
 export function isNoOrgError(e: unknown): boolean {
@@ -108,7 +132,8 @@ let resetting = false;
  * Without a stored slug nothing happens, so a refusal of the default org cannot loop.
  */
 export function handleOrgRefused(status: number, detail: string): boolean {
-  if (status !== 403 || NO_ORG.test(detail) || !ORG_REFUSED.test(detail)) return false;
+  // Neither "no organisation" nor "address refused" means the stored slug is wrong
+  if (status !== 403 || detail === IP_REFUSED_DETAIL || NO_ORG.test(detail) || !ORG_REFUSED.test(detail)) return false;
   if (!getOrgSlug()) return false;
   if (resetting) return true;
   resetting = true;
