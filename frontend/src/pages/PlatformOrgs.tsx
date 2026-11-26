@@ -23,6 +23,7 @@ import {
 } from "@/components/kit";
 import { TableSkeleton, Tip } from "@/components/auditUi";
 import IdentityProvidersPanel from "@/components/settings/IdentityProvidersPanel";
+import DomainRequestsPanel from "@/components/settings/DomainRequestsPanel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -453,6 +454,9 @@ export default function PlatformOrgs() {
           </TableBody>
         </Table>
       </Card>
+
+      {/* Organisation SSO domains waiting for approval (shown only when there are some) */}
+      <DomainRequestsPanel />
 
       {/* Buttons of the sign-in page (platform providers) */}
       <div className="space-y-4 pt-4">

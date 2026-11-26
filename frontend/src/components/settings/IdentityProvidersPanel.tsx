@@ -43,6 +43,29 @@ function oktaIssuer(domain: string): string {
   return d ? `https://${d}` : "";
 }
 
+/** Approved domains (green) and domains waiting for a platform admin (amber). */
+export function DomainChips({ provider }: { provider: Pick<IdentityProviderData, "domains" | "verified_domains" | "pending_domains"> }) {
+  const verified = provider.verified_domains ?? [];
+  const pending = provider.pending_domains ?? provider.domains.filter((d) => !verified.includes(d));
+  if (!verified.length && !pending.length) return <span className="text-muted-foreground">-</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {verified.map((d) => (
+        <Chip key={d} tone="green" title="Approuvé par l'administrateur de la plateforme">
+          <Check className="size-3" />
+          <span className="font-mono">{d}</span>
+        </Chip>
+      ))}
+      {pending.map((d) => (
+        <Chip key={d} tone="amber" title="En attente de validation par l'administrateur de la plateforme">
+          <span className="font-mono">{d}</span>
+          <span className="font-normal">en attente</span>
+        </Chip>
+      ))}
+    </span>
+  );
+}
+
 /** Redirect URI to register at the provider, with a copy button. */
 function RedirectUri({ uri }: { uri: string }) {
   const [copied, setCopied] = useState(false);
@@ -113,6 +136,12 @@ function ProviderModal({
     .split(/[\s,;]+/)
     .map((d) => d.trim())
     .filter(Boolean);
+  // Same normalisation as the backend: a change of server or application erases the stored secret
+  const moved =
+    editing &&
+    (kind !== provider.kind ||
+      issuer.trim().replace(/\/+$/, "") !== provider.issuer ||
+      clientId.trim() !== provider.client_id);
   const needsSecret = !editing || !provider?.has_secret;
   const valid =
     name.trim().length > 0 &&
@@ -257,6 +286,14 @@ function ProviderModal({
         </Field>
       </div>
 
+      {moved && !secret && (
+        <p role="alert" className="rounded-md border border-live/30 bg-live/10 px-3 py-2 text-sm">
+          Le type, l'émetteur ou l'ID client a changé : le secret actuel sera effacé à l'enregistrement. Saisissez de
+          nouveau le secret client
+          {(provider?.verified_domains?.length ?? 0) > 0 ? ", et les domaines devront être validés de nouveau" : ""}.
+        </p>
+      )}
+
       <Field label="Scopes" hint="Séparés par des espaces ; « openid » est obligatoire.">
         <Input value={scopes} onChange={(e) => setScopes(e.target.value)} className="font-mono" />
       </Field>
@@ -268,7 +305,7 @@ function ProviderModal({
             hint={
               kind === "google"
                 ? "Obligatoire en pratique pour Google : sans domaine, tout compte Google pourrait se présenter. Ils servent aussi à trouver votre SSO depuis la page de connexion."
-                : "Séparés par des virgules. Ils servent à trouver votre SSO depuis la page de connexion et limitent les adresses acceptées."
+                : "Séparés par des virgules. Ils servent à trouver votre SSO depuis la page de connexion et limitent les adresses acceptées, une fois validés par l'administrateur de la plateforme."
             }
           >
             <Input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="contoso.com, contoso.fr" className="font-mono" />
@@ -377,6 +414,14 @@ export default function IdentityProvidersPanel({ scope }: { scope: Scope }) {
         }
         className="[&>div:last-child]:p-0"
       >
+        {scope === "org" && (
+          <p className="border-b px-5 py-3 text-xs text-muted-foreground">
+            Un domaine n'est utilisé (trouver votre SSO depuis une adresse e-mail, faire confiance aux adresses du
+            fournisseur pour les invitations) qu'après validation par l'administrateur de la plateforme. Cette
+            vérification empêche une organisation de revendiquer le domaine d'une autre entreprise. En attendant, vos
+            membres trouvent le SSO avec l'identifiant de l'organisation.
+          </p>
+        )}
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -412,8 +457,8 @@ export default function IdentityProvidersPanel({ scope }: { scope: Scope }) {
                     {p.issuer}
                   </TableCell>
                   {scope === "org" && (
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {p.domains.length ? p.domains.join(", ") : "-"}
+                    <TableCell className="text-xs">
+                      <DomainChips provider={p} />
                     </TableCell>
                   )}
                   {scope === "org" && (

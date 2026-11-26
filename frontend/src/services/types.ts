@@ -1205,6 +1205,15 @@ export interface IdentityProviderData {
   is_active: boolean;
   created_at: string;
   redirect_uri: string;
+  /** Domains approved by a platform admin (only these are used for discovery and trusted e-mails). */
+  verified_domains?: string[];
+  /** Domains asked by the organisation, waiting for a platform admin. */
+  pending_domains?: string[];
+}
+
+/** /api/platform/domain-requests row: an organisation SSO with domains to approve. */
+export interface DomainRequest extends IdentityProviderData {
+  org: { id: string; name: string; slug: string };
 }
 
 export interface IdentityProviderInput {
