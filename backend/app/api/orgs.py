@@ -3,7 +3,7 @@ the current one, platform administration of every organisation."""
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,6 +65,16 @@ async def decline_invitation(invitation_id: uuid.UUID, db: AsyncSession = Depend
     if getattr(user, "_via_access_key", False):
         raise HTTPException(status_code=403, detail="Not allowed with an access key")
     return await orgs_svc.answer_invitation(db, user, invitation_id, False)
+
+
+@router.get("/me/orgs")
+async def my_orgs_unbound(request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(get_identity)):
+    """Organisations of the signed-in person without entering any: used when the
+    current one refuses the request (address allow-list) to offer another."""
+    from app.core.governance import client_ip
+    ip = client_ip(request.client.host if request.client else None, request.headers)
+    return {"client_ip": ip, "orgs": [{"id": str(o.id), "name": o.name, "slug": o.slug, "is_default": o.is_default}
+                                      for o, _ in await user_orgs(db, user)]}
 
 
 # ── Members of the current organisation ──
