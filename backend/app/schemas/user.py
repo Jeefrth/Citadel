@@ -37,6 +37,7 @@ class MeRead(UserRead):
     org: OrgRef | None = None
     orgs: list[OrgRef] = []
     pending_invitations: int = 0
+    client_ip: str | None = None   # as seen by Citadel (address allow-list)
 
 
 class UserUpdate(BaseModel):

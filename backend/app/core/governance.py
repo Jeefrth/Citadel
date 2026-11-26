@@ -259,6 +259,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _next_number(db: AsyncSession) -> int:
+    """Next request number of the current organisation (transaction-scoped
+    advisory lock: two requests at once never get the same number)."""
+    from sqlalchemy import func, text
+    from app.core.tenancy import require_org_id
+    org = require_org_id()
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"approval-number:{org}"})
+    current = (await db.execute(select(func.max(ApprovalRequest.number)))).scalar_one()
+    return (current or 0) + 1
+
+
 async def approver_ids(db: AsyncSession, approver_group_ids: list, exclude=None) -> list:
     if approver_group_ids:
         rows = await db.execute(
@@ -322,9 +333,9 @@ async def request_approval(
         approver_group_ids=decision.approver_group_ids or [],
         expires_at=_now() + timedelta(hours=settings.APPROVAL_PENDING_HOURS),
     )
+    req.number = await _next_number(db)
     db.add(req)
     await db.flush()
-    await db.refresh(req, attribute_names=["number"])
     what = {
         ApprovalKind.CONNECT.value: f"connexion à {server.name if server else '?'} ({account})",
         ApprovalKind.COMMAND.value: f"commande sur {server.name if server else '?'} : {command}",

@@ -6,7 +6,7 @@ Rule targets are stored as JSONB lists of ids / strings (empty list = any).
 
 import enum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Identity, Integer, LargeBinary, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,8 +88,11 @@ class ApprovalStatus(str, enum.Enum):
 
 class ApprovalRequest(TenantMixin, UUIDMixin, Base):
     __tablename__ = "approval_requests"
+    __table_args__ = (UniqueConstraint("org_id", "number", name="uq_approval_requests_org_number"),)
 
-    number: Mapped[int] = mapped_column(Integer, Identity(start=1), unique=True, nullable=False)
+    # #1, #2... per organisation (governance.create_request); a global sequence
+    # would show each customer how busy the others are
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=ApprovalStatus.PENDING.value, index=True)
     requester_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

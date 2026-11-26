@@ -402,7 +402,7 @@ class _SSHFrontend:
         return ("input", data)
 
 
-async def _enter_org(process, db, user: User, wanted: str | None) -> bool:
+async def _enter_org(process, db, user: User, wanted: str | None, ip: str | None = None) -> bool:
     from app.core.auth import bind_user, user_orgs
     choices = await user_orgs(db, user)
     if wanted:
@@ -421,7 +421,11 @@ async def _enter_org(process, db, user: User, wanted: str | None) -> bool:
         if picked is None or picked == "back":
             return False
         org, m = picked.value
-    await bind_user(db, user, org, m)
+    try:
+        await bind_user(db, user, org, m, ip)
+    except HTTPException as e:
+        _w(process, f"Refusé : {e.detail}\n")
+        return False
     return True
 
 
@@ -445,7 +449,7 @@ async def _handle(process) -> None:
                 process.exit(1)
                 return
             # Organisation: prefix of the target, the only one, or chosen in a menu
-            if not await _enter_org(process, db, user, wanted_org):
+            if not await _enter_org(process, db, user, wanted_org, owner.ip):
                 process.exit(1)
                 return
             if owner.key_id is not None:

@@ -48,7 +48,7 @@ async def monitor_ssh(websocket: WebSocket, session_id: str):
     ip = client_ip(websocket.client.host if websocket.client else None, websocket.headers)
     async with async_session() as db:
         try:
-            user = await authenticate_ws(db, msg)
+            user = await authenticate_ws(db, msg, client_ip(websocket.client.host if websocket.client else None, websocket.headers))
             await enforce_login_acl(db, user, ip)
         except Exception as e:  # noqa: BLE001
             await websocket.send_json({"type": "error", "message": f"Auth failed: {getattr(e, 'detail', e)}"})

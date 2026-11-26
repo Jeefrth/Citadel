@@ -206,7 +206,9 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
             await websocket.close(code=4003, reason="Forbidden")
             return
         try:   # the organisation the ticket was issued in
-            await bind_request(db, user, org_id=payload["org_id"])
+            from app.core.governance import client_ip as _cip
+            await bind_request(db, user, org_id=payload["org_id"],
+                               ip=_cip(websocket.client.host if websocket.client else None, websocket.headers))
         except Exception:  # noqa: BLE001
             await websocket.close(code=4003, reason="Forbidden")
             return
@@ -249,13 +251,18 @@ async def rdp_websocket(websocket: WebSocket, server_id: str):
         await websocket.close(code=4005, reason=f"Gateway unreachable: {e}"[:120])
         return
 
+    # Recording can be switched off by the organisation (phase 2)
+    from app.services.settings_service import get_setting_bool
+    async with async_session() as sdb:
+        record = await get_setting_bool(sdb, "session_recording_enabled")
+
     # Connect to guacd
     try:
         sock = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: _connect_guacd(rdp_host, rdp_port, rdp_user, rdp_pass, width, height,
                                    disable_copy=disable_copy, disable_paste=disable_paste,
-                                   recording_name=sid),
+                                   recording_name=sid if record else None),
         )
         sock, guac_conn_id = sock
     except Exception as e:

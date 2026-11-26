@@ -18,6 +18,7 @@ from typing import Protocol
 
 from sqlalchemy import select
 
+from app.services.settings_service import get_setting_bool, get_setting_int
 from app.core.database import async_session
 from app.core.permissions import ResolvedAccount
 from app.models.audit import AuditLog
@@ -31,7 +32,6 @@ from app.websocket.line_tracker import KILL_LINE, LineTracker
 from app.websocket.session_manager import session_manager
 
 logger = logging.getLogger("citadel.terminal")
-IDLE_TIMEOUT = 1800  # 30 minutes
 
 
 class Frontend(Protocol):
@@ -125,7 +125,15 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
     Raises SessionOpenError if the target can't be reached (nothing recorded)."""
     user, server, account, ip = spec.user, spec.server, spec.account, spec.ip
     use_cert = account.use_cert
-    cert_minutes = spec.cert_minutes or account.cert_minutes or 480
+    # Organisation settings (phase 2): certificate bounds, idle timeout, recording
+    async with async_session() as db:
+        lo = await get_setting_int(db, "min_cert_validity_minutes")
+        hi = await get_setting_int(db, "max_cert_validity_minutes")
+        default_minutes = await get_setting_int(db, "default_cert_validity_minutes")
+        idle_seconds = max(60, await get_setting_int(db, "idle_timeout_minutes") * 60)
+        record = await get_setting_bool(db, "session_recording_enabled")
+    lo, hi = max(1, min(lo, hi)), max(lo, hi)
+    cert_minutes = min(max(spec.cert_minutes or account.cert_minutes or default_minutes, lo), hi)
     route_stack = AsyncExitStack()
     is_server = not getattr(server, "is_k8s", False)
     try:
@@ -197,8 +205,8 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
                     await _safe(fe.notice("Attention : la session expire dans 5 minutes"))
                 elif 50 < remaining <= 60:
                     await _safe(fe.notice(f"Attention : la session expire dans {int(remaining)} secondes"))
-            if time.time() - last_activity > IDLE_TIMEOUT:
-                await _safe(fe.notice(f"Session fermée après {IDLE_TIMEOUT // 60} minutes d'inactivité"))
+            if time.time() - last_activity > idle_seconds:
+                await _safe(fe.notice(f"Session fermée après {idle_seconds // 60} minutes d'inactivité"))
                 stop_event.set()
                 break
 
@@ -327,7 +335,8 @@ async def run_session(spec: SessionSpec, fe: Frontend) -> None:
             await live.unregister(sid)
         except Exception:  # noqa: BLE001
             pass
-        await _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masker.hits, spec.protocol)
+        await _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masker.hits, spec.protocol,
+                     record=record)
 
 
 async def _safe(coro) -> None:
@@ -338,20 +347,24 @@ async def _safe(coro) -> None:
 
 
 async def _store(sid, recorder, terminated, srv_id, user_id, server_name, user_name, masked_hits,
-                 protocol: str = "ssh") -> None:
-    """Store the recording (D8) and close the audit trail."""
+                 protocol: str = "ssh", record: bool = True) -> None:
+    """Store the recording (D8) and close the audit trail. Recording switched off
+    by the organisation: the session row and the audit stay, without content."""
     try:
         async with async_session() as db:
-            payload = json.dumps(recorder.events, separators=(",", ":")).encode()
-            started = datetime.fromtimestamp(recorder.start_time, timezone.utc)
-            stored = await recording_storage.store(db, f"{protocol}/{started:%Y/%m/%d}/{sid}.json.gz", payload)
+            stored = None
+            if record:
+                payload = json.dumps(recorder.events, separators=(",", ":")).encode()
+                started = datetime.fromtimestamp(recorder.start_time, timezone.utc)
+                stored = await recording_storage.store(db, f"{protocol}/{started:%Y/%m/%d}/{sid}.json.gz", payload)
             rec = (await db.execute(select(SessionRecording).where(SessionRecording.session_id == sid))).scalar_one_or_none()
             if rec is None:
                 rec = SessionRecording(session_id=sid, server_id=srv_id, user_id=user_id,
                                        server_name=server_name, user_name=user_name, protocol=protocol)
                 db.add(rec)
             rec.events = None
-            rec.storage_type, rec.storage_key, rec.sha256 = stored.storage_type, stored.key, stored.sha256
+            if stored is not None:
+                rec.storage_type, rec.storage_key, rec.sha256 = stored.storage_type, stored.key, stored.sha256
             rec.ended_at = datetime.now(timezone.utc)
             rec.duration_seconds = recorder.duration_seconds
             rec.event_count = recorder.event_count
@@ -360,7 +373,8 @@ async def _store(sid, recorder, terminated, srv_id, user_id, server_name, user_n
             rec.termination_reason = terminated.get("reason")
             db.add(AuditLog(
                 user_id=user_id, server_id=srv_id, action="terminal.close",
-                result=(f"Recorded {recorder.event_count} events, {recorder.duration_seconds}s"
+                result=((f"Recorded {recorder.event_count} events" if record else "Not recorded (organisation setting)")
+                        + f", {recorder.duration_seconds}s"
                         + (f", {masked_hits} masked" if masked_hits else "")
                         + (f", killed by {terminated['by']}" if terminated.get("by") else "")),
             ))

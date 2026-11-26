@@ -32,7 +32,7 @@ async def k8s_exec(websocket: WebSocket, cluster_id: str):
 
     async with async_session() as db:
         try:
-            user = await authenticate_ws(db, msg)
+            user = await authenticate_ws(db, msg, client_ip(websocket.client.host if websocket.client else None, websocket.headers))
             await require_recent_auth(db, user)   # sign-in at the provider just before
         except Exception as e:  # noqa: BLE001
             return await _fail(websocket, f"Auth failed: {getattr(e, 'detail', e)}")

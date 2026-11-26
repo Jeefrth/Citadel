@@ -58,7 +58,8 @@ async def resolve_org(db: AsyncSession, user: User, wanted: str | None = None,
     return match[0]
 
 
-async def bind_user(db: AsyncSession, user: User, org: Organization, membership: OrgMembership | None) -> None:
+async def bind_user(db: AsyncSession, user: User, org: Organization, membership: OrgMembership | None,
+                    ip: str | None = None, check_ip: bool = True) -> None:
     """Enter the organisation: tenant context + RLS for this transaction, and the
     user's role in it. A platform admin without membership is admin."""
     from app.models.identity import CustomRole
@@ -76,6 +77,9 @@ async def bind_user(db: AsyncSession, user: User, org: Organization, membership:
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pas membre de cette organisation")
     await _enforce_org_sso(db, user, org)
+    if check_ip:   # address allow-list of the organisation (phase 2)
+        from app.services.org_policy import check_ip as _check_ip
+        await _check_ip(db, user, ip)
 
 
 async def _enforce_org_sso(db: AsyncSession, user: User, org: Organization) -> None:
@@ -93,9 +97,10 @@ async def _enforce_org_sso(db: AsyncSession, user: User, org: Organization) -> N
                             detail=f"Cette organisation exige la connexion par {enforced[0].name}")
 
 
-async def bind_request(db: AsyncSession, user: User, wanted: str | None = None, org_id=None) -> Organization:
+async def bind_request(db: AsyncSession, user: User, wanted: str | None = None, org_id=None,
+                       ip: str | None = None) -> Organization:
     org, membership = await resolve_org(db, user, wanted, org_id)
-    await bind_user(db, user, org, membership)
+    await bind_user(db, user, org, membership, ip)
     return org
 
 
@@ -166,8 +171,10 @@ async def get_current_user(
     from app.core.config import settings
 
     if settings.DEV_MODE:
+        from app.core.governance import client_ip as _cip
         user = await _get_or_create_dev_user(db)
-        await bind_request(db, user, request.headers.get(ORG_HEADER))
+        await bind_request(db, user, request.headers.get(ORG_HEADER),
+                           ip=_cip(request.client.host if request.client else None, request.headers))
         return user
 
     if not credentials:
@@ -193,7 +200,16 @@ async def get_current_user(
         )
 
     # Organisation: an access key works only in its own organisation
-    await bind_request(db, user, request.headers.get(ORG_HEADER), getattr(user, "_access_key_org", None))
+    try:
+        org = await bind_request(db, user, request.headers.get(ORG_HEADER), getattr(user, "_access_key_org", None), ip)
+    except HTTPException as e:
+        if e.status_code == 403 and "Adresse IP" in str(e.detail):
+            await devices.record_denied(db, user, ip, "adresse IP hors de la liste de l'organisation", method,
+                                        request.headers.get("user-agent"))
+            await db.commit()
+        raise
+    from app.services.org_policy import check_rate
+    await check_rate(db, org.id, user.id)
     await enforce_login_acl(db, user, ip, method=method, user_agent=request.headers.get("user-agent"))
     await devices.touch(db, user, request, ip, getattr(user, "_access_key_prefix", None))
     return user
@@ -298,14 +314,14 @@ def require_role(*roles: UserRole):
     return _check_role
 
 
-async def authenticate_ws(db: AsyncSession, msg: dict) -> User:
+async def authenticate_ws(db: AsyncSession, msg: dict, ip: str | None = None) -> User:
     """WebSocket first message {"type": "auth", "token", "org"}: authenticate and
     enter the organisation (for the rest of the handler task)."""
     user = await _get_or_create_dev_user(db) if settings.DEV_MODE else await authenticate_token(msg.get("token") or "", db)
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated")
     org = msg.get("org")
-    await bind_request(db, user, str(org) if org else None, getattr(user, "_access_key_org", None))
+    await bind_request(db, user, str(org) if org else None, getattr(user, "_access_key_org", None), ip)
     return user
 
 

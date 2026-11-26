@@ -83,7 +83,7 @@ async def terminal_websocket(websocket: WebSocket, server_id: str):
             return await _fail(websocket, "No token provided")
         # Recent sign-in at the provider (re-authentication popup) required
         try:
-            user = await authenticate_ws(db, msg)
+            user = await authenticate_ws(db, msg, client_ip(websocket.client.host if websocket.client else None, websocket.headers))
             await require_recent_auth(db, user)   # sign-in at the provider just before
         except Exception as e:  # noqa: BLE001
             return await _fail(websocket, f"Auth failed: {getattr(e, 'detail', e)}")

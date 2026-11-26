@@ -116,10 +116,6 @@ DEFAULTS = {
         "value": "true",
         "description": "Enregistre les sessions SSH et RDP pour pouvoir les rejouer.",
     },
-    "max_session_recordings": {
-        "value": "1000",
-        "description": "Au-delà, les plus anciens enregistrements sont supprimés.",
-    },
 
     # Audit (lot 4)
     "recording_retention_days": {

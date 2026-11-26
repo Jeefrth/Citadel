@@ -1,7 +1,7 @@
 import uuid
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,7 @@ async def get_all_settings(
 async def update_setting(
     key: str,
     body: SettingUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN)),
 ):
@@ -62,6 +63,34 @@ async def update_setting(
             json.loads(body.value)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid JSON value")
+
+    if key == "ip_allowlist":
+        from app.services.org_policy import ip_allowed, parse_allowlist
+        entries = json.loads(body.value)
+        if not isinstance(entries, list):
+            raise HTTPException(status_code=400, detail="Liste attendue")
+        nets = parse_allowlist(entries)
+        if len(nets) != len([e for e in entries if str(e).strip()]):
+            raise HTTPException(status_code=400, detail="Adresse ou plage invalide dans la liste")
+        ip = getattr(request.state, "client_ip", None)
+        if nets and not ip_allowed(ip, nets) and not user.is_platform_admin:
+            raise HTTPException(status_code=400, detail=f"Votre adresse actuelle ({ip}) n'est pas dans la liste : "
+                                                        "vous perdriez l'accès à l'organisation")
+        body.value = json.dumps([str(n) for n in nets])
+
+    int_ranges = {"rate_limit_requests": (0, 100000), "rate_limit_window_seconds": (1, 3600), "idle_timeout_minutes": (1, 1440),
+                  "default_cert_validity_minutes": (1, 1440), "max_cert_validity_minutes": (1, 1440),
+                  "min_cert_validity_minutes": (1, 1440)}
+    if key in int_ranges:
+        lo, hi = int_ranges[key]
+        try:
+            v = int(body.value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Nombre entier attendu")
+        if not lo <= v <= hi:
+            raise HTTPException(status_code=400, detail=f"Valeur entre {lo} et {hi}")
+        if key == "rate_limit_requests" and 0 < v < 30:
+            raise HTTPException(status_code=400, detail="Au moins 30 requêtes (0 = pas de limite) : l'interface en fait plusieurs par page")
 
     if key == "data_masking_rules":
         from app.services import masking

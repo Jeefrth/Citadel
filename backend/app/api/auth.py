@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user, user_orgs
@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/me", response_model=MeRead)
-async def get_me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_me(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """The current user, their role in the current organisation and the
     organisations they can switch to (X-Citadel-Org header)."""
     orgs = [OrgRef(id=o.id, name=o.name, slug=o.slug, is_default=o.is_default, role=m.role if m else None)
@@ -21,4 +21,5 @@ async def get_me(user: User = Depends(get_current_user), db: AsyncSession = Depe
     me.orgs = orgs
     from app.services.orgs import my_invitations
     me.pending_invitations = len(await my_invitations(db, user))
+    me.client_ip = getattr(request.state, "client_ip", None)
     return me

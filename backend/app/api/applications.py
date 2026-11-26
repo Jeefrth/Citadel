@@ -175,6 +175,10 @@ async def app_read_secret(request: Request, server: str, account: str,
         raise HTTPException(status_code=401, detail="Invalid application key")
     tenancy.set_context(tenancy.TenantContext.for_org(org))
     await tenancy.apply_to_session(db)
+    from app.services.org_policy import ip_allowed, parse_allowlist
+    from app.services.settings_service import get_setting_json
+    if not ip_allowed(ip, parse_allowlist(await get_setting_json(db, "ip_allowlist"))):
+        raise HTTPException(status_code=403, detail="Adresse IP non autorisée par cette organisation")
 
     from app.services.secrets_ops import _system_user_id
     actor = app.created_by or await _system_user_id(db)
