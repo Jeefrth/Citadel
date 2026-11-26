@@ -3,8 +3,9 @@
 // exchanges it for short access tokens with POST /api/auth/refresh. The access
 // token lives in memory only (never in storage). The cookie rotates on every
 // refresh, so refreshes are single-flight and scheduled ~60 s before expiry.
+// Cookie endpoints (/api/auth/login, refresh, logout) are always called on the
+// app origin, never on VITE_API_URL: the cookie is set there by the callback.
 import { useEffect, useState } from "react";
-import { apiConfig } from "./authConfig";
 
 export const DEV_MODE = import.meta.env.VITE_DEV_MODE === "true";
 
@@ -69,7 +70,7 @@ export function refreshSession(): Promise<string | null> {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const res = await fetch(`${apiConfig.baseUrl}/api/auth/refresh`, {
+      const res = await fetch(`/api/auth/refresh`, {
         method: "POST",
         headers: REFRESH_HEADER,
         credentials: "same-origin",
@@ -132,7 +133,7 @@ export function markSignedOut(): void {
 export async function logout(): Promise<void> {
   if (!DEV_MODE) {
     try {
-      await fetch(`${apiConfig.baseUrl}/api/auth/logout`, {
+      await fetch(`/api/auth/logout`, {
         method: "POST",
         headers: REFRESH_HEADER,
         credentials: "same-origin",
@@ -149,7 +150,7 @@ export async function logout(): Promise<void> {
 export function signInUrl(providerId: string, returnTo: string, loginHint?: string): string {
   const q = new URLSearchParams({ return_to: returnTo || "/" });
   if (loginHint) q.set("login_hint", loginHint);
-  return `${apiConfig.baseUrl}/api/auth/login/${encodeURIComponent(providerId)}?${q.toString()}`;
+  return `/api/auth/login/${encodeURIComponent(providerId)}?${q.toString()}`;
 }
 
 // ── Popups (re-authentication, linking another provider) ──
